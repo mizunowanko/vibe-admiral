@@ -3,6 +3,7 @@ import { useBridge } from "@/hooks/useBridge";
 import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
 import { BridgeInput } from "./BridgeInput";
+import { BridgeShipBar } from "./BridgeShipBar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,9 @@ export function Bridge({ fleetId }: BridgeProps) {
           )}
         </div>
       </ScrollArea>
+
+      {/* Ship Cards */}
+      <BridgeShipBar fleetId={fleetId} />
 
       {/* Input */}
       <BridgeInput

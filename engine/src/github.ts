@@ -75,8 +75,10 @@ export async function createIssue(
   repo: string,
   title: string,
   body: string,
+  labels?: string[],
 ): Promise<Issue> {
-  const raw = await gh([
+  const labelList = labels && labels.length > 0 ? labels : ["todo"];
+  const args = [
     "issue",
     "create",
     "--repo",
@@ -85,11 +87,13 @@ export async function createIssue(
     title,
     "--body",
     body,
-    "--label",
-    "todo",
     "--json",
     "number,title,body,labels",
-  ]);
+  ];
+  for (const label of labelList) {
+    args.push("--label", label);
+  }
+  const raw = await gh(args);
   const i = JSON.parse(raw) as {
     number: number;
     title: string;
@@ -222,4 +226,113 @@ export async function listSubIssues(
     labels: [],
     state: n.state === "OPEN" ? ("open" as const) : ("closed" as const),
   }));
+}
+
+export async function addSubIssue(
+  repo: string,
+  parentNumber: number,
+  childNumber: number,
+): Promise<void> {
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return;
+
+  // Get node IDs for parent and child issues
+  const parentRaw = await gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) { id }
+      }
+    }`,
+    "-f",
+    `owner=${owner}`,
+    "-f",
+    `repo=${repoName}`,
+    "-F",
+    `number=${parentNumber}`,
+  ]);
+  const childRaw = await gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) { id }
+      }
+    }`,
+    "-f",
+    `owner=${owner}`,
+    "-f",
+    `repo=${repoName}`,
+    "-F",
+    `number=${childNumber}`,
+  ]);
+
+  const parentId = (
+    JSON.parse(parentRaw) as {
+      data: { repository: { issue: { id: string } } };
+    }
+  ).data.repository.issue.id;
+  const childId = (
+    JSON.parse(childRaw) as {
+      data: { repository: { issue: { id: string } } };
+    }
+  ).data.repository.issue.id;
+
+  await gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=mutation($parentId: ID!, $childId: ID!) {
+      addSubIssue(input: { issueId: $parentId, subIssueId: $childId }) {
+        issue { id }
+      }
+    }`,
+    "-f",
+    `parentId=${parentId}`,
+    "-f",
+    `childId=${childId}`,
+  ]);
+}
+
+export async function getSubIssues(
+  repo: string,
+  issueNumber: number,
+): Promise<Array<{ number: number; title: string; state: string }>> {
+  const [owner, repoName] = repo.split("/");
+  if (!owner || !repoName) return [];
+  const raw = await gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) {
+          subIssues(first: 50) {
+            nodes { number title state }
+          }
+        }
+      }
+    }`,
+    "-f",
+    `owner=${owner}`,
+    "-f",
+    `repo=${repoName}`,
+    "-F",
+    `number=${issueNumber}`,
+  ]);
+  const result = JSON.parse(raw) as {
+    data: {
+      repository: {
+        issue: {
+          subIssues: {
+            nodes: Array<{ number: number; title: string; state: string }>;
+          };
+        };
+      };
+    };
+  };
+  return result.data.repository.issue.subIssues.nodes;
 }

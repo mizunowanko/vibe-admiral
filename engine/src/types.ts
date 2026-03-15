@@ -90,6 +90,21 @@ export interface ServerMessage {
   data: Record<string, unknown>;
 }
 
+// === Bridge Actions ===
+export type BridgeAction =
+  | { action: "sortie"; requests: Array<{ repo: string; issueNumber: number }> }
+  | {
+      action: "create-issue";
+      repo: string;
+      title: string;
+      body: string;
+      labels?: string[];
+      parentIssue?: number;
+      dependsOn?: number[];
+    }
+  | { action: "list-issues"; repo: string; label?: string }
+  | { action: "ship-status" };
+
 // === Ship Process Info ===
 export interface ShipProcess {
   id: string;

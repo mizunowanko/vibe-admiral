@@ -7,7 +7,6 @@ import {
   Plus,
   Settings,
   Ship,
-  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -57,7 +56,10 @@ export function Sidebar() {
         {fleets.map((fleet) => (
           <button
             key={fleet.id}
-            onClick={() => selectFleet(fleet.id)}
+            onClick={() => {
+              selectFleet(fleet.id);
+              setMainView("bridge");
+            }}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
               selectedFleetId === fleet.id
@@ -76,27 +78,9 @@ export function Sidebar() {
         )}
       </ScrollArea>
 
-      {/* View Switcher */}
+      {/* Settings */}
       {selectedFleetId && (
         <div className="border-t border-border p-2">
-          <Button
-            variant={mainView === "bridge" ? "secondary" : "ghost"}
-            size="sm"
-            className="w-full justify-start gap-2"
-            onClick={() => setMainView("bridge")}
-          >
-            <MessageSquare className="h-4 w-4" />
-            Bridge
-          </Button>
-          <Button
-            variant={mainView === "ships" ? "secondary" : "ghost"}
-            size="sm"
-            className="w-full justify-start gap-2"
-            onClick={() => setMainView("ships")}
-          >
-            <Ship className="h-4 w-4" />
-            Ships
-          </Button>
           <Button
             variant={mainView === "fleet-settings" ? "secondary" : "ghost"}
             size="sm"
