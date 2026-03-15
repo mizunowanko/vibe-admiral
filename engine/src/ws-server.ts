@@ -95,44 +95,10 @@ export class EngineServer {
               });
             }
 
-            // Execute each action and return results to Bridge
+            // Execute actions sequentially and batch results
             if (actions.length > 0) {
               const bridgeId = `bridge-${fleetId}`;
-              for (const action of actions) {
-                this.actionExecutor
-                  .execute(fleetId, action)
-                  .then((result) => {
-                    // Send result back to Bridge stdin
-                    this.processManager.sendMessage(bridgeId, result);
-
-                    // Also broadcast to frontend as action-result
-                    const resultMessage = {
-                      type: "system" as const,
-                      subtype: "action-result",
-                      content: result,
-                    };
-                    this.bridgeManager.addToHistory(fleetId, resultMessage);
-                    this.broadcast({
-                      type: "bridge:stream",
-                      data: { fleetId, message: resultMessage },
-                    });
-                  })
-                  .catch((err) => {
-                    const errorResult = `[Action Error] ${err instanceof Error ? err.message : String(err)}`;
-                    this.processManager.sendMessage(bridgeId, errorResult);
-
-                    const errorMessage = {
-                      type: "system" as const,
-                      subtype: "action-result",
-                      content: errorResult,
-                    };
-                    this.bridgeManager.addToHistory(fleetId, errorMessage);
-                    this.broadcast({
-                      type: "bridge:stream",
-                      data: { fleetId, message: errorMessage },
-                    });
-                  });
-              }
+              this.executeActionsSequentially(fleetId, bridgeId, actions);
             }
           } else {
             // Non-assistant or no content — pass through normally
@@ -505,6 +471,50 @@ export class EngineServer {
         client.send(data);
       }
     }
+  }
+
+  private async executeActionsSequentially(
+    fleetId: string,
+    bridgeId: string,
+    actions: import("./types.js").BridgeAction[],
+  ): Promise<void> {
+    const results: string[] = [];
+
+    for (const action of actions) {
+      try {
+        const result = await this.actionExecutor.execute(fleetId, action);
+        results.push(result);
+
+        // Broadcast each result to frontend as it completes
+        const resultMessage = {
+          type: "system" as const,
+          subtype: "action-result",
+          content: result,
+        };
+        this.bridgeManager.addToHistory(fleetId, resultMessage);
+        this.broadcast({
+          type: "bridge:stream",
+          data: { fleetId, message: resultMessage },
+        });
+      } catch (err) {
+        const errorResult = `[Action Error] ${err instanceof Error ? err.message : String(err)}`;
+        results.push(errorResult);
+
+        const errorMessage = {
+          type: "system" as const,
+          subtype: "action-result",
+          content: errorResult,
+        };
+        this.bridgeManager.addToHistory(fleetId, errorMessage);
+        this.broadcast({
+          type: "bridge:stream",
+          data: { fleetId, message: errorMessage },
+        });
+      }
+    }
+
+    // Send batched results to Bridge stdin as a single message
+    this.processManager.sendMessage(bridgeId, results.join("\n\n"));
   }
 
   shutdown(): void {
