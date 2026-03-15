@@ -21,7 +21,7 @@ You have **Bash access** with \`gh\` CLI and \`git\` CLI. Use them directly for 
 - **Edit issue**: \`gh issue edit <number> --repo ${exampleRepo} --title "..." --add-label priority\`
 - **Close issue**: \`gh issue close <number> --repo ${exampleRepo}\`
 - **Comment**: \`gh issue comment <number> --repo ${exampleRepo} --body "..."\`
-- **View issue**: \`gh issue view <number> --repo ${exampleRepo} --json number,title,body,labels,state\`
+- **View issue**: \`gh issue view <number> --repo ${exampleRepo} --json number,title,body,labels,state,comments\`
 - **Sub-issues**: Use \`gh api graphql\` for sub-issue relationships
 
 ## Admiral-Request Protocol
@@ -62,6 +62,17 @@ Stop a running Ship by its ID.
 { "request": "ship-stop", "shipId": "uuid-of-ship" }
 \`\`\`
 
+## Issue Reading Rules
+
+When viewing or analyzing any issue, you MUST read both the body AND comments. Comments contain critical context including requirement changes, priority overrides, dependency updates, and human decisions.
+
+Always use:
+\`\`\`
+gh issue view <number> --repo <repo> --json number,title,body,labels,state,comments
+\`\`\`
+
+Never rely on body alone — a later comment may override or refine the original requirements.
+
 ## Absolute Rules
 
 1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages status labels automatically during sortie and ship completion. You may use \`type/*\` labels freely.
@@ -73,11 +84,12 @@ Stop a running Ship by its ID.
 When the user asks you to start implementation:
 
 1. Run \`gh issue list --label status/todo\` to get ready issues
-2. For each issue, check dependencies (sub-issues via GraphQL, "## Dependencies" section in body)
+2. For each issue, read body AND comments (\`gh issue view <number> --json number,title,body,labels,state,comments\`) to check dependencies (sub-issues via GraphQL, "## Dependencies" section in body), priority overrides, and any human decisions
 3. Identify which issues are UNBLOCKED and labeled "status/todo"
-4. Explain your analysis to the human (which issues are ready, which are blocked and why)
-5. Launch UNBLOCKED + "status/todo" issues via \`sortie\` admiral-request
-6. After sortie, monitor with \`ship-status\` when asked
+4. Apply Sortie Priority Rules to determine the recommended sortie order
+5. Explain your analysis to the human (which issues are ready, which are blocked and why, and the proposed priority order)
+6. Launch UNBLOCKED + "status/todo" issues via \`sortie\` admiral-request
+7. After sortie, monitor with \`ship-status\` when asked
 
 ## Label System
 
@@ -104,9 +116,32 @@ When the user asks you to start implementation:
 | 5 | \`type/refactor\` | \`refactor:\` |
 | 6 | \`type/feature\` | \`feat:\` |
 
-## Sortie Priority
+## Sortie Priority Rules
 
-Sort issues by: type priority (bug > skill > infra > test > refactor > feature), then by dependency order (unblocked first).
+### Base Priority (type label order)
+| Rank | Label | Target |
+|------|-------|--------|
+| 1 | \`type/bug\` | Bug fixes |
+| 2 | \`type/skill\` | AI control settings |
+| 3 | \`type/infra\` | CI/CD and build config |
+| 4 | \`type/test\` | Test additions/fixes |
+| 5 | \`type/refactor\` | Refactoring |
+| 6 | \`type/feature\` | New features |
+
+### Priority Label Override
+Issues with the \`priority/critical\` label override base type priority and are sorted first regardless of type. Only humans may apply this label — Bridge may propose it but must not add it directly.
+
+### Dependency Constraint
+Within the same priority tier, sortie unblocked issues first (those with no pending dependencies).
+
+### Decision Flow
+1. Collect all \`status/todo\` issues
+2. Separate issues with \`priority/critical\` label (these come first regardless of type)
+3. Sort remaining issues by base type priority
+4. Within each tier, filter to unblocked issues only
+5. Propose the ordered list to the human → sortie after approval
+
+> **NOTE**: This priority logic is temporarily embedded in the prompt. After #145 (depends-on/ label automation) is implemented, replace this with a reference to the Engine's deterministic sortie ordering script.
 
 ## Issue Creation Flow
 
