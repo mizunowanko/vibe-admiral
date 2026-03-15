@@ -173,16 +173,21 @@ export class EngineServer {
       console.error(`Process ${id} error:`, error.message);
       if (id.startsWith("bridge-")) {
         const fleetId = id.replace("bridge-", "");
-        const errMsg = {
-          type: "system" as const,
-          subtype: "bridge-status",
-          content: `Failed to start Bridge CLI: ${error.message}`,
-        };
-        this.bridgeManager.addToHistory(fleetId, errMsg);
-        this.broadcast({
-          type: "bridge:stream",
-          data: { fleetId, message: errMsg },
-        });
+        const hadData = this.bridgeFirstData.has(id);
+        this.bridgeFirstData.delete(id);
+        // Only show "Failed to start" if bridge never sent data (spawn failure)
+        if (!hadData) {
+          const errMsg = {
+            type: "system" as const,
+            subtype: "bridge-status",
+            content: `Failed to start Bridge CLI: ${error.message}`,
+          };
+          this.bridgeManager.addToHistory(fleetId, errMsg);
+          this.broadcast({
+            type: "bridge:stream",
+            data: { fleetId, message: errMsg },
+          });
+        }
       }
       this.broadcast({
         type: "error",
@@ -320,17 +325,6 @@ export class EngineServer {
                 fleet.name,
                 fleet.repos,
               );
-              // Notify frontend that bridge is starting
-              const startMsg = {
-                type: "system" as const,
-                subtype: "bridge-status",
-                content: "Starting Bridge session...",
-              };
-              this.broadcast({
-                type: "bridge:stream",
-                data: { fleetId, message: startMsg },
-              });
-
               this.bridgeManager.launch(
                 fleetId,
                 process.cwd(),
@@ -338,8 +332,17 @@ export class EngineServer {
                 prompt,
               );
 
-              // Store the start message in history after launch
+              // Notify frontend that bridge is starting (after successful launch)
+              const startMsg = {
+                type: "system" as const,
+                subtype: "bridge-status",
+                content: "Starting Bridge session...",
+              };
               this.bridgeManager.addToHistory(fleetId, startMsg);
+              this.broadcast({
+                type: "bridge:stream",
+                data: { fleetId, message: startMsg },
+              });
             } finally {
               this.launchingBridges.delete(fleetId);
             }
