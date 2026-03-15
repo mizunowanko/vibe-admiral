@@ -156,13 +156,14 @@ export async function editIssue(
       .map((n) => `- Depends on #${n}`)
       .join("\n");
     const depSection = `\n\n## Dependencies\n${depLines}`;
+    const hasOtherEdits = hasTitle || hasBody || hasAddLabels || hasRemoveLabels;
     try {
       const issue = await getIssue(repo, number);
       const existingBody = issue.body ?? "";
-      // Replace existing Dependencies section or append
-      const sectionRe = /\n*## Dependencies\n[\s\S]*?(?=\n## |\n*$)/;
-      const newBody = sectionRe.test(existingBody)
-        ? existingBody.replace(sectionRe, depSection)
+      // Replace existing Dependencies section or append.
+      // Uses the same regex as parseDependencies for round-trip consistency.
+      const newBody = DEPENDENCIES_SECTION_RE.test(existingBody)
+        ? existingBody.replace(DEPENDENCIES_SECTION_RE, `## Dependencies\n${depLines}`)
         : existingBody + depSection;
       // If body was also explicitly provided, the explicit body takes precedence;
       // dependsOn section will be appended to the explicit body instead
@@ -173,8 +174,13 @@ export async function editIssue(
       }
       result.dependsOnAppended = true;
     } catch (err) {
-      // If we can't fetch the issue body, skip dependsOn silently
-      // but still proceed with other edits
+      if (!hasOtherEdits) {
+        // dependsOn was the only requested operation and it failed — throw
+        throw new Error(
+          `Failed to append dependsOn to #${number}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // Other edits were also requested — log warning and proceed with those
       console.warn(
         `[github] Failed to append dependsOn to #${number}: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -412,13 +418,18 @@ export async function addSubIssue(
   ]);
 }
 
+// Shared regex to match the "## Dependencies" section in issue bodies.
+// Captures the section content (group 1). Works whether the section is
+// followed by another heading or sits at the end of the body.
+const DEPENDENCIES_SECTION_RE = /## Dependencies\s*\n([\s\S]*?)(?=\n##|$)/;
+
 /**
  * Parse "## Dependencies" section from issue body and extract issue numbers.
  * Looks for lines like "- Depends on #42".
  */
 export function parseDependencies(body: string): number[] {
   if (!body) return [];
-  const sectionMatch = body.match(/## Dependencies\s*\n([\s\S]*?)(?:\n##|$)/);
+  const sectionMatch = body.match(DEPENDENCIES_SECTION_RE);
   if (!sectionMatch?.[1]) return [];
   const section = sectionMatch[1];
   const nums = new Set<number>();
