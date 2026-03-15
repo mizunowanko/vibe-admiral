@@ -17,10 +17,19 @@ export interface FleetRepo {
   remote?: string;
 }
 
+export interface FleetSkillSources {
+  implement?: string;
+  devSharedDir?: string;
+}
+
 export interface Fleet {
   id: string;
   name: string;
   repos: FleetRepo[];
+  skillSources?: FleetSkillSources;
+  sharedRulePaths?: string[];
+  bridgeRulePaths?: string[];
+  shipRulePaths?: string[];
   createdAt: string;
 }
 
@@ -78,7 +87,15 @@ export type ClientMessage =
   | { type: "fleet:select"; data: { id: string } }
   | {
       type: "fleet:update";
-      data: { id: string; name?: string; repos?: FleetRepo[] };
+      data: {
+        id: string;
+        name?: string;
+        repos?: FleetRepo[];
+        skillSources?: FleetSkillSources;
+        sharedRulePaths?: string[];
+        bridgeRulePaths?: string[];
+        shipRulePaths?: string[];
+      };
     }
   | { type: "fleet:delete"; data: { id: string } }
   | { type: "bridge:send"; data: { fleetId: string; message: string } }

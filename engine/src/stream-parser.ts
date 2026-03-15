@@ -6,6 +6,10 @@ const VALID_ACTIONS = new Set([
   "edit-issue",
   "sortie",
   "ship-status",
+  "close-issue",
+  "edit-issue",
+  "stop-ship",
+  "organize-issues",
 ]);
 
 const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
@@ -36,13 +40,20 @@ function validateAction(obj: unknown): BridgeAction | null {
 
   const action = record.action as BridgeAction["action"];
 
-  // ship-status has no additional fields to validate
+  // Actions with no repo validation needed
   if (action === "ship-status") {
     return { action: "ship-status" };
   }
+  if (action === "stop-ship") {
+    if (typeof record.shipId !== "string" || !record.shipId) {
+      console.warn("[stream-parser] stop-ship missing shipId");
+      return null;
+    }
+    return { action: "stop-ship", shipId: record.shipId };
+  }
 
   // Validate repo for actions that require it
-  if (action === "list-issues" || action === "create-issue" || action === "edit-issue") {
+  if (action === "list-issues" || action === "create-issue" || action === "close-issue" || action === "edit-issue" || action === "organize-issues") {
     if (typeof record.repo !== "string" || !REPO_PATTERN.test(record.repo)) {
       console.warn(
         "[stream-parser] Invalid repo format:",
@@ -288,7 +299,7 @@ function validateAction(obj: unknown): BridgeAction | null {
         return null;
       }
 
-      const validatedRequests: Array<{ repo: string; issueNumber: number }> =
+      const validatedRequests: Array<{ repo: string; issueNumber: number; skill?: string }> =
         [];
       for (const req of record.requests) {
         if (typeof req !== "object" || req === null) {
@@ -317,13 +328,60 @@ function validateAction(obj: unknown): BridgeAction | null {
           );
           return null;
         }
-        validatedRequests.push({
+        const entry: { repo: string; issueNumber: number; skill?: string } = {
           repo: r.repo,
           issueNumber: r.issueNumber,
-        });
+        };
+        if (typeof r.skill === "string") {
+          entry.skill = r.skill;
+        }
+        validatedRequests.push(entry);
       }
 
       return { action: "sortie", requests: validatedRequests };
+    }
+
+    case "close-issue": {
+      if (
+        typeof record.issueNumber !== "number" ||
+        !Number.isInteger(record.issueNumber) ||
+        record.issueNumber <= 0
+      ) {
+        console.warn("[stream-parser] close-issue missing valid issueNumber");
+        return null;
+      }
+      const closeResult: {
+        action: "close-issue";
+        repo: string;
+        issueNumber: number;
+        comment?: string;
+      } = {
+        action: "close-issue",
+        repo: record.repo as string,
+        issueNumber: record.issueNumber,
+      };
+      if (typeof record.comment === "string") {
+        closeResult.comment = record.comment;
+      }
+      return closeResult;
+    }
+
+    case "organize-issues": {
+      if (!Array.isArray(record.operations) || record.operations.length === 0) {
+        console.warn("[stream-parser] organize-issues missing operations array");
+        return null;
+      }
+      for (const op of record.operations) {
+        if (typeof op !== "object" || op === null || !("op" in op)) {
+          console.warn("[stream-parser] organize-issues invalid operation:", op);
+          return null;
+        }
+      }
+      return {
+        action: "organize-issues",
+        repo: record.repo as string,
+        operations: record.operations,
+      } as Extract<BridgeAction, { action: "organize-issues" }>;
     }
 
     default:

@@ -2,9 +2,72 @@ import { useState, useEffect } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings, Trash2, X, FolderOpen } from "lucide-react";
+import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
 import { DirectoryPicker } from "./DirectoryPicker";
-import type { FleetRepo } from "@/types";
+import type { FleetRepo, FleetSkillSources } from "@/types";
+
+function PathListEditor({
+  label,
+  paths,
+  onChange,
+}: {
+  label: string;
+  paths: string[];
+  onChange: (paths: string[]) => void;
+}) {
+  const [newPath, setNewPath] = useState("");
+
+  const handleAdd = () => {
+    const trimmed = newPath.trim();
+    if (!trimmed || paths.includes(trimmed)) return;
+    onChange([...paths, trimmed]);
+    setNewPath("");
+  };
+
+  return (
+    <div>
+      <label className="text-sm font-medium mb-2 block">{label}</label>
+      <div className="space-y-1">
+        {paths.map((p) => (
+          <div
+            key={p}
+            className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5"
+          >
+            <span className="text-xs font-mono flex-1 truncate">{p}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 shrink-0"
+              onClick={() => onChange(paths.filter((x) => x !== p))}
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <Input
+            value={newPath}
+            onChange={(e) => setNewPath(e.target.value)}
+            placeholder="/path/to/rules.md"
+            className="text-xs"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleAdd();
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAdd}
+            disabled={!newPath.trim()}
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            Add
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function FleetSettings() {
   const selectedFleet = useFleetStore((s) => s.selectedFleet);
@@ -16,6 +79,18 @@ export function FleetSettings() {
   const [repos, setRepos] = useState<FleetRepo[]>(selectedFleet?.repos ?? []);
   const [newRepoPath, setNewRepoPath] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [skillSources, setSkillSources] = useState<FleetSkillSources>(
+    selectedFleet?.skillSources ?? {},
+  );
+  const [sharedRulePaths, setSharedRulePaths] = useState<string[]>(
+    selectedFleet?.sharedRulePaths ?? [],
+  );
+  const [bridgeRulePaths, setBridgeRulePaths] = useState<string[]>(
+    selectedFleet?.bridgeRulePaths ?? [],
+  );
+  const [shipRulePaths, setShipRulePaths] = useState<string[]>(
+    selectedFleet?.shipRulePaths ?? [],
+  );
 
   const isNew = !selectedFleet;
 
@@ -23,17 +98,33 @@ export function FleetSettings() {
     setName(selectedFleet?.name ?? "");
     setRepos(selectedFleet?.repos ?? []);
     setNewRepoPath("");
+    setSkillSources(selectedFleet?.skillSources ?? {});
+    setSharedRulePaths(selectedFleet?.sharedRulePaths ?? []);
+    setBridgeRulePaths(selectedFleet?.bridgeRulePaths ?? []);
+    setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
   }, [selectedFleet]);
 
   const saveRepos = (nextRepos: FleetRepo[]) => {
     if (!isNew && name.trim()) {
-      updateFleet(selectedFleet.id, name.trim(), nextRepos);
+      updateFleet(selectedFleet.id, { name: name.trim(), repos: nextRepos });
     }
   };
 
   const handleCreate = () => {
     if (!name.trim()) return;
     createFleet(name.trim(), repos);
+  };
+
+  const handleSave = () => {
+    if (!name.trim() || isNew) return;
+    updateFleet(selectedFleet.id, {
+      name: name.trim(),
+      repos,
+      skillSources,
+      sharedRulePaths,
+      bridgeRulePaths,
+      shipRulePaths,
+    });
   };
 
   const addRepo = (path: string) => {
@@ -73,7 +164,7 @@ export function FleetSettings() {
               onChange={(e) => setName(e.target.value)}
               onBlur={() => {
                 if (!isNew && name.trim() && name.trim() !== selectedFleet.name) {
-                  updateFleet(selectedFleet.id, name.trim(), repos);
+                  updateFleet(selectedFleet.id, { name: name.trim() });
                 }
               }}
               placeholder="My Project Fleet"
@@ -141,6 +232,71 @@ export function FleetSettings() {
             </div>
           </div>
 
+          {/* Skill Sources — only shown when editing */}
+          {!isNew && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Skill Sources
+              </label>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    /implement skill directory
+                  </label>
+                  <Input
+                    value={skillSources.implement ?? ""}
+                    onChange={(e) =>
+                      setSkillSources({
+                        ...skillSources,
+                        implement: e.target.value || undefined,
+                      })
+                    }
+                    placeholder="Default: repo skills/implement/"
+                    className="text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    dev-shared skills directory
+                  </label>
+                  <Input
+                    value={skillSources.devSharedDir ?? ""}
+                    onChange={(e) =>
+                      setSkillSources({
+                        ...skillSources,
+                        devSharedDir: e.target.value || undefined,
+                      })
+                    }
+                    placeholder="e.g. ~/Projects/Plugins/dev-shared/plugins/shared-skills/skills/"
+                    className="text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Behavioral Rules — only shown when editing */}
+          {!isNew && (
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium">Behavioral Rules</h3>
+              <PathListEditor
+                label="Shared Rules (Bridge + Ship)"
+                paths={sharedRulePaths}
+                onChange={setSharedRulePaths}
+              />
+              <PathListEditor
+                label="Bridge-only Rules"
+                paths={bridgeRulePaths}
+                onChange={setBridgeRulePaths}
+              />
+              <PathListEditor
+                label="Ship-only Rules"
+                paths={shipRulePaths}
+                onChange={setShipRulePaths}
+              />
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-2 pt-4 border-t border-border">
             {isNew && (
@@ -149,13 +305,18 @@ export function FleetSettings() {
               </Button>
             )}
             {!isNew && (
-              <Button
-                variant="destructive"
-                onClick={() => deleteFleet(selectedFleet.id)}
-              >
-                <Trash2 className="h-3 w-3 mr-1" />
-                Delete Fleet
-              </Button>
+              <>
+                <Button onClick={handleSave}>
+                  Save Settings
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteFleet(selectedFleet.id)}
+                >
+                  <Trash2 className="h-3 w-3 mr-1" />
+                  Delete Fleet
+                </Button>
+              </>
             )}
           </div>
         </div>

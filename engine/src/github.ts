@@ -172,8 +172,19 @@ export async function closeIssue(
     String(number),
     "--repo",
     repo,
-    "--comment",
-    "Closed via vibe-admiral Ship completion",
+  ]);
+}
+
+export async function reopenIssue(
+  repo: string,
+  number: number,
+): Promise<void> {
+  await gh([
+    "issue",
+    "reopen",
+    String(number),
+    "--repo",
+    repo,
   ]);
 }
 

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Fleet, FleetRepo } from "@/types";
+import type { Fleet, FleetRepo, FleetSkillSources } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
 interface FleetState {
@@ -10,7 +10,14 @@ interface FleetState {
   setFleets: (fleets: Fleet[]) => void;
   selectFleet: (id: string | null) => void;
   createFleet: (name: string, repos: FleetRepo[]) => void;
-  updateFleet: (id: string, name?: string, repos?: FleetRepo[]) => void;
+  updateFleet: (id: string, updates: {
+    name?: string;
+    repos?: FleetRepo[];
+    skillSources?: FleetSkillSources;
+    sharedRulePaths?: string[];
+    bridgeRulePaths?: string[];
+    shipRulePaths?: string[];
+  }) => void;
   deleteFleet: (id: string) => void;
   fetchFleets: () => void;
 }
@@ -40,8 +47,8 @@ export const useFleetStore = create<FleetState>((set, get) => ({
     wsClient.send({ type: "fleet:create", data: { name, repos } });
   },
 
-  updateFleet: (id, name, repos) => {
-    wsClient.send({ type: "fleet:update", data: { id, name, repos } });
+  updateFleet: (id, updates) => {
+    wsClient.send({ type: "fleet:update", data: { id, ...updates } });
   },
 
   deleteFleet: (id) => {

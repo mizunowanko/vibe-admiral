@@ -7,7 +7,7 @@ import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, ShipStatus } from "./types.js";
+import type { ShipProcess, ShipStatus, FleetSkillSources } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,6 +43,9 @@ export class ShipManager {
     repo: string,
     issueNumber: number,
     localPath: string,
+    skillSources?: FleetSkillSources,
+    extraPrompt?: string,
+    skill?: string,
   ): Promise<ShipProcess> {
     const shipId = randomUUID();
 
@@ -71,7 +74,7 @@ export class ShipManager {
     await worktree.symlinkSettings(repoRoot, worktreePath);
 
     // 5. Copy /implement skill to worktree
-    await this.deploySkills(repoRoot, worktreePath);
+    await this.deploySkills(repoRoot, worktreePath, skillSources);
 
     // 6. npm install if web project
     if (await worktree.isWebProject(worktreePath)) {
@@ -95,7 +98,7 @@ export class ShipManager {
     this.ships.set(shipId, ship);
 
     // 7. Launch Claude CLI process
-    this.processManager.sortie(shipId, worktreePath, issueNumber);
+    this.processManager.sortie(shipId, worktreePath, issueNumber, extraPrompt, skill);
 
     // 8. Start acceptance test watcher
     this.acceptanceWatcher.watch(worktreePath, shipId);
@@ -219,10 +222,7 @@ export class ShipManager {
           : "";
         if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
           tryAdvance("testing");
-        } else if (
-          inputStr.includes("gh pr create") ||
-          inputStr.includes("gh pr merge")
-        ) {
+        } else if (inputStr.includes("gh pr merge")) {
           tryAdvance("merging");
         }
       } else if (tool === "Skill" || tool === "Task") {
@@ -257,17 +257,34 @@ export class ShipManager {
   private async deploySkills(
     repoRoot: string,
     worktreePath: string,
+    skillSources?: FleetSkillSources,
   ): Promise<void> {
-    // Copy /implement skill from the main repo's skills/ to the worktree's
-    // .claude/skills/ so that Claude CLI recognizes the /implement command.
-    const skillSrc = join(repoRoot, "skills", "implement", "SKILL.md");
-    const skillDestDir = join(worktreePath, ".claude", "skills", "implement");
+    // Copy /implement skill from the main repo's skills/ (or custom path)
+    const implementSrc = skillSources?.implement
+      ? join(skillSources.implement, "SKILL.md")
+      : join(repoRoot, "skills", "implement", "SKILL.md");
+    const implementDestDir = join(worktreePath, ".claude", "skills", "implement");
     try {
-      await mkdir(skillDestDir, { recursive: true });
-      await copyFile(skillSrc, join(skillDestDir, "SKILL.md"));
+      await mkdir(implementDestDir, { recursive: true });
+      await copyFile(implementSrc, join(implementDestDir, "SKILL.md"));
     } catch (err) {
-      // Non-fatal: ship can still function without the skill
       console.warn(`[ship-manager] Failed to deploy /implement skill: ${err}`);
+    }
+
+    // Copy dev-shared skills if devSharedDir is configured
+    const devSharedDir = skillSources?.devSharedDir;
+    if (!devSharedDir) return;
+
+    const devSharedSkills = ["review-pr", "second-opinion", "test", "refactor"];
+    for (const skillName of devSharedSkills) {
+      const src = join(devSharedDir, skillName, "SKILL.md");
+      const destDir = join(worktreePath, ".claude", "skills", skillName);
+      try {
+        await mkdir(destDir, { recursive: true });
+        await copyFile(src, join(destDir, "SKILL.md"));
+      } catch {
+        console.warn(`[ship-manager] Failed to deploy /${skillName} skill from dev-shared`);
+      }
     }
   }
 

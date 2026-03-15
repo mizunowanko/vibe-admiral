@@ -1,5 +1,5 @@
 import type { ShipManager } from "./ship-manager.js";
-import type { BridgeAction, FleetRepo } from "./types.js";
+import type { BridgeAction, FleetRepo, FleetSkillSources, OrganizeOperation } from "./types.js";
 import * as github from "./github.js";
 
 /**
@@ -9,11 +9,14 @@ function getActionRepos(action: BridgeAction): string[] {
   switch (action.action) {
     case "list-issues":
     case "create-issue":
+    case "close-issue":
     case "edit-issue":
+    case "organize-issues":
       return [action.repo];
     case "sortie":
       return action.requests.map((r) => r.repo);
     case "ship-status":
+    case "stop-ship":
       return [];
   }
 }
@@ -32,6 +35,8 @@ export class ActionExecutor {
     action: BridgeAction,
     repoRemotes: string[],
     fleetRepos: FleetRepo[],
+    skillSources?: FleetSkillSources,
+    shipExtraPrompt?: string,
   ): Promise<string> {
     // Validate that all repos in the action are in the fleet's whitelist
     const actionRepos = getActionRepos(action);
@@ -47,7 +52,7 @@ export class ActionExecutor {
 
     switch (action.action) {
       case "sortie":
-        return this.executeSortie(fleetId, action, fleetRepos);
+        return this.executeSortie(fleetId, action, fleetRepos, skillSources, shipExtraPrompt);
       case "create-issue":
         return this.executeCreateIssue(action);
       case "edit-issue":
@@ -56,6 +61,12 @@ export class ActionExecutor {
         return this.executeListIssues(action);
       case "ship-status":
         return this.executeShipStatus(fleetId);
+      case "close-issue":
+        return this.executeCloseIssue(action);
+      case "stop-ship":
+        return this.executeStopShip(action);
+      case "organize-issues":
+        return this.executeOrganizeIssues(action);
       default:
         return `Unknown action: ${(action as { action: string }).action}`;
     }
@@ -65,6 +76,8 @@ export class ActionExecutor {
     fleetId: string,
     action: Extract<BridgeAction, { action: "sortie" }>,
     fleetRepos: FleetRepo[],
+    skillSources?: FleetSkillSources,
+    shipExtraPrompt?: string,
   ): Promise<string> {
     const results: string[] = [];
     for (const req of action.requests) {
@@ -83,6 +96,9 @@ export class ActionExecutor {
           req.repo,
           req.issueNumber,
           repoEntry.localPath,
+          skillSources,
+          shipExtraPrompt,
+          req.skill,
         );
         results.push(
           `Ship ${ship.id} launched for ${req.repo}#${req.issueNumber} (${ship.issueTitle})`,
@@ -218,6 +234,87 @@ export class ActionExecutor {
       return `[Issues in ${action.repo}]\n${lines.join("\n")}`;
     } catch (err) {
       return `[List Issues Failed] ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  private async executeCloseIssue(
+    action: Extract<BridgeAction, { action: "close-issue" }>,
+  ): Promise<string> {
+    try {
+      if (action.comment) {
+        await github.commentOnIssue(action.repo, action.issueNumber, action.comment);
+      }
+      await github.closeIssue(action.repo, action.issueNumber);
+      return `[Issue Closed] #${action.issueNumber} (${action.repo})`;
+    } catch (err) {
+      return `[Close Issue Failed] ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  private executeStopShip(
+    action: Extract<BridgeAction, { action: "stop-ship" }>,
+  ): string {
+    const killed = this.shipManager.stopShip(action.shipId);
+    if (killed) {
+      return `[Ship Stopped] ${action.shipId}`;
+    }
+    return `[Stop Ship Failed] Ship ${action.shipId} not found or already stopped`;
+  }
+
+  private async executeOrganizeIssues(
+    action: Extract<BridgeAction, { action: "organize-issues" }>,
+  ): Promise<string> {
+    const results: string[] = [];
+    for (const op of action.operations) {
+      try {
+        const result = await this.executeOrganizeOp(action.repo, op);
+        results.push(result);
+      } catch (err) {
+        results.push(`[Op Failed] ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return `[Organize Results]\n${results.join("\n")}`;
+  }
+
+  private async executeOrganizeOp(
+    repo: string,
+    op: OrganizeOperation,
+  ): Promise<string> {
+    switch (op.op) {
+      case "create": {
+        const issue = await github.createIssue(repo, op.title, op.body, op.labels);
+        if (op.parentIssue) {
+          await github.addSubIssue(repo, op.parentIssue, issue.number);
+        }
+        return `Created #${issue.number}: ${issue.title}`;
+      }
+      case "edit": {
+        if (op.comment) {
+          await github.commentOnIssue(repo, op.issueNumber, op.comment);
+        }
+        const hasEditFields = op.title !== undefined || op.body !== undefined ||
+          (op.addLabels && op.addLabels.length > 0) ||
+          (op.removeLabels && op.removeLabels.length > 0);
+        if (hasEditFields) {
+          await github.editIssue(repo, op.issueNumber, {
+            title: op.title,
+            body: op.body,
+            addLabels: op.addLabels,
+            removeLabels: op.removeLabels,
+          });
+        }
+        if (op.parentIssue) {
+          await github.addSubIssue(repo, op.parentIssue, op.issueNumber);
+        }
+        return `Updated #${op.issueNumber}`;
+      }
+      case "close": {
+        if (op.comment) {
+          await github.commentOnIssue(repo, op.issueNumber, op.comment);
+        }
+        await github.closeIssue(repo, op.issueNumber);
+        return `Closed #${op.issueNumber}`;
+      }
     }
   }
 

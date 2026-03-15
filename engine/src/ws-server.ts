@@ -19,7 +19,7 @@ import {
   stripActionBlocks,
 } from "./stream-parser.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
-import type { Fleet, FleetRepo, ClientMessage, BridgeAction, StreamMessage } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeAction, StreamMessage } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -168,9 +168,7 @@ export class EngineServer {
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
         const ship = this.shipManager.getShip(id);
-        const completedPhases = new Set([
-          "merging", "reviewing", "acceptance-test", "testing",
-        ]);
+        const completedPhases = new Set(["merging"]);
         if (code === 0 && ship && completedPhases.has(ship.status)) {
           // Ship reached a late phase — treat as successful completion
           this.shipManager.onShipComplete(id).catch(console.error);
@@ -312,11 +310,7 @@ export class EngineServer {
           break;
         }
         case "fleet:update": {
-          await this.updateFleet(
-            data.id as string,
-            data.name as string | undefined,
-            data.repos as FleetRepo[] | undefined,
-          );
+          await this.updateFleet(data.id as string, data);
           const fleets = await this.loadFleets();
           this.sendTo(ws, { type: "fleet:data", data: fleets });
           break;
@@ -346,10 +340,19 @@ export class EngineServer {
               const remoteNames = fleet.repos
                 .map((r) => r.remote)
                 .filter((r): r is string => r !== undefined);
-              const prompt = buildBridgeSystemPrompt(
+              let prompt = buildBridgeSystemPrompt(
                 fleet.name,
                 remoteNames,
               );
+
+              // Load and append shared + bridge rules
+              const sharedRules = await this.loadRules(fleet.sharedRulePaths ?? []);
+              const bridgeRules = await this.loadRules(fleet.bridgeRulePaths ?? []);
+              const rulesSuffix = [sharedRules, bridgeRules].filter(Boolean).join("\n\n");
+              if (rulesSuffix) {
+                prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
+              }
+
               this.bridgeManager.launch(
                 fleetId,
                 process.cwd(),
@@ -402,11 +405,18 @@ export class EngineServer {
               `Repo "${data.repo}" not found in fleet. Register the local path first.`,
             );
           }
+          // Load shared + ship rules for extraPrompt
+          const sharedRulesForShip = await this.loadRules(fleet?.sharedRulePaths ?? []);
+          const shipRules = await this.loadRules(fleet?.shipRulePaths ?? []);
+          const shipExtraPrompt = [sharedRulesForShip, shipRules].filter(Boolean).join("\n\n") || undefined;
+
           const ship = await this.shipManager.sortie(
             data.fleetId as string,
             data.repo as string,
             data.issueNumber as number,
             repoEntry.localPath,
+            fleet?.skillSources,
+            shipExtraPrompt,
           );
           this.broadcast({
             type: "ship:created",
@@ -612,14 +622,17 @@ export class EngineServer {
 
   private async updateFleet(
     id: string,
-    name?: string,
-    repos?: FleetRepo[],
+    updates: Record<string, unknown>,
   ): Promise<void> {
     const fleets = await this.loadFleets();
     const fleet = fleets.find((f) => f.id === id);
     if (!fleet) throw new Error(`Fleet not found: ${id}`);
-    if (name !== undefined) fleet.name = name;
-    if (repos !== undefined) fleet.repos = await this.enrichRepos(repos);
+    if (updates.name !== undefined) fleet.name = updates.name as string;
+    if (updates.repos !== undefined) fleet.repos = await this.enrichRepos(updates.repos as FleetRepo[]);
+    if (updates.skillSources !== undefined) fleet.skillSources = updates.skillSources as FleetSkillSources;
+    if (updates.sharedRulePaths !== undefined) fleet.sharedRulePaths = updates.sharedRulePaths as string[];
+    if (updates.bridgeRulePaths !== undefined) fleet.bridgeRulePaths = updates.bridgeRulePaths as string[];
+    if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
     await this.saveFleets(fleets);
   }
 
@@ -659,6 +672,11 @@ export class EngineServer {
       .map((r) => r.remote)
       .filter((r): r is string => r !== undefined);
 
+    // Pre-load ship rules for sortie actions
+    const sharedRulesForAction = await this.loadRules(fleet?.sharedRulePaths ?? []);
+    const shipRulesForAction = await this.loadRules(fleet?.shipRulePaths ?? []);
+    const actionShipExtraPrompt = [sharedRulesForAction, shipRulesForAction].filter(Boolean).join("\n\n") || undefined;
+
     const results: string[] = [];
 
     for (const action of actions) {
@@ -668,6 +686,8 @@ export class EngineServer {
           action,
           repoRemotes,
           fleetRepos,
+          fleet?.skillSources,
+          actionShipExtraPrompt,
         );
         results.push(result);
 
@@ -747,6 +767,20 @@ export class EngineServer {
         break;
       }
     }
+  }
+
+  private async loadRules(paths: string[]): Promise<string> {
+    if (!paths || paths.length === 0) return "";
+    const parts: string[] = [];
+    for (const p of paths) {
+      try {
+        const content = await readFile(p, "utf-8");
+        parts.push(content.trim());
+      } catch {
+        console.warn(`[engine] Failed to read rule file: ${p}`);
+      }
+    }
+    return parts.join("\n\n");
   }
 
   shutdown(): void {
