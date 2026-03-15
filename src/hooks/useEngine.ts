@@ -11,6 +11,7 @@ export function useEngine() {
   const setMainView = useUIStore((s) => s.setMainView);
   const addShip = useShipStore((s) => s.addShip);
   const setShipStatus = useShipStore((s) => s.setShipStatus);
+  const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
   const setShipDone = useShipStore((s) => s.setShipDone);
@@ -80,6 +81,15 @@ export function useEngine() {
           break;
         }
 
+        case "ship:compacting": {
+          const compactData = msg.data as {
+            id: string;
+            isCompacting: boolean;
+          };
+          setShipCompacting(compactData.id, compactData.isCompacting);
+          break;
+        }
+
         case "ship:stream": {
           const streamData = msg.data as {
             id: string;
@@ -146,6 +156,7 @@ export function useEngine() {
     setMainView,
     addShip,
     setShipStatus,
+    setShipCompacting,
     addShipLog,
     setAcceptanceTest,
     setShipDone,

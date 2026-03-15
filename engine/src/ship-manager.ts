@@ -89,6 +89,7 @@ export class ShipManager {
       issueNumber,
       issueTitle: issue.title,
       status: "sortie",
+      isCompacting: false,
       branchName,
       worktreePath,
       sessionId: null,
@@ -114,6 +115,8 @@ export class ShipManager {
     const killed = this.processManager.kill(shipId);
     if (killed) {
       this.acceptanceWatcher.unwatch(shipId);
+      const ship = this.ships.get(shipId);
+      if (ship) ship.isCompacting = false;
       this.updateStatus(shipId, "error", "Manually stopped");
     }
     return killed;

@@ -21,6 +21,7 @@ export const STATUS_CONFIG: Record<ShipStatus, StatusConfig> = {
 };
 
 export function getStatusColor(content: string): string {
+  if (content.includes("compacting")) return "text-purple-400";
   for (const [status, config] of Object.entries(STATUS_CONFIG)) {
     if (content.includes(`: ${status}`)) return config.textColor;
   }

@@ -16,6 +16,7 @@ interface ShipState {
 
   addShip: (ship: Partial<Ship> & { id: string; status: ShipStatus }) => void;
   setShipStatus: (id: string, status: ShipStatus, extra?: ShipStatusData) => void;
+  setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
   setAcceptanceTest: (id: string, test: AcceptanceTestRequest) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
@@ -43,6 +44,7 @@ export const useShipStore = create<ShipState>((set) => ({
         repo: "",
         issueNumber: 0,
         issueTitle: "",
+        isCompacting: false,
         branchName: "",
         worktreePath: "",
         sessionId: null,
@@ -78,6 +80,7 @@ export const useShipStore = create<ShipState>((set) => ({
           issueNumber: extra?.issueNumber ?? 0,
           issueTitle: extra?.issueTitle ?? "",
           status,
+          isCompacting: false,
           branchName: "",
           worktreePath: "",
           sessionId: null,
@@ -87,6 +90,17 @@ export const useShipStore = create<ShipState>((set) => ({
           acceptanceTestApproved: false,
           createdAt: new Date().toISOString(),
         });
+      }
+      return { ships };
+    });
+  },
+
+  setShipCompacting: (id, isCompacting) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      const ship = ships.get(id);
+      if (ship) {
+        ships.set(id, { ...ship, isCompacting });
       }
       return { ships };
     });

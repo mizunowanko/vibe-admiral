@@ -123,6 +123,9 @@ export class StateSync {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
+    // Clear compacting flag — process is gone, no more compact events
+    ship.isCompacting = false;
+
     if (succeeded) {
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
