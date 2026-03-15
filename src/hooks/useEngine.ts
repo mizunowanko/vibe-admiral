@@ -9,6 +9,7 @@ export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
   const selectFleet = useFleetStore((s) => s.selectFleet);
   const setMainView = useUIStore((s) => s.setMainView);
+  const addShip = useShipStore((s) => s.addShip);
   const setShipStatus = useShipStore((s) => s.setShipStatus);
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
@@ -37,13 +38,36 @@ export function useEngine() {
           break;
         }
 
+        case "ship:created": {
+          const created = msg.data as {
+            id: string;
+            fleetId: string;
+            repo: string;
+            issueNumber: number;
+            issueTitle: string;
+            status: ShipStatus;
+            branchName?: string;
+          };
+          addShip(created);
+          break;
+        }
+
         case "ship:status": {
           const statusData = msg.data as {
             id: string;
             status: ShipStatus;
             detail?: string;
+            fleetId?: string;
+            repo?: string;
+            issueNumber?: number;
+            issueTitle?: string;
           };
-          setShipStatus(statusData.id, statusData.status, statusData.detail);
+          setShipStatus(statusData.id, statusData.status, {
+            fleetId: statusData.fleetId,
+            repo: statusData.repo,
+            issueNumber: statusData.issueNumber,
+            issueTitle: statusData.issueTitle,
+          });
           break;
         }
 
@@ -111,6 +135,7 @@ export function useEngine() {
     setFleets,
     selectFleet,
     setMainView,
+    addShip,
     setShipStatus,
     addShipLog,
     setAcceptanceTest,

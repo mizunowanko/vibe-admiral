@@ -224,13 +224,21 @@ export class EngineServer {
 
   private setupShipStatusHandler(): void {
     this.shipManager.setStatusChangeHandler((id, status, detail) => {
+      const ship = this.shipManager.getShip(id);
       this.broadcast({
         type: "ship:status",
-        data: { id, status, detail },
+        data: {
+          id,
+          status,
+          detail,
+          fleetId: ship?.fleetId,
+          repo: ship?.repo,
+          issueNumber: ship?.issueNumber,
+          issueTitle: ship?.issueTitle,
+        },
       });
 
       // Also inject into Bridge chat for the ship's fleet
-      const ship = this.shipManager.getShip(id);
       if (ship) {
         const statusMessage = {
           type: "system" as const,
@@ -345,8 +353,16 @@ export class EngineServer {
             data.issueNumber as number,
           );
           this.broadcast({
-            type: "ship:status",
-            data: { id: ship.id, status: ship.status },
+            type: "ship:created",
+            data: {
+              id: ship.id,
+              fleetId: ship.fleetId,
+              repo: ship.repo,
+              issueNumber: ship.issueNumber,
+              issueTitle: ship.issueTitle,
+              status: ship.status,
+              branchName: ship.branchName,
+            },
           });
           break;
         }

@@ -2,12 +2,20 @@ import { create } from "zustand";
 import type { Ship, ShipStatus, StreamMessage, AcceptanceTestRequest } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
+interface ShipStatusData {
+  fleetId?: string;
+  repo?: string;
+  issueNumber?: number;
+  issueTitle?: string;
+}
+
 interface ShipState {
   ships: Map<string, Ship>;
   shipLogs: Map<string, StreamMessage[]>;
   selectedShipId: string | null;
 
-  setShipStatus: (id: string, status: ShipStatus, detail?: string) => void;
+  addShip: (ship: Partial<Ship> & { id: string; status: ShipStatus }) => void;
+  setShipStatus: (id: string, status: ShipStatus, extra?: ShipStatusData) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
   setAcceptanceTest: (id: string, test: AcceptanceTestRequest) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
@@ -25,20 +33,46 @@ export const useShipStore = create<ShipState>((set) => ({
   shipLogs: new Map(),
   selectedShipId: null,
 
-  setShipStatus: (id, status, _detail) => {
+  addShip: (shipData) => {
     set((state) => {
       const ships = new Map(state.ships);
-      const ship = ships.get(id);
-      if (ship) {
-        ships.set(id, { ...ship, status });
+      ships.set(shipData.id, {
+        fleetId: "",
+        repo: "",
+        issueNumber: 0,
+        issueTitle: "",
+        branchName: "",
+        worktreePath: "",
+        sessionId: null,
+        prUrl: null,
+        acceptanceTest: null,
+        createdAt: new Date().toISOString(),
+        ...shipData,
+      } as Ship);
+      return { ships };
+    });
+  },
+
+  setShipStatus: (id, status, extra) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      const existing = ships.get(id);
+      if (existing) {
+        ships.set(id, {
+          ...existing,
+          status,
+          ...(extra?.fleetId && { fleetId: extra.fleetId }),
+          ...(extra?.repo && { repo: extra.repo }),
+          ...(extra?.issueNumber && { issueNumber: extra.issueNumber }),
+          ...(extra?.issueTitle && { issueTitle: extra.issueTitle }),
+        });
       } else {
-        // Create a placeholder ship
         ships.set(id, {
           id,
-          fleetId: "",
-          repo: "",
-          issueNumber: 0,
-          issueTitle: "",
+          fleetId: extra?.fleetId ?? "",
+          repo: extra?.repo ?? "",
+          issueNumber: extra?.issueNumber ?? 0,
+          issueTitle: extra?.issueTitle ?? "",
           status,
           branchName: "",
           worktreePath: "",
