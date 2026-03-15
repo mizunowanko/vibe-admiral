@@ -46,6 +46,7 @@ export interface Ship {
   sessionId: string | null;
   prUrl: string | null;
   acceptanceTest: AcceptanceTestRequest | null;
+  acceptanceTestApproved: boolean;
   createdAt: string;
 }
 

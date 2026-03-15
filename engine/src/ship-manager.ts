@@ -91,6 +91,7 @@ export class ShipManager {
       sessionId: null,
       prUrl: null,
       acceptanceTest: null,
+      acceptanceTestApproved: false,
       createdAt: new Date().toISOString(),
     };
     this.ships.set(shipId, ship);
@@ -175,6 +176,15 @@ export class ShipManager {
     const tryAdvance = (target: ShipStatus): void => {
       const targetIdx = phaseOrder.indexOf(target);
       if (targetIdx > currentIdx) {
+        // Gate: block advancement past acceptance-test until human approves
+        const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
+        if (
+          ship.status === "acceptance-test" &&
+          targetIdx > acceptanceIdx &&
+          !ship.acceptanceTestApproved
+        ) {
+          return;
+        }
         this.updateStatus(id, target);
       }
     };
@@ -226,6 +236,10 @@ export class ShipManager {
   ): void {
     const ship = this.ships.get(shipId);
     if (!ship) return;
+
+    if (accepted) {
+      ship.acceptanceTestApproved = true;
+    }
 
     this.acceptanceWatcher
       .respond(ship.worktreePath, { accepted, feedback })

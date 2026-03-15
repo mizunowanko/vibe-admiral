@@ -46,6 +46,7 @@ export interface Ship {
   sessionId: string | null;
   prUrl: string | null;
   acceptanceTest: AcceptanceTestRequest | null;
+  acceptanceTestApproved: boolean;
   createdAt: string;
 }
 
@@ -127,6 +128,7 @@ export interface ShipProcess {
   status: ShipStatus;
   prUrl: string | null;
   acceptanceTest: AcceptanceTestRequest | null;
+  acceptanceTestApproved: boolean;
   createdAt: string;
   completedAt?: number;
 }
