@@ -55,6 +55,8 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
 
   // Tool use — collapsible by default
   if (message.type === "tool_use") {
+    const hasContent = Boolean(message.toolInput) ||
+      (message.content && message.content !== message.tool);
     return (
       <div className="flex w-full justify-start">
         <button
@@ -71,8 +73,34 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
               [{message.tool}]
             </span>
           </div>
-          {toolExpanded && message.content && message.content !== message.tool && (
+          {toolExpanded && hasContent && (
             <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground/80 mt-1.5 font-mono leading-relaxed">
+              {message.content}
+            </pre>
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  // Tool result — collapsible
+  if (message.type === "tool_result") {
+    return (
+      <div className="flex w-full justify-start">
+        <button
+          type="button"
+          className={cn(
+            "max-w-[90%] rounded border-l-2 border-emerald-500/30 px-3 py-1.5 cursor-pointer select-none text-left",
+            "hover:bg-muted/30 transition-colors",
+          )}
+          onClick={() => setResultExpanded(!resultExpanded)}
+        >
+          <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400/70">
+            <span className="text-[10px]">{resultExpanded ? "▼" : "▶"}</span>
+            <span>result</span>
+          </div>
+          {resultExpanded && message.content && (
+            <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground/80 mt-1.5 font-mono leading-relaxed max-h-60 overflow-y-auto">
               {message.content}
             </pre>
           )}
