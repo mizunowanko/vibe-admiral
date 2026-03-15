@@ -115,6 +115,8 @@ export class ShipManager {
     const killed = this.processManager.kill(shipId);
     if (killed) {
       this.acceptanceWatcher.unwatch(shipId);
+      const ship = this.ships.get(shipId);
+      if (ship) ship.isCompacting = false;
       this.updateStatus(shipId, "error", "Manually stopped");
     }
     return killed;

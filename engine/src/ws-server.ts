@@ -950,6 +950,8 @@ export class EngineServer {
     if (raw.type !== "system" || raw.subtype !== "status") return;
 
     const status = raw.status as string | null | undefined;
+    // Only handle compact-related status changes
+    if (status !== "compacting" && status !== null && status !== undefined) return;
     const isCompacting = status === "compacting";
     const ship = this.shipManager.getShip(id);
     if (!ship) return;

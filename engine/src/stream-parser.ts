@@ -78,11 +78,14 @@ export function parseStreamMessage(
       // Compact status: { type: "system", subtype: "status", status: "compacting" | null }
       if (subtype === "status") {
         const status = raw.status as string | null | undefined;
-        return {
-          type: "system",
-          subtype: "compact-status",
-          content: status === "compacting" ? "Compacting context..." : "Context compaction complete",
-        };
+        if (status === "compacting" || status === null || status === undefined) {
+          return {
+            type: "system",
+            subtype: "compact-status",
+            content: status === "compacting" ? "Compacting context..." : "Context compaction complete",
+          };
+        }
+        // Non-compact status messages — fall through to generic handler
       }
       // Compact boundary: { type: "system", subtype: "compact_boundary", compact_metadata: {...} }
       if (subtype === "compact_boundary") {
