@@ -335,6 +335,47 @@ export async function addSubIssue(
   ]);
 }
 
+/**
+ * Parse "## Dependencies" section from issue body and extract issue numbers.
+ * Looks for lines like "- Depends on #42".
+ */
+export function parseDependencies(body: string): number[] {
+  if (!body) return [];
+  const sectionMatch = body.match(/## Dependencies\s*\n([\s\S]*?)(?:\n##|$)/);
+  if (!sectionMatch?.[1]) return [];
+  const section = sectionMatch[1];
+  const nums = new Set<number>();
+  for (const m of section.matchAll(/#(\d+)/g)) {
+    nums.add(Number(m[1]));
+  }
+  return [...nums];
+}
+
+/**
+ * Parse dependencies from issue body and check which ones are still open.
+ * Returns open dependency issue numbers.
+ */
+export async function getOpenBodyDependencies(
+  repo: string,
+  body: string,
+): Promise<number[]> {
+  const depNums = parseDependencies(body);
+  if (depNums.length === 0) return [];
+
+  const results = await Promise.all(
+    depNums.map(async (num) => {
+      try {
+        const issue = await getIssue(repo, num);
+        return issue.state === "open" ? num : null;
+      } catch {
+        // If we can't fetch the issue, assume it's not blocking
+        return null;
+      }
+    }),
+  );
+  return results.filter((n): n is number => n !== null);
+}
+
 export async function getSubIssues(
   repo: string,
   issueNumber: number,

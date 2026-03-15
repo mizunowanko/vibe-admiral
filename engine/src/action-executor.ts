@@ -184,14 +184,22 @@ export class ActionExecutor {
         return `[Issues] No issues found in ${action.repo}${action.label ? ` with label "${action.label}"` : ""}`;
       }
 
-      // For each issue, check sub-issues to determine blocked/unblocked
+      // For each issue, check sub-issues and body dependencies to determine blocked/unblocked
       const lines: string[] = [];
       for (const issue of issues) {
         const subIssues = await github.getSubIssues(action.repo, issue.number);
-        const openDeps = subIssues.filter((s) => s.state === "OPEN");
-        const blocked = openDeps.length > 0;
+        const openSubDeps = subIssues.filter((s) => s.state === "OPEN");
+        const openBodyDeps = await github.getOpenBodyDependencies(action.repo, issue.body);
+
+        const allBlockers = [
+          ...openSubDeps.map((d) => `#${d.number}`),
+          ...openBodyDeps.map((n) => `#${n}`),
+        ];
+        // Deduplicate in case a dependency appears in both
+        const uniqueBlockers = [...new Set(allBlockers)];
+        const blocked = uniqueBlockers.length > 0;
         const status = blocked
-          ? `BLOCKED (by ${openDeps.map((d) => `#${d.number}`).join(", ")})`
+          ? `BLOCKED (by ${uniqueBlockers.join(", ")})`
           : "UNBLOCKED";
         const labels = issue.labels.length > 0 ? ` [${issue.labels.join(", ")}]` : "";
         lines.push(`  #${issue.number}: ${issue.title}${labels} — ${status}`);
