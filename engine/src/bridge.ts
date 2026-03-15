@@ -1,6 +1,8 @@
 import { ProcessManager } from "./process-manager.js";
 import type { StreamMessage } from "./types.js";
 
+const MAX_HISTORY = 500;
+
 export interface BridgeSession {
   id: string;
   fleetId: string;
@@ -75,6 +77,9 @@ export class BridgeManager {
     const session = this.sessions.get(fleetId);
     if (session) {
       session.history.push(message);
+      if (session.history.length > MAX_HISTORY) {
+        session.history = session.history.slice(-MAX_HISTORY);
+      }
     }
   }
 
