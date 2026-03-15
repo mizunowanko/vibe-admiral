@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings, Plus, Trash2, X } from "lucide-react";
+import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
+import { DirectoryPicker } from "./DirectoryPicker";
 import type { FleetRepo } from "@/types";
 
 export function FleetSettings() {
@@ -14,6 +15,7 @@ export function FleetSettings() {
   const [name, setName] = useState(selectedFleet?.name ?? "");
   const [repos, setRepos] = useState<FleetRepo[]>(selectedFleet?.repos ?? []);
   const [newRepoPath, setNewRepoPath] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const isNew = !selectedFleet;
 
@@ -109,6 +111,15 @@ export function FleetSettings() {
                 />
                 <Button
                   variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => setPickerOpen(true)}
+                  title="Browse..."
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={handleAddRepo}
                   disabled={!newRepoPath.trim()}
@@ -117,6 +128,14 @@ export function FleetSettings() {
                   Add
                 </Button>
               </div>
+              <DirectoryPicker
+                open={pickerOpen}
+                onSelect={(path) => {
+                  setNewRepoPath(path);
+                  setPickerOpen(false);
+                }}
+                onCancel={() => setPickerOpen(false)}
+              />
             </div>
           </div>
 
