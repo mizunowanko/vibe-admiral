@@ -8,7 +8,7 @@ export interface UnblockedIssue extends Issue {
 export async function getUnblockedTodoIssues(
   repo: string,
 ): Promise<UnblockedIssue[]> {
-  const issues = await github.listIssues(repo, "todo");
+  const issues = await github.listIssues(repo, "status/todo");
   const unblocked: UnblockedIssue[] = [];
 
   for (const issue of issues) {

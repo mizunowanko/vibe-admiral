@@ -155,7 +155,18 @@ export class ShipManager {
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
       }
-      // Label rollback is now handled by StateSync — no fire-and-forget here
+      // Sync phase label to GitHub Issue (fire-and-forget for non-terminal phases)
+      // Terminal statuses (done/error) are handled by StateSync
+      if (status !== "done" && status !== "error") {
+        this.statusManager
+          .syncPhaseLabel(ship.repo, ship.issueNumber, status)
+          .catch((err) => {
+            console.warn(
+              `[ship-manager] Failed to sync phase label for #${ship.issueNumber}: ${status}`,
+              err,
+            );
+          });
+      }
       this.onStatusChange?.(id, status, detail);
     }
   }
