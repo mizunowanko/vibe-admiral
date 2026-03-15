@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, readdir, realpath, unlink } from "node:fs/promises";
 import { join, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -23,8 +23,9 @@ import {
   isShipRequest,
 } from "./stream-parser.js";
 import { ShipRequestHandler } from "./ship-request-handler.js";
+import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
-import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeRequest, StreamMessage } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeRequest, StreamMessage, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -57,6 +58,15 @@ export class EngineServer {
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
     this.shipRequestHandler = new ShipRequestHandler(this.shipManager, this.statusManager);
+
+    // Wire up cross-handler references for gate flow
+    this.requestHandler.setShipRequestHandler(this.shipRequestHandler);
+    this.requestHandler.setGateApprovedHandler((shipId, transition) => {
+      this.onGateApproved(shipId, transition);
+    });
+    this.requestHandler.setGateRejectedHandler((shipId, transition, feedback) => {
+      this.onGateRejected(shipId, transition, feedback);
+    });
 
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
@@ -768,6 +778,7 @@ export class EngineServer {
     if (updates.sharedRulePaths !== undefined) fleet.sharedRulePaths = updates.sharedRulePaths as string[];
     if (updates.bridgeRulePaths !== undefined) fleet.bridgeRulePaths = updates.bridgeRulePaths as string[];
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
+    if (updates.gates !== undefined) fleet.gates = updates.gates as import("./types.js").FleetGateSettings;
     await this.saveFleets(fleets);
   }
 
@@ -863,21 +874,154 @@ export class EngineServer {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
-    for (const request of requests) {
-      const response = await this.shipRequestHandler.handle(shipId, request);
-      // Write response file so Ship CLI can poll for the result
-      await ShipRequestHandler.writeResponse(ship.worktreePath, response);
+    // Load fleet gate settings for this ship
+    const fleets = await this.loadFleets();
+    const fleet = fleets.find((f) => f.id === ship.fleetId);
+    this.shipRequestHandler.setGateSettings(fleet?.gates);
 
-      if (response.ok) {
+    for (const request of requests) {
+      const response: StatusTransitionResult = await this.shipRequestHandler.handle(shipId, request);
+
+      if (response.gate) {
+        // Gate check required — initiate gate flow instead of writing response
+        this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to);
+        // Write a "pending" response so Ship knows to wait
+        await ShipRequestHandler.writeResponse(ship.worktreePath, {
+          ok: false,
+          error: `Gate check initiated for ${response.gate.from} → ${response.gate.to}. Wait for gate-response.json.`,
+        });
         console.log(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
+          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check initiated: ${response.gate.from} → ${response.gate.to} (${response.gate.type})`,
         );
       } else {
-        console.warn(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
-        );
+        // Write response file so Ship CLI can poll for the result
+        await ShipRequestHandler.writeResponse(ship.worktreePath, response);
+
+        if (response.ok) {
+          console.log(
+            `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
+          );
+        } else {
+          console.warn(
+            `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
+          );
+        }
       }
     }
+  }
+
+  private initiateGateCheck(
+    shipId: string,
+    gateType: GateType,
+    from: import("./types.js").ShipStatus,
+    to: import("./types.js").ShipStatus,
+  ): void {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) return;
+
+    const transition = `${from}→${to}` as GateTransition;
+
+    // Set gate check state on the ship
+    this.shipManager.setGateCheck(shipId, transition, gateType);
+
+    // Write gate-request.json for Ship to detect
+    const gateRequest: GateFileRequest = {
+      transition,
+      gateType,
+      message: `Gate check required: ${transition} (${gateType})`,
+    };
+    const claudeDir = join(ship.worktreePath, ".claude");
+    mkdir(claudeDir, { recursive: true })
+      .then(() => writeFile(join(claudeDir, "gate-request.json"), JSON.stringify(gateRequest, null, 2)))
+      .catch((err) => console.error(`[ws-server] Failed to write gate-request.json:`, err));
+
+    // Notify frontend
+    this.broadcast({
+      type: "ship:gate-pending",
+      data: {
+        id: shipId,
+        transition,
+        gateType,
+        fleetId: ship.fleetId,
+        issueNumber: ship.issueNumber,
+        issueTitle: ship.issueTitle,
+      },
+    });
+
+    // Build gate check message for Bridge
+    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType);
+
+    // Inject into Bridge chat
+    const bridgeMsg = {
+      type: "system" as const,
+      subtype: "gate-check-request",
+      content: gateMessage,
+    };
+    this.bridgeManager.addToHistory(ship.fleetId, bridgeMsg);
+    this.broadcast({
+      type: "bridge:stream",
+      data: { fleetId: ship.fleetId, message: bridgeMsg },
+    });
+
+    // Send to Bridge stdin
+    const bridgeId = `bridge-${ship.fleetId}`;
+    this.processManager.sendMessage(bridgeId, gateMessage);
+  }
+
+  private buildGateCheckMessage(
+    ship: import("./types.js").ShipProcess,
+    transition: GateTransition,
+    gateType: GateType,
+  ): string {
+    const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
+    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}`;
+
+    switch (gateType) {
+      case "plan-review":
+        return `${header}\n${meta}\n\nThe Ship is requesting to move from planning to implementing. Please review the plan and approve or reject the transition.`;
+      case "code-review":
+        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nThe Ship is requesting code review. Please review the PR diff and submit your verdict via \`gate-result\` admiral-request.`;
+      case "playwright":
+        return `${header}\n${meta}\n\nThe Ship is requesting acceptance testing. Please run Playwright QA checks and submit your verdict via \`gate-result\` admiral-request.`;
+      case "human":
+        return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
+    }
+  }
+
+  private onGateApproved(shipId: string, transition: GateTransition): void {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) return;
+
+    // Notify frontend that gate was approved
+    this.broadcast({
+      type: "ship:gate-resolved",
+      data: {
+        id: shipId,
+        transition,
+        approved: true,
+      },
+    });
+
+    // Clean up gate-request.json and gate-response.json
+    const claudeDir = join(ship.worktreePath, ".claude");
+    unlink(join(claudeDir, "gate-request.json")).catch(() => {});
+    unlink(join(claudeDir, "gate-response.json")).catch(() => {});
+  }
+
+  private onGateRejected(shipId: string, transition: GateTransition, feedback?: string): void {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) return;
+
+    // Notify frontend that gate was rejected
+    this.broadcast({
+      type: "ship:gate-resolved",
+      data: {
+        id: shipId,
+        transition,
+        approved: false,
+        feedback,
+      },
+    });
   }
 
   private runStartupReconciliation(): void {

@@ -3,7 +3,7 @@ import { wsClient } from "@/lib/ws-client";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
-import type { ServerMessage, Fleet, Ship, ShipStatus, StreamMessage } from "@/types";
+import type { ServerMessage, Fleet, Ship, ShipStatus, StreamMessage, GateTransition, GateType } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -15,6 +15,8 @@ export function useEngine() {
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
   const setShipDone = useShipStore((s) => s.setShipDone);
+  const setGateCheck = useShipStore((s) => s.setGateCheck);
+  const clearGateCheck = useShipStore((s) => s.clearGateCheck);
   const syncShips = useShipStore((s) => s.syncShips);
   const fetchShips = useShipStore((s) => s.fetchShips);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
@@ -122,6 +124,40 @@ export function useEngine() {
           break;
         }
 
+        case "ship:gate-pending": {
+          const gateData = msg.data as {
+            id: string;
+            transition: GateTransition;
+            gateType: GateType;
+          };
+          setGateCheck(gateData.id, {
+            transition: gateData.transition,
+            gateType: gateData.gateType,
+            status: "pending",
+          });
+          break;
+        }
+
+        case "ship:gate-resolved": {
+          const resolvedData = msg.data as {
+            id: string;
+            transition: GateTransition;
+            approved: boolean;
+            feedback?: string;
+          };
+          if (resolvedData.approved) {
+            clearGateCheck(resolvedData.id);
+          } else {
+            setGateCheck(resolvedData.id, {
+              transition: resolvedData.transition,
+              gateType: "code-review", // Will be overwritten by sync
+              status: "rejected",
+              feedback: resolvedData.feedback,
+            });
+          }
+          break;
+        }
+
         case "bridge:stream":
           // Bridge messages are handled by useBridge hook
           break;
@@ -160,6 +196,8 @@ export function useEngine() {
     addShipLog,
     setAcceptanceTest,
     setShipDone,
+    setGateCheck,
+    clearGateCheck,
     syncShips,
     fetchShips,
     setEngineConnected,

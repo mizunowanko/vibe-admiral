@@ -2,33 +2,52 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShipManager } from "./ship-manager.js";
 import type { StatusManager } from "./status-manager.js";
-import type { ShipRequest, AdmiralRequestResponse, ShipStatus } from "./types.js";
+import type { ShipRequest, AdmiralRequestResponse, ShipStatus, FleetGateSettings, GateType } from "./types.js";
+import { resolveGate } from "./gate-config.js";
+
+/**
+ * Extended response that indicates whether a gate check was triggered.
+ * When `gate` is set, the caller should NOT write the response file immediately —
+ * instead, it should initiate the gate check flow and write the response later.
+ */
+export interface StatusTransitionResult extends AdmiralRequestResponse {
+  gate?: {
+    type: GateType;
+    from: ShipStatus;
+    to: ShipStatus;
+  };
+}
 
 /**
  * Handles admiral-request blocks from Ship processes.
  *
- * Currently supports:
+ * Supports:
  * - `status-transition`: Transactional phase change —
- *   validates the transition, updates GitHub label synchronously,
- *   and only then confirms the new status internally.
+ *   validates the transition, checks for gate requirements,
+ *   updates GitHub label synchronously, and confirms the new status internally.
  */
 export class ShipRequestHandler {
   private shipManager: ShipManager;
   private statusManager: StatusManager;
+  private gateSettings?: FleetGateSettings;
 
   constructor(shipManager: ShipManager, statusManager: StatusManager) {
     this.shipManager = shipManager;
     this.statusManager = statusManager;
   }
 
+  setGateSettings(settings: FleetGateSettings | undefined): void {
+    this.gateSettings = settings;
+  }
+
   /**
-   * Handle a Ship request and return a response to write back.
-   * The caller is responsible for writing the response file.
+   * Handle a Ship request and return a response.
+   * For status-transition, returns StatusTransitionResult which may include gate info.
    */
   async handle(
     shipId: string,
     request: ShipRequest,
-  ): Promise<AdmiralRequestResponse> {
+  ): Promise<StatusTransitionResult> {
     switch (request.request) {
       case "status-transition":
         return this.handleStatusTransition(shipId, request.status);
@@ -38,7 +57,7 @@ export class ShipRequestHandler {
   private async handleStatusTransition(
     shipId: string,
     targetStatus: ShipStatus,
-  ): Promise<AdmiralRequestResponse> {
+  ): Promise<StatusTransitionResult> {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) {
       return { ok: false, error: `Ship ${shipId} not found` };
@@ -68,22 +87,68 @@ export class ShipRequestHandler {
       };
     }
 
-    // Gate: block advancement past reviewing until Bridge approves PR
-    const mergingIdx = phaseOrder.indexOf("merging");
-    if (targetIdx >= mergingIdx && ship.prReviewStatus !== "approved") {
-      return {
-        ok: false,
-        error: `Cannot advance to ${targetStatus}: PR review not approved (current: ${ship.prReviewStatus ?? "none"})`,
-      };
+    // Check for gate on direct transition (from current → target)
+    const gateType = resolveGate(ship.status, targetStatus, this.gateSettings);
+    if (gateType) {
+      // If there's already a pending/approved gate for this exact transition, check it
+      if (ship.gateCheck?.transition === `${ship.status}→${targetStatus}`) {
+        if (ship.gateCheck.status === "approved") {
+          // Gate was approved — proceed with the transition
+          this.shipManager.clearGateCheck(shipId);
+        } else if (ship.gateCheck.status === "pending") {
+          // Gate is still pending — reject with a message
+          return {
+            ok: false,
+            error: `Gate check pending for ${ship.status} → ${targetStatus}. Waiting for Bridge approval.`,
+          };
+        } else if (ship.gateCheck.status === "rejected") {
+          // Gate was rejected — Ship should have acted on the feedback
+          // Clear the rejection and let them re-request
+          this.shipManager.clearGateCheck(shipId);
+          // Fall through to initiate a new gate check
+          return {
+            ok: false,
+            gate: { type: gateType, from: ship.status, to: targetStatus },
+            error: `Gate check required for ${ship.status} → ${targetStatus}. Initiating review.`,
+          };
+        }
+      } else {
+        // No gate check yet — initiate one
+        return {
+          ok: false,
+          gate: { type: gateType, from: ship.status, to: targetStatus },
+          error: `Gate check required for ${ship.status} → ${targetStatus}. Initiating review.`,
+        };
+      }
     }
 
-    // Gate: block advancement past acceptance-test until human approves
+    // Legacy gate: block advancement past reviewing until Bridge approves PR
+    // (This is now handled by the "testing→reviewing" gate, but we keep this
+    //  as a safety check for the merging phase)
+    const mergingIdx = phaseOrder.indexOf("merging");
+    if (targetIdx >= mergingIdx && ship.prReviewStatus !== "approved") {
+      // Only enforce if the code-review gate is disabled
+      const codeReviewGate = resolveGate("testing", "reviewing", this.gateSettings);
+      if (!codeReviewGate) {
+        return {
+          ok: false,
+          error: `Cannot advance to ${targetStatus}: PR review not approved (current: ${ship.prReviewStatus ?? "none"})`,
+        };
+      }
+    }
+
+    // Legacy gate: block advancement past acceptance-test until human approves
+    // (This is now handled by the "acceptance-test→merging" gate, but we keep
+    //  this as a safety check)
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
-      return {
-        ok: false,
-        error: `Cannot advance past acceptance-test: not yet approved`,
-      };
+      const humanGate = resolveGate("acceptance-test", "merging", this.gateSettings);
+      if (!humanGate) {
+        return {
+          ok: false,
+          error: `Cannot advance past acceptance-test: not yet approved`,
+        };
+      }
     }
 
     // Transactional: sync GitHub label FIRST, then update internal state
@@ -101,6 +166,37 @@ export class ShipRequestHandler {
     }
 
     // Label update succeeded — now confirm the status internally
+    this.shipManager.updateStatus(shipId, targetStatus);
+    return { ok: true };
+  }
+
+  /**
+   * Execute a transition that was previously gated and is now approved.
+   * Called by the gate result handler after Bridge approves.
+   */
+  async executeGatedTransition(
+    shipId: string,
+    targetStatus: ShipStatus,
+  ): Promise<AdmiralRequestResponse> {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) {
+      return { ok: false, error: `Ship ${shipId} not found` };
+    }
+
+    // Transactional: sync GitHub label FIRST, then update internal state
+    try {
+      await this.statusManager.syncPhaseLabel(
+        ship.repo,
+        ship.issueNumber,
+        targetStatus,
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        error: `GitHub label sync failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
     this.shipManager.updateStatus(shipId, targetStatus);
     return { ok: true };
   }

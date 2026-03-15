@@ -50,6 +50,8 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                   "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
                   ship.status === "acceptance-test" &&
                     "border-amber-500/50 ring-1 ring-amber-500/20",
+                  ship.gateCheck?.status === "pending" &&
+                    "border-sky-500/50 ring-1 ring-sky-500/20",
                   isSelected &&
                     "border-primary/70 bg-primary/5",
                 )}
@@ -69,6 +71,12 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                       <Badge className="text-[10px] px-1 py-0 bg-purple-500/20 text-purple-400">
                         <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
                         Compact
+                      </Badge>
+                    )}
+                    {ship.gateCheck?.status === "pending" && (
+                      <Badge className="text-[10px] px-1 py-0 bg-sky-500/20 text-sky-400">
+                        <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+                        Gate
                       </Badge>
                     )}
                   </div>

@@ -1,4 +1,5 @@
-import type { StreamMessage, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus } from "./types.js";
+import type { StreamMessage, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus, GateTransition } from "./types.js";
+import { GATE_TRANSITIONS } from "./gate-config.js";
 
 interface ContentBlock {
   type: string;
@@ -192,6 +193,20 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       };
       if (typeof r.comments === "string") result.comments = r.comments;
       return result;
+    }
+
+    case "gate-result": {
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
+      if (r.verdict !== "approve" && r.verdict !== "reject") return null;
+      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string } = {
+        request: "gate-result",
+        shipId: r.shipId,
+        transition: r.transition as GateTransition,
+        verdict: r.verdict,
+      };
+      if (typeof r.feedback === "string") gateResult.feedback = r.feedback;
+      return gateResult;
     }
 
     case "status-transition": {

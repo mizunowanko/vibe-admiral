@@ -51,11 +51,48 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
               Compacting
             </Badge>
           )}
+          {ship.gateCheck?.status === "pending" && (
+            <Badge className="text-[10px] bg-sky-500/20 text-sky-400 shrink-0">
+              <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+              Gate: {ship.gateCheck.gateType}
+            </Badge>
+          )}
         </div>
         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Gate Check Banner */}
+      {ship.gateCheck && (
+        <div className="p-3">
+          <div className={`rounded-lg border p-3 ${
+            ship.gateCheck.status === "pending"
+              ? "border-sky-500/50 bg-sky-500/10"
+              : ship.gateCheck.status === "rejected"
+                ? "border-red-500/50 bg-red-500/10"
+                : "border-green-500/50 bg-green-500/10"
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className={`text-sm font-medium ${
+                ship.gateCheck.status === "pending" ? "text-sky-400"
+                  : ship.gateCheck.status === "rejected" ? "text-red-400"
+                    : "text-green-400"
+              }`}>
+                Gate: {ship.gateCheck.transition}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {ship.gateCheck.gateType} | {ship.gateCheck.status}
+              </span>
+            </div>
+            {ship.gateCheck.feedback && (
+              <p className="text-xs text-muted-foreground mt-2">
+                {ship.gateCheck.feedback}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Acceptance Test Banner */}
       {ship.status === "acceptance-test" && (

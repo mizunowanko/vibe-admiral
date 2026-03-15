@@ -9,7 +9,7 @@ import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import { writeFile } from "node:fs/promises";
-import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse } from "./types.js";
+import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse, GateTransition, GateType, GateFileResponse } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -97,6 +97,7 @@ export class ShipManager {
       prReviewStatus: null,
       acceptanceTest: null,
       acceptanceTestApproved: false,
+      gateCheck: null,
       createdAt: new Date().toISOString(),
     };
     this.ships.set(shipId, ship);
@@ -209,6 +210,48 @@ export class ShipManager {
           err,
         );
       });
+  }
+
+  setGateCheck(
+    shipId: string,
+    transition: GateTransition,
+    gateType: GateType,
+  ): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.gateCheck = {
+      transition,
+      gateType,
+      status: "pending",
+      requestedAt: new Date().toISOString(),
+    };
+  }
+
+  clearGateCheck(shipId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.gateCheck = null;
+  }
+
+  async respondToGate(
+    shipId: string,
+    approved: boolean,
+    feedback?: string,
+  ): Promise<void> {
+    const ship = this.ships.get(shipId);
+    if (!ship || !ship.gateCheck) return;
+
+    ship.gateCheck.status = approved ? "approved" : "rejected";
+    if (feedback) ship.gateCheck.feedback = feedback;
+
+    // Write gate-response.json for Ship CLI to poll
+    const claudeDir = join(ship.worktreePath, ".claude");
+    await mkdir(claudeDir, { recursive: true });
+    const response: GateFileResponse = { approved, feedback };
+    await writeFile(
+      join(claudeDir, "gate-response.json"),
+      JSON.stringify(response, null, 2),
+    );
   }
 
   private async deploySkills(

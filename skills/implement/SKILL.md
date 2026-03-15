@@ -101,7 +101,38 @@ echo "$RESPONSE"
 ```
 
 - `ok: true` → 遷移確定、次の作業に進む
-- `ok: false` → `error` フィールドを確認して対処
+- `ok: false` (Gate なし) → `error` フィールドを確認して対処
+- `ok: false` + `error` に "Gate check initiated" を含む → Gate 待機フローに入る
+
+### Gate 待機フロー
+
+特定のステータス遷移には Gate（関門）が設定されている。Gate 付き遷移を表明した場合、
+Engine は `ok: false` を返し、Bridge sub-agent が品質チェックを実施する。
+Ship は `.claude/gate-response.json` の出現を待機する:
+
+```bash
+echo "Gate check initiated. Waiting for Bridge approval..."
+rm -f .claude/admiral-request-response.json
+while [ ! -f .claude/gate-response.json ]; do
+  sleep 2
+done
+GATE_RESULT=$(cat .claude/gate-response.json)
+rm -f .claude/gate-response.json
+rm -f .claude/gate-request.json
+echo "$GATE_RESULT"
+```
+
+- `approved: true` → Gate 承認。Engine が自動でステータスを確定する。次の作業に進む
+- `approved: false` → Gate 拒否。`feedback` を確認して修正し、再度 `status-transition` を表明する
+
+### Gate 付き遷移の一覧
+
+| 遷移 | Gate タイプ | 内容 |
+|------|-----------|------|
+| `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
+| `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
+| `reviewing → acceptance-test` | playwright | Bridge が自動 QA を実施 |
+| `acceptance-test → merging` | human | 人間が UI で承認 |
 
 ### ステップ対応表
 
@@ -257,20 +288,15 @@ PR URL をユーザーに報告して Step 10 へ進む。
 
 push した時点で CI が走り始める。CI の完了を待たずにコードレビューを実施する。
 
-#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
+#### VIBE_ADMIRAL 設定時（Gate 方式）
 
-Bridge が PR を検出して自動的にレビューする。Ship 側は `.claude/pr-review-response.json` の出現を待機する:
+`testing → reviewing` の遷移表明時に Gate が発動し、Bridge が自動的にコードレビューを実施する。
+Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待機する。
 
-```bash
-echo "Waiting for Bridge PR review..."
-while [ ! -f .claude/pr-review-response.json ]; do
-  sleep 3
-done
-cat .claude/pr-review-response.json
-```
+- `approved: true` → Step 11 へ進む
+- `approved: false` → `feedback` を読んで修正 → commit & push → 再度 `status-transition` で `reviewing` を表明
 
-- `verdict: "approve"` → Step 11 へ進む
-- `verdict: "request-changes"` → `comments` を読んで修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機ループ
+**注**: 従来の `pr-review-response.json` による Bridge レビュー方式は Gate に統合された。
 
 #### VIBE_ADMIRAL 未設定時
 
