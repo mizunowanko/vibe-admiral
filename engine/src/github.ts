@@ -302,14 +302,15 @@ export async function addSubIssue(
  * Looks for lines like "- Depends on #42".
  */
 export function parseDependencies(body: string): number[] {
+  if (!body) return [];
   const sectionMatch = body.match(/## Dependencies\s*\n([\s\S]*?)(?:\n##|$)/);
   if (!sectionMatch?.[1]) return [];
   const section = sectionMatch[1];
-  const nums: number[] = [];
+  const nums = new Set<number>();
   for (const m of section.matchAll(/#(\d+)/g)) {
-    nums.push(Number(m[1]));
+    nums.add(Number(m[1]));
   }
-  return nums;
+  return [...nums];
 }
 
 /**
