@@ -186,23 +186,22 @@ export class ShipManager {
     if (!ship) return;
     const currentIdx = phaseOrder.indexOf(ship.status);
 
-    const reviewingIdx = phaseOrder.indexOf("reviewing");
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     const mergingIdx = phaseOrder.indexOf("merging");
     const tryAdvance = (target: ShipStatus): void => {
       const targetIdx = phaseOrder.indexOf(target);
       if (targetIdx > currentIdx) {
-        // Gate: block advancement past reviewing to merging until Bridge approves PR
+        // Gate: block advancement past reviewing until Bridge approves PR
+        // Check if the transition crosses the reviewing→merging boundary
         if (
-          currentIdx >= reviewingIdx &&
           targetIdx >= mergingIdx &&
           ship.prReviewStatus !== "approved"
         ) {
           return;
         }
         // Gate: block advancement past acceptance-test until human approves
+        // Check if the transition crosses the acceptance-test boundary
         if (
-          currentIdx === acceptanceIdx &&
           targetIdx > acceptanceIdx &&
           !ship.acceptanceTestApproved
         ) {
@@ -254,20 +253,25 @@ export class ShipManager {
     }
   }
 
-  respondToPRReview(
+  async respondToPRReview(
     shipId: string,
     response: PRReviewResponse,
-  ): void {
+  ): Promise<void> {
     const ship = this.ships.get(shipId);
     if (!ship) return;
 
     ship.prReviewStatus = response.verdict === "approve" ? "approved" : "changes-requested";
 
-    // Write response file for Ship CLI to pick up
-    const responseFile = join(ship.worktreePath, ".claude", "pr-review-response.json");
-    writeFile(responseFile, JSON.stringify(response, null, 2)).catch((err) => {
-      console.error(`Failed to write PR review response for ${shipId}:`, err);
-    });
+    // On request-changes, revert phase to implementing so Ship can fix
+    if (response.verdict === "request-changes") {
+      this.updateStatus(shipId, "implementing");
+    }
+
+    // Ensure .claude directory exists and write response file for Ship CLI
+    const claudeDir = join(ship.worktreePath, ".claude");
+    await mkdir(claudeDir, { recursive: true });
+    const responseFile = join(claudeDir, "pr-review-response.json");
+    await writeFile(responseFile, JSON.stringify(response, null, 2));
   }
 
   respondToAcceptanceTest(
