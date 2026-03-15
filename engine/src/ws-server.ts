@@ -13,7 +13,7 @@ import {
   extractActions,
   stripActionBlocks,
 } from "./stream-parser.js";
-import { BRIDGE_SYSTEM_PROMPT } from "./bridge-system-prompt.js";
+import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import type { Fleet, ClientMessage } from "./types.js";
 
 const FLEETS_DIR =
@@ -284,11 +284,15 @@ export class EngineServer {
                 throw new Error(`Fleet not found: ${fleetId}`);
               }
               // TODO: Use fleet-specific path once Fleet model has a basePath field
+              const prompt = buildBridgeSystemPrompt(
+                fleet.name,
+                fleet.repos,
+              );
               this.bridgeManager.launch(
                 fleetId,
                 process.cwd(),
                 [],
-                BRIDGE_SYSTEM_PROMPT,
+                prompt,
               );
             } finally {
               this.launchingBridges.delete(fleetId);

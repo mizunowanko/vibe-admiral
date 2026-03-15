@@ -2,7 +2,7 @@ import type { ClientMessage, ServerMessage } from "@/types";
 
 type MessageHandler = (msg: ServerMessage) => void;
 
-const ENGINE_URL = "ws://localhost:9720";
+const ENGINE_URL = "ws://localhost:9721";
 
 export class WSClient {
   private ws: WebSocket | null = null;

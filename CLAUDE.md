@@ -12,7 +12,7 @@ Admiral(アプリ) → Fleet(艦隊=プロジェクト) → Bridge(艦橋=中央
 ```
 React Frontend (port 1420)
   ↕ WebSocket
-Node.js Engine Sidecar (port 9720)
+Node.js Engine Sidecar (port 9721)
   ↕ subprocess
 Claude Code CLI (claude -p --output-format stream-json)
 ```
