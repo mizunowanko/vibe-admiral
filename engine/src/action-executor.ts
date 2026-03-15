@@ -135,14 +135,38 @@ export class ActionExecutor {
     action: Extract<BridgeAction, { action: "edit-issue" }>,
   ): Promise<string> {
     try {
-      const fields: { title?: string; body?: string; labels?: string[] } = {};
-      if (action.title) fields.title = action.title;
-      if (action.body) fields.body = action.body;
-      if (action.labels) fields.labels = action.labels;
+      const results: string[] = [];
 
-      // Edit basic fields if any were provided
-      if (Object.keys(fields).length > 0) {
-        await github.editIssue(action.repo, action.number, fields);
+      // If comment is provided, use `gh issue comment`
+      if (action.comment) {
+        await github.commentOnIssue(
+          action.repo,
+          action.issueNumber,
+          action.comment,
+        );
+        results.push(`Comment added to #${action.issueNumber}`);
+      }
+
+      // If title, body, or label changes are provided, use `gh issue edit`
+      const hasEditFields =
+        action.title !== undefined ||
+        action.body !== undefined ||
+        (action.addLabels && action.addLabels.length > 0) ||
+        (action.removeLabels && action.removeLabels.length > 0);
+
+      if (hasEditFields) {
+        await github.editIssue(action.repo, action.issueNumber, {
+          title: action.title,
+          body: action.body,
+          addLabels: action.addLabels,
+          removeLabels: action.removeLabels,
+        });
+        const fields: string[] = [];
+        if (action.title !== undefined) fields.push("title");
+        if (action.body !== undefined) fields.push("body");
+        if (action.addLabels?.length) fields.push(`+labels: ${action.addLabels.join(", ")}`);
+        if (action.removeLabels?.length) fields.push(`-labels: ${action.removeLabels.join(", ")}`);
+        results.push(`Issue #${action.issueNumber} updated (${fields.join(", ")})`);
       }
 
       // Set up parent sub-issue relationship
@@ -150,17 +174,12 @@ export class ActionExecutor {
         await github.addSubIssue(
           action.repo,
           action.parentIssue,
-          action.number,
+          action.issueNumber,
         );
+        results.push(`Sub-issue of #${action.parentIssue}`);
       }
 
-      const changes: string[] = [];
-      if (action.title) changes.push("title");
-      if (action.body) changes.push("body");
-      if (action.labels) changes.push("labels");
-      if (action.parentIssue) changes.push(`parentIssue=#${action.parentIssue}`);
-      const detail = changes.length > 0 ? ` [${changes.join(", ")}]` : "";
-      return `[Issue Updated] #${action.number}${detail} (${action.repo})`;
+      return `[Issue Edit] ${results.join("; ")} (${action.repo})`;
     } catch (err) {
       return `[Issue Edit Failed] ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -175,14 +194,22 @@ export class ActionExecutor {
         return `[Issues] No issues found in ${action.repo}${action.label ? ` with label "${action.label}"` : ""}`;
       }
 
-      // For each issue, check sub-issues to determine blocked/unblocked
+      // For each issue, check sub-issues and body dependencies to determine blocked/unblocked
       const lines: string[] = [];
       for (const issue of issues) {
         const subIssues = await github.getSubIssues(action.repo, issue.number);
-        const openDeps = subIssues.filter((s) => s.state === "OPEN");
-        const blocked = openDeps.length > 0;
+        const openSubDeps = subIssues.filter((s) => s.state === "OPEN");
+        const openBodyDeps = await github.getOpenBodyDependencies(action.repo, issue.body);
+
+        const allBlockers = [
+          ...openSubDeps.map((d) => `#${d.number}`),
+          ...openBodyDeps.map((n) => `#${n}`),
+        ];
+        // Deduplicate in case a dependency appears in both
+        const uniqueBlockers = [...new Set(allBlockers)];
+        const blocked = uniqueBlockers.length > 0;
         const status = blocked
-          ? `BLOCKED (by ${openDeps.map((d) => `#${d.number}`).join(", ")})`
+          ? `BLOCKED (by ${uniqueBlockers.join(", ")})`
           : "UNBLOCKED";
         const labels = issue.labels.length > 0 ? ` [${issue.labels.join(", ")}]` : "";
         lines.push(`  #${issue.number}: ${issue.title}${labels} — ${status}`);

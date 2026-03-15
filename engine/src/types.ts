@@ -111,10 +111,12 @@ export type BridgeAction =
   | {
       action: "edit-issue";
       repo: string;
-      number: number;
+      issueNumber: number;
       title?: string;
       body?: string;
-      labels?: string[];
+      comment?: string;
+      addLabels?: string[];
+      removeLabels?: string[];
       parentIssue?: number;
     }
   | { action: "list-issues"; repo: string; label?: string }

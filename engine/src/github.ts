@@ -87,26 +87,18 @@ export async function createIssue(
     title,
     "--body",
     body,
-    "--json",
-    "number,title,body,labels",
   ];
   for (const label of labelList) {
     args.push("--label", label);
   }
-  const raw = await gh(args);
-  const i = JSON.parse(raw) as {
-    number: number;
-    title: string;
-    body: string;
-    labels: Array<{ name: string }>;
-  };
-  return {
-    number: i.number,
-    title: i.title,
-    body: i.body,
-    labels: i.labels.map((l) => l.name),
-    state: "open",
-  };
+  // gh issue create outputs the issue URL (e.g. https://github.com/owner/repo/issues/123)
+  const url = await gh(args);
+  const match = url.match(/\/issues\/(\d+)$/);
+  if (!match) {
+    throw new Error(`Failed to parse issue number from gh output: ${url}`);
+  }
+  const issueNumber = Number(match[1]);
+  return getIssue(repo, issueNumber);
 }
 
 export async function updateLabels(
@@ -124,6 +116,52 @@ export async function updateLabels(
   await gh(args);
 }
 
+export async function editIssue(
+  repo: string,
+  number: number,
+  opts: {
+    title?: string;
+    body?: string;
+    addLabels?: string[];
+    removeLabels?: string[];
+  },
+): Promise<void> {
+  const args = ["issue", "edit", String(number), "--repo", repo];
+  if (opts.title !== undefined) {
+    args.push("--title", opts.title);
+  }
+  if (opts.body !== undefined) {
+    args.push("--body", opts.body);
+  }
+  if (opts.addLabels) {
+    for (const label of opts.addLabels) {
+      args.push("--add-label", label);
+    }
+  }
+  if (opts.removeLabels) {
+    for (const label of opts.removeLabels) {
+      args.push("--remove-label", label);
+    }
+  }
+  await gh(args);
+}
+
+export async function commentOnIssue(
+  repo: string,
+  number: number,
+  comment: string,
+): Promise<void> {
+  await gh([
+    "issue",
+    "comment",
+    String(number),
+    "--repo",
+    repo,
+    "--body",
+    comment,
+  ]);
+}
+
 export async function closeIssue(
   repo: string,
   number: number,
@@ -137,26 +175,6 @@ export async function closeIssue(
     "--comment",
     "Closed via vibe-admiral Ship completion",
   ]);
-}
-
-export async function editIssue(
-  repo: string,
-  number: number,
-  fields: { title?: string; body?: string; labels?: string[] },
-): Promise<void> {
-  const args = ["issue", "edit", String(number), "--repo", repo];
-  if (fields.title) {
-    args.push("--title", fields.title);
-  }
-  if (fields.body) {
-    args.push("--body", fields.body);
-  }
-  if (fields.labels) {
-    for (const label of fields.labels) {
-      args.push("--add-label", label);
-    }
-  }
-  await gh(args);
 }
 
 export async function getDefaultBranch(repo: string): Promise<string> {
@@ -315,6 +333,47 @@ export async function addSubIssue(
     "-f",
     `childId=${childId}`,
   ]);
+}
+
+/**
+ * Parse "## Dependencies" section from issue body and extract issue numbers.
+ * Looks for lines like "- Depends on #42".
+ */
+export function parseDependencies(body: string): number[] {
+  if (!body) return [];
+  const sectionMatch = body.match(/## Dependencies\s*\n([\s\S]*?)(?:\n##|$)/);
+  if (!sectionMatch?.[1]) return [];
+  const section = sectionMatch[1];
+  const nums = new Set<number>();
+  for (const m of section.matchAll(/#(\d+)/g)) {
+    nums.add(Number(m[1]));
+  }
+  return [...nums];
+}
+
+/**
+ * Parse dependencies from issue body and check which ones are still open.
+ * Returns open dependency issue numbers.
+ */
+export async function getOpenBodyDependencies(
+  repo: string,
+  body: string,
+): Promise<number[]> {
+  const depNums = parseDependencies(body);
+  if (depNums.length === 0) return [];
+
+  const results = await Promise.all(
+    depNums.map(async (num) => {
+      try {
+        const issue = await getIssue(repo, num);
+        return issue.state === "open" ? num : null;
+      } catch {
+        // If we can't fetch the issue, assume it's not blocking
+        return null;
+      }
+    }),
+  );
+  return results.filter((n): n is number => n !== null);
 }
 
 export async function getSubIssues(

@@ -156,84 +156,130 @@ function validateAction(obj: unknown): BridgeAction | null {
 
     case "edit-issue": {
       if (
-        typeof record.number !== "number" ||
-        !Number.isInteger(record.number) ||
-        record.number <= 0
+        typeof record.issueNumber !== "number" ||
+        !Number.isInteger(record.issueNumber) ||
+        record.issueNumber <= 0
       ) {
-        console.warn("[stream-parser] edit-issue missing or invalid number");
+        console.warn("[stream-parser] edit-issue requires a positive integer issueNumber");
         return null;
       }
 
-      const result: {
+      const hasTitle = record.title !== undefined;
+      const hasBody = record.body !== undefined;
+      const hasComment = record.comment !== undefined;
+      const hasAddLabels = record.addLabels !== undefined;
+      const hasRemoveLabels = record.removeLabels !== undefined;
+      const hasParentIssue = record.parentIssue !== undefined;
+
+      if (!hasTitle && !hasBody && !hasComment && !hasAddLabels && !hasRemoveLabels && !hasParentIssue) {
+        console.warn("[stream-parser] edit-issue requires at least one field to change");
+        return null;
+      }
+
+      const editResult: {
         action: "edit-issue";
         repo: string;
-        number: number;
+        issueNumber: number;
         title?: string;
         body?: string;
-        labels?: string[];
+        comment?: string;
+        addLabels?: string[];
+        removeLabels?: string[];
         parentIssue?: number;
       } = {
         action: "edit-issue",
         repo: record.repo as string,
-        number: record.number,
+        issueNumber: record.issueNumber,
       };
 
-      if (record.title !== undefined) {
+      if (hasTitle) {
         if (typeof record.title !== "string" || record.title.length === 0) {
           console.warn("[stream-parser] edit-issue title must be a non-empty string");
           return null;
         }
         if (record.title.length > TITLE_MAX_LENGTH) {
-          console.warn(
-            `[stream-parser] edit-issue title exceeds ${TITLE_MAX_LENGTH} chars:`,
-            record.title.length,
-          );
+          console.warn(`[stream-parser] edit-issue title exceeds ${TITLE_MAX_LENGTH} chars`);
           return null;
         }
-        result.title = record.title;
+        editResult.title = record.title;
       }
 
-      if (record.body !== undefined) {
+      if (hasBody) {
         if (typeof record.body !== "string") {
           console.warn("[stream-parser] edit-issue body must be a string");
           return null;
         }
         if (record.body.length > BODY_MAX_LENGTH) {
-          console.warn(
-            `[stream-parser] edit-issue body exceeds ${BODY_MAX_LENGTH} chars:`,
-            record.body.length,
-          );
+          console.warn(`[stream-parser] edit-issue body exceeds ${BODY_MAX_LENGTH} chars`);
           return null;
         }
-        result.body = record.body;
+        editResult.body = record.body;
       }
 
-      if (record.labels !== undefined) {
+      if (hasComment) {
+        if (typeof record.comment !== "string" || record.comment.length === 0) {
+          console.warn("[stream-parser] edit-issue comment must be a non-empty string");
+          return null;
+        }
+        if (record.comment.length > BODY_MAX_LENGTH) {
+          console.warn(`[stream-parser] edit-issue comment exceeds ${BODY_MAX_LENGTH} chars`);
+          return null;
+        }
+        editResult.comment = record.comment;
+      }
+
+      if (hasAddLabels) {
         if (
-          !Array.isArray(record.labels) ||
-          !record.labels.every((l: unknown) => typeof l === "string")
+          !Array.isArray(record.addLabels) ||
+          !record.addLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
         ) {
-          console.warn("[stream-parser] edit-issue labels must be string[]");
+          console.warn("[stream-parser] edit-issue addLabels must be non-empty string[]");
           return null;
         }
-        result.labels = record.labels as string[];
+        if ((record.addLabels as string[]).length > 0) {
+          editResult.addLabels = record.addLabels as string[];
+        }
       }
 
-      if (record.parentIssue !== undefined) {
+      if (hasRemoveLabels) {
+        if (
+          !Array.isArray(record.removeLabels) ||
+          !record.removeLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
+        ) {
+          console.warn("[stream-parser] edit-issue removeLabels must be non-empty string[]");
+          return null;
+        }
+        if ((record.removeLabels as string[]).length > 0) {
+          editResult.removeLabels = record.removeLabels as string[];
+        }
+      }
+
+      if (hasParentIssue) {
         if (
           typeof record.parentIssue !== "number" ||
           !Number.isInteger(record.parentIssue) ||
           record.parentIssue <= 0
         ) {
-          console.warn(
-            "[stream-parser] edit-issue parentIssue must be a positive integer",
-          );
+          console.warn("[stream-parser] edit-issue parentIssue must be a positive integer");
           return null;
         }
-        result.parentIssue = record.parentIssue;
+        editResult.parentIssue = record.parentIssue;
       }
 
-      return result;
+      // Reject if no effective fields remain after filtering
+      if (
+        editResult.title === undefined &&
+        editResult.body === undefined &&
+        editResult.comment === undefined &&
+        editResult.addLabels === undefined &&
+        editResult.removeLabels === undefined &&
+        editResult.parentIssue === undefined
+      ) {
+        console.warn("[stream-parser] edit-issue requires at least one effective field");
+        return null;
+      }
+
+      return editResult;
     }
 
     case "sortie": {
