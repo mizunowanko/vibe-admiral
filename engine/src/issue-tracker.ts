@@ -26,8 +26,13 @@ export async function isBlocked(
   number: number,
 ): Promise<boolean> {
   const subIssues = await github.listSubIssues(repo, number);
-  if (subIssues.length === 0) return false;
-  return subIssues.some((s) => s.state === "open");
+  const blockedBySub = subIssues.some((s) => s.state === "open");
+  if (blockedBySub) return true;
+
+  // Also check body-based dependencies
+  const issue = await github.getIssue(repo, number);
+  const openBodyDeps = await github.getOpenBodyDependencies(repo, issue.body);
+  return openBodyDeps.length > 0;
 }
 
 export function getActiveShips(
