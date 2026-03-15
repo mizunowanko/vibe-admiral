@@ -13,15 +13,11 @@ import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse } fro
 
 const execFileAsync = promisify(execFile);
 
-const SHIP_RETENTION_MS = 30 * 60 * 1000; // 30 minutes
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
 export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
   private acceptanceWatcher: AcceptanceWatcher;
   private statusManager: StatusManager;
-  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
     | null = null;
@@ -34,7 +30,6 @@ export class ShipManager {
     this.processManager = processManager;
     this.acceptanceWatcher = acceptanceWatcher;
     this.statusManager = statusManager;
-    this.startCleanup();
   }
 
   setStatusChangeHandler(
@@ -52,6 +47,13 @@ export class ShipManager {
     extraPrompt?: string,
     skill?: string,
   ): Promise<ShipProcess> {
+    // Clean up all completed ships (done/error) on every new sortie
+    for (const [id, ship] of this.ships) {
+      if (ship.status === "done" || ship.status === "error") {
+        this.ships.delete(id);
+      }
+    }
+
     const shipId = randomUUID();
 
     // 1. Get issue info (used later for title, slug, etc.)
@@ -330,29 +332,7 @@ export class ShipManager {
     }
   }
 
-  private startCleanup(): void {
-    this.cleanupTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [id, ship] of this.ships) {
-        if (
-          ship.completedAt &&
-          now - ship.completedAt > SHIP_RETENTION_MS
-        ) {
-          this.ships.delete(id);
-        }
-      }
-    }, CLEANUP_INTERVAL_MS);
-  }
-
-  stopCleanup(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-  }
-
   stopAll(): void {
-    this.stopCleanup();
     for (const [id] of this.ships) {
       this.processManager.kill(id);
     }
