@@ -19,7 +19,6 @@ const STATUS_TO_LABEL: ReadonlyMap<IssueStatus, string> = new Map([
  * Phases that don't map to a label are omitted.
  */
 const PHASE_TO_LABEL: ReadonlyMap<ShipStatus, string> = new Map([
-  ["sortie", "status/todo"],
   ["investigating", "status/investigating"],
   ["planning", "status/planning"],
   ["implementing", "status/implementing"],

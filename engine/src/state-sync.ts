@@ -127,7 +127,7 @@ export class StateSync {
   }
 
   /**
-   * Startup reconciliation: audit "doing" labels and orphan worktrees.
+   * Startup reconciliation: audit active status/* labels and orphan worktrees.
    * Called once when Engine starts.
    */
   async reconcileOnStartup(
@@ -141,6 +141,8 @@ export class StateSync {
       if (!repo.remote) continue;
 
       // 1. Audit active status/* labels: if no active Ship, roll back to "status/todo"
+      // Note: "status/blocked" is excluded — it is set manually by Bridge/human
+      // to indicate dependency blocks and should persist across Engine restarts.
       const activeStatusLabels = [
         "status/investigating",
         "status/planning",
