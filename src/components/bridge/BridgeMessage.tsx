@@ -195,7 +195,7 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
           {stripCodeFences(message.content ?? "")}
         </p>
         {message.timestamp && (
-          <span className="block text-[10px] text-muted-foreground/60 mt-1 text-right">
+          <span className="block text-[10px] text-slate-400 mt-1 text-right">
             {formatTime(message.timestamp)}
           </span>
         )}
