@@ -25,14 +25,24 @@ type ImageMediaType = ImageAttachment["mediaType"];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image
 const MAX_IMAGES = 10;
 
-function fileToAttachment(file: File): Promise<ImageAttachment> {
+/** Attachment with an object URL for DOM preview (avoids base64 in <img src>). */
+interface PreviewAttachment extends ImageAttachment {
+  objectUrl: string;
+}
+
+function fileToAttachment(file: File): Promise<PreviewAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
       // Strip "data:<mime>;base64," prefix
-      const base64 = dataUrl.split(",")[1]!;
-      resolve({ base64, mediaType: file.type as ImageMediaType });
+      const base64 = dataUrl.split(",")[1] ?? "";
+      const objectUrl = URL.createObjectURL(file);
+      resolve({
+        base64,
+        mediaType: file.type as ImageMediaType,
+        objectUrl,
+      });
     };
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
@@ -55,7 +65,7 @@ export function BridgeInput({
   placeholder = "Send a command to the Bridge...",
 }: BridgeInputProps) {
   const [value, setValue] = useState("");
-  const [images, setImages] = useState<ImageAttachment[]>([]);
+  const [images, setImages] = useState<PreviewAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,23 +82,56 @@ export function BridgeInput({
     resetHeight();
   }, [value, resetHeight]);
 
+  // Revoke all object URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      for (const img of images) URL.revokeObjectURL(img.objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on unmount
+  }, []);
+
   const addImages = useCallback(async (files: File[]) => {
     const valid = files.filter(
       (f) => ACCEPTED_TYPES.has(f.type) && f.size <= MAX_IMAGE_BYTES,
     );
     if (valid.length === 0) return;
-    const attachments = await Promise.all(valid.map(fileToAttachment));
-    setImages((prev) => [...prev, ...attachments].slice(0, MAX_IMAGES));
+    const results = await Promise.allSettled(valid.map(fileToAttachment));
+    const attachments = results
+      .filter(
+        (r): r is PromiseFulfilledResult<PreviewAttachment> =>
+          r.status === "fulfilled",
+      )
+      .map((r) => r.value);
+    if (attachments.length === 0) return;
+    setImages((prev) => {
+      const merged = [...prev, ...attachments];
+      // Revoke object URLs for images that exceed the limit
+      for (const dropped of merged.slice(MAX_IMAGES)) {
+        URL.revokeObjectURL(dropped.objectUrl);
+      }
+      return merged.slice(0, MAX_IMAGES);
+    });
   }, []);
 
   const removeImage = useCallback((index: number) => {
-    setImages((prev) => prev.filter((_, i) => i !== index));
+    setImages((prev) => {
+      const removed = prev[index];
+      if (removed) URL.revokeObjectURL(removed.objectUrl);
+      return prev.filter((_, i) => i !== index);
+    });
   }, []);
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed && images.length === 0) return;
-    onSend(trimmed || "(image)", images.length > 0 ? images : undefined);
+    // Strip objectUrl before sending — only base64 + mediaType go over the wire
+    const toSend: ImageAttachment[] | undefined =
+      images.length > 0
+        ? images.map(({ base64, mediaType }) => ({ base64, mediaType }))
+        : undefined;
+    onSend(trimmed, toSend);
+    // Revoke all preview object URLs
+    for (const img of images) URL.revokeObjectURL(img.objectUrl);
     setValue("");
     setImages([]);
   }, [value, images, onSend]);
@@ -137,6 +180,14 @@ export function BridgeInput({
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    // Only clear dragOver when the pointer truly leaves the container,
+    // not when entering a child element within it.
+    if (
+      e.relatedTarget instanceof Node &&
+      e.currentTarget.contains(e.relatedTarget)
+    ) {
+      return;
+    }
     setDragOver(false);
   }, []);
 
@@ -184,7 +235,7 @@ export function BridgeInput({
           {images.map((img, i) => (
             <div key={i} className="relative group">
               <img
-                src={`data:${img.mediaType};base64,${img.base64}`}
+                src={img.objectUrl}
                 alt={`Attachment ${i + 1}`}
                 className="h-16 w-16 rounded border border-border object-cover"
               />
