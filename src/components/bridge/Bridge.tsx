@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { memo, useRef, useEffect } from "react";
 import { useBridge } from "@/hooks/useBridge";
 import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
@@ -12,7 +12,7 @@ interface BridgeProps {
   fleetId: string | null;
 }
 
-export function Bridge({ fleetId }: BridgeProps) {
+export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const { messages, sendMessage, isLoading } = useBridge(fleetId);
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -95,4 +95,4 @@ export function Bridge({ fleetId }: BridgeProps) {
       />
     </div>
   );
-}
+});

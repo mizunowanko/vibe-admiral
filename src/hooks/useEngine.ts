@@ -21,7 +21,10 @@ export function useEngine() {
     wsClient.connect();
 
     const checkConnection = setInterval(() => {
-      setEngineConnected(wsClient.connected);
+      const connected = wsClient.connected;
+      if (connected !== useUIStore.getState().engineConnected) {
+        setEngineConnected(connected);
+      }
     }, 1000);
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {

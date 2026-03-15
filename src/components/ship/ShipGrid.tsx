@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useShipsByFleet } from "@/hooks/useShip";
 import { useShipStore } from "@/stores/shipStore";
 import { useFleetStore } from "@/stores/fleetStore";
@@ -12,7 +12,7 @@ interface ShipGridProps {
   fleetId: string | null;
 }
 
-export function ShipGrid({ fleetId }: ShipGridProps) {
+export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const ships = useShipsByFleet(fleetId);
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
@@ -146,4 +146,4 @@ export function ShipGrid({ fleetId }: ShipGridProps) {
       )}
     </div>
   );
-}
+});
