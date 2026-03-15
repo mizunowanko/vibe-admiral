@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from "react";
+import { useRef, useEffect, useMemo, useCallback } from "react";
 import { useShip } from "@/hooks/useShip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -16,14 +16,25 @@ const LOG_TAIL_LIMIT = 100;
 export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
   const { ship, logs } = useShip(shipId);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
 
   const tailLogs = useMemo(
     () => logs.slice(-LOG_TAIL_LIMIT),
     [logs],
   );
 
+  const baseIndex = logs.length - tailLogs.length;
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const threshold = 30;
+    isAtBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && isAtBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [tailLogs]);
@@ -56,11 +67,16 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
       </div>
 
       {/* Logs */}
-      <ScrollArea ref={scrollRef} className="flex-1 p-3 min-h-0">
+      <ScrollArea ref={scrollRef} className="flex-1 p-3 min-h-0" onScroll={handleScroll}>
         <div className="space-y-0.5 font-mono text-xs">
+          {logs.length > LOG_TAIL_LIMIT && (
+            <p className="text-center text-muted-foreground/50 text-[10px] py-1">
+              Showing last {LOG_TAIL_LIMIT} of {logs.length} entries
+            </p>
+          )}
           {tailLogs.map((log, i) => (
             <div
-              key={i}
+              key={baseIndex + i}
               className={cn(
                 log.type === "error" && "text-red-400",
                 log.type === "user" && "text-blue-400",
@@ -85,11 +101,6 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
           {tailLogs.length === 0 && (
             <p className="text-center text-muted-foreground py-4">
               No logs yet — waiting for output...
-            </p>
-          )}
-          {logs.length > LOG_TAIL_LIMIT && (
-            <p className="text-center text-muted-foreground/50 text-[10px] py-1">
-              Showing last {LOG_TAIL_LIMIT} of {logs.length} entries
             </p>
           )}
         </div>
