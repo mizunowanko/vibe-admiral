@@ -11,6 +11,7 @@ import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import { ShipStatusWatcher } from "./ship-status-watcher.js";
 import { StatusManager } from "./status-manager.js";
 import { StateSync } from "./state-sync.js";
 import { BridgeRequestHandler } from "./bridge-request-handler.js";
@@ -33,6 +34,7 @@ export class EngineServer {
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private shipStatusWatcher: ShipStatusWatcher;
   private statusManager: StatusManager;
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
@@ -43,10 +45,12 @@ export class EngineServer {
   constructor(port: number) {
     this.processManager = new ProcessManager();
     this.acceptanceWatcher = new AcceptanceWatcher();
+    this.shipStatusWatcher = new ShipStatusWatcher();
     this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
       this.acceptanceWatcher,
+      this.shipStatusWatcher,
       this.statusManager,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
@@ -163,7 +167,6 @@ export class EngineServer {
         // Ship stream — parse raw CLI JSON before broadcast
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          this.shipManager.updatePhaseFromStream(id, parsed);
           this.logShipMessage(id, parsed);
           this.broadcast({
             type: "ship:stream",
@@ -967,6 +970,7 @@ export class EngineServer {
     this.bridgeManager.stopAll();
     this.processManager.killAll();
     this.acceptanceWatcher.unwatchAll();
+    this.shipStatusWatcher.unwatchAll();
     this.wss.close();
   }
 }
