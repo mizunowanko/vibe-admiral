@@ -5,10 +5,10 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import type { ShipProcess, ShipStatus, FleetSkillSources } from "./types.js";
-import { getActiveStatusLabel } from "./state-sync.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +19,7 @@ export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private statusManager: StatusManager;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
@@ -27,9 +28,11 @@ export class ShipManager {
   constructor(
     processManager: ProcessManager,
     acceptanceWatcher: AcceptanceWatcher,
+    statusManager: StatusManager,
   ) {
     this.processManager = processManager;
     this.acceptanceWatcher = acceptanceWatcher;
+    this.statusManager = statusManager;
     this.startCleanup();
   }
 
@@ -50,20 +53,11 @@ export class ShipManager {
   ): Promise<ShipProcess> {
     const shipId = randomUUID();
 
-    // 1. Get issue info
+    // 1. Get issue info (used later for title, slug, etc.)
     const issue = await github.getIssue(repo, issueNumber);
-    const activeStatusLabel = getActiveStatusLabel(issue.labels);
-    if (activeStatusLabel) {
-      throw new Error(
-        `Issue #${issueNumber} is already in progress (${activeStatusLabel})`,
-      );
-    }
 
-    // 2. Update labels: status/todo → status/investigating
-    await github.updateLabels(repo, issueNumber, {
-      remove: "status/todo",
-      add: "status/investigating",
-    });
+    // 2. Update issue status: todo → doing (via StatusManager)
+    await this.statusManager.markDoing(repo, issueNumber);
 
     // 3. Create worktree
     const repoRoot = await worktree.getRepoRoot(localPath);
@@ -97,6 +91,7 @@ export class ShipManager {
       sessionId: null,
       prUrl: null,
       acceptanceTest: null,
+      acceptanceTestApproved: false,
       createdAt: new Date().toISOString(),
     };
     this.ships.set(shipId, ship);
@@ -160,7 +155,18 @@ export class ShipManager {
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
       }
-      // Label rollback is now handled by StateSync — no fire-and-forget here
+      // Sync phase label to GitHub Issue (fire-and-forget for non-terminal phases)
+      // Terminal statuses (done/error) are handled by StateSync
+      if (status !== "done" && status !== "error") {
+        this.statusManager
+          .syncPhaseLabel(ship.repo, ship.issueNumber, status)
+          .catch((err) => {
+            console.warn(
+              `[ship-manager] Failed to sync phase label for #${ship.issueNumber}: ${status}`,
+              err,
+            );
+          });
+      }
       this.onStatusChange?.(id, status, detail);
     }
   }
@@ -178,9 +184,18 @@ export class ShipManager {
     if (!ship) return;
     const currentIdx = phaseOrder.indexOf(ship.status);
 
+    const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     const tryAdvance = (target: ShipStatus): void => {
       const targetIdx = phaseOrder.indexOf(target);
       if (targetIdx > currentIdx) {
+        // Gate: block advancement past acceptance-test until human approves
+        if (
+          currentIdx === acceptanceIdx &&
+          targetIdx > acceptanceIdx &&
+          !ship.acceptanceTestApproved
+        ) {
+          return;
+        }
         this.updateStatus(id, target);
       }
     };
@@ -232,6 +247,10 @@ export class ShipManager {
   ): void {
     const ship = this.ships.get(shipId);
     if (!ship) return;
+
+    if (accepted) {
+      ship.acceptanceTestApproved = true;
+    }
 
     this.acceptanceWatcher
       .respond(ship.worktreePath, { accepted, feedback })

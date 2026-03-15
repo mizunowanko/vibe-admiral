@@ -27,7 +27,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--dangerously-skip-permissions",
       "--disallowedTools",
-      "EnterPlanMode,ExitPlanMode",
+      "EnterPlanMode,ExitPlanMode,AskUserQuestion",
       "--max-turns",
       "200",
       "--verbose",
@@ -115,7 +115,7 @@ export class ProcessManager extends EventEmitter {
         "--verbose",
         "--dangerously-skip-permissions",
         "--disallowedTools",
-        "EnterPlanMode,ExitPlanMode",
+        "EnterPlanMode,ExitPlanMode,AskUserQuestion",
       ],
       {
         cwd,

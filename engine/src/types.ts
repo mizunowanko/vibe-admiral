@@ -46,6 +46,7 @@ export interface Ship {
   sessionId: string | null;
   prUrl: string | null;
   acceptanceTest: AcceptanceTestRequest | null;
+  acceptanceTestApproved: boolean;
   createdAt: string;
 }
 
@@ -72,6 +73,9 @@ export interface StreamMessage {
   subtype?: string;
   [key: string]: unknown;
 }
+
+// === Issue Status (GitHub label-based) ===
+export type IssueStatus = "todo" | "doing" | "done";
 
 // === Label Operations ===
 export interface LabelOps {
@@ -124,6 +128,7 @@ export interface ShipProcess {
   status: ShipStatus;
   prUrl: string | null;
   acceptanceTest: AcceptanceTestRequest | null;
+  acceptanceTestApproved: boolean;
   createdAt: string;
   completedAt?: number;
 }

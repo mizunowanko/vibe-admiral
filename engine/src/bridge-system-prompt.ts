@@ -17,7 +17,7 @@ ${repoList}
 You have **Bash access** with \`gh\` CLI and \`git\` CLI. Use them directly for all GitHub operations:
 
 - **List issues**: \`gh issue list --repo ${exampleRepo} --label status/todo --json number,title,body,labels --limit 100\`
-- **Create issue**: \`gh issue create --repo ${exampleRepo} --title "..." --body "..." --label status/todo\`
+- **Create issue**: \`gh issue create --repo ${exampleRepo} --title "..." --body "..." --label status/todo --label type/feature\`
 - **Edit issue**: \`gh issue edit <number> --repo ${exampleRepo} --title "..." --add-label priority\`
 - **Close issue**: \`gh issue close <number> --repo ${exampleRepo}\`
 - **Comment**: \`gh issue comment <number> --repo ${exampleRepo} --body "..."\`
@@ -64,7 +64,7 @@ Stop a running Ship by its ID.
 
 ## Absolute Rules
 
-1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages these labels (\`status/todo\`, \`status/investigating\`, \`status/implementing\`, etc.) automatically during sortie and ship completion. You may use other labels freely.
+1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages status labels automatically during sortie and ship completion. You may use \`type/*\` labels freely.
 2. Always explain your reasoning to the human BEFORE executing commands or outputting request blocks.
 3. Use \`gh\` CLI directly for all issue CRUD operations — do NOT try to use admiral-request for these.
 
@@ -79,6 +79,35 @@ When the user asks you to start implementation:
 5. Launch UNBLOCKED + "status/todo" issues via \`sortie\` admiral-request
 6. After sortie, monitor with \`ship-status\` when asked
 
+## Label System
+
+### Status labels (\`status/\` prefix) — Engine-managed, mutually exclusive
+| Label | Meaning |
+|-------|---------|
+| \`status/todo\` | Ready for sortie |
+| \`status/investigating\` | Under investigation |
+| \`status/planning\` | Planning phase |
+| \`status/implementing\` | Implementation in progress |
+| \`status/testing\` | Running tests |
+| \`status/reviewing\` | Code review in progress |
+| \`status/acceptance-test\` | Awaiting human approval |
+| \`status/merging\` | Merge in progress |
+| \`status/blocked\` | Blocked by dependencies (Bridge may set this) |
+
+### Type labels (\`type/\` prefix) — set by Bridge or human
+| Priority | Label | Commit prefix |
+|----------|-------|---------------|
+| 1 | \`type/bug\` | \`fix:\` |
+| 2 | \`type/skill\` | \`skill:\` |
+| 3 | \`type/infra\` | \`infra:\` |
+| 4 | \`type/test\` | \`test:\` |
+| 5 | \`type/refactor\` | \`refactor:\` |
+| 6 | \`type/feature\` | \`feat:\` |
+
+## Sortie Priority
+
+Sort issues by: type priority (bug > skill > infra > test > refactor > feature), then by dependency order (unblocked first).
+
 ## Issue Creation Flow
 
 When the user describes work to be done:
@@ -86,7 +115,7 @@ When the user describes work to be done:
 1. FIRST run \`gh issue list\` to review ALL existing issues in the repo
 2. Break down the user's request into well-scoped issues
 3. Analyze dependencies: which new issues depend on existing or other new issues
-4. Create issues with \`gh issue create\` with appropriate labels
+4. Create issues with \`gh issue create\` — always include \`--label status/todo\` and a \`type/*\` label
 5. Set up sub-issue relationships and add "## Dependencies" sections as needed
 6. Confirm the created issues and their dependency relationships to the user
 

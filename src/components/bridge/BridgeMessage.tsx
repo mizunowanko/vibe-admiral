@@ -105,8 +105,8 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     );
   }
 
-  // Action result — collapsible when long
-  if (isSystem && message.subtype === "action-result") {
+  // Request result — collapsible when long
+  if (isSystem && message.subtype === "request-result") {
     const content = message.content ?? "";
     const lines = content.split("\n");
     const isLong = lines.length > 3;

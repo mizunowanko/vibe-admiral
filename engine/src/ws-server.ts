@@ -11,6 +11,7 @@ import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import { StatusManager } from "./status-manager.js";
 import { StateSync } from "./state-sync.js";
 import { BridgeRequestHandler } from "./bridge-request-handler.js";
 import * as github from "./github.js";
@@ -32,6 +33,7 @@ export class EngineServer {
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private statusManager: StatusManager;
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
   private clients = new Set<WebSocket>();
@@ -41,12 +43,14 @@ export class EngineServer {
   constructor(port: number) {
     this.processManager = new ProcessManager();
     this.acceptanceWatcher = new AcceptanceWatcher();
+    this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
       this.acceptanceWatcher,
+      this.statusManager,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
-    this.stateSync = new StateSync(this.shipManager);
+    this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
 
     this.wss = new WebSocketServer({ port });
@@ -454,18 +458,29 @@ export class EngineServer {
           break;
         }
         case "ship:accept": {
-          this.shipManager.respondToAcceptanceTest(
-            data.id as string,
-            true,
-          );
+          const acceptId = data.id as string;
+          this.shipManager.respondToAcceptanceTest(acceptId, true);
+          // Clear acceptance test state and advance status so frontend sees immediate feedback
+          const acceptShip = this.shipManager.getShip(acceptId);
+          if (acceptShip) {
+            acceptShip.acceptanceTest = null;
+            this.shipManager.updateStatus(acceptId, "merging");
+          }
           break;
         }
         case "ship:reject": {
+          const rejectId = data.id as string;
           this.shipManager.respondToAcceptanceTest(
-            data.id as string,
+            rejectId,
             false,
             data.feedback as string,
           );
+          // Clear acceptance test state; Ship CLI will re-request after fixing
+          const rejectShip = this.shipManager.getShip(rejectId);
+          if (rejectShip) {
+            rejectShip.acceptanceTest = null;
+            this.shipManager.updateStatus(rejectId, "implementing");
+          }
           break;
         }
         case "ship:stop": {

@@ -89,18 +89,18 @@ DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBran
   ```bash
   gh issue view <番号> --repo "$REPO" --json number,title,labels
   ```
-  **重要: `status/investigating` や `status/implementing` 等のアクティブな `status/*` ラベルが付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
+  **重要: `status/` prefix のアクティブラベル（`status/todo` 以外）が付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
 
 - 指定がない場合: **必ず `--label status/todo` を指定して** `status/todo` ラベルの Issue のみを取得する:
   ```bash
   gh issue list --repo "$REPO" --label status/todo --state open --json number,title
   ```
   取得した Issue の Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
-  **`status/todo` 以外の `status/*` ラベルが付いた Issue は絶対に選択しない。**
+  **アクティブステータスラベルが付いている Issue は絶対に選択しない。**
 
 **`VIBE_ADMIRAL` 未設定の場合のみ**: 選択した Issue のラベルを変更:
 ```bash
-gh issue edit <番号> --repo "$REPO" --remove-label status/todo --add-label status/investigating
+gh issue edit <番号> --repo "$REPO" --remove-label status/todo --add-label status/implementing
 ```
 
 ### Step 2: Worktree 作成
@@ -192,7 +192,7 @@ git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
    ## Changes
    <コミット内容の箇条書き>
 
-   Closes #<Issue 番号>
+   Resolves #<Issue 番号>
 
    ## Test plan
    <ビルド・テスト・リントコマンドの実行結果>

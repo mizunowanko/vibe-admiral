@@ -48,6 +48,7 @@ export const useShipStore = create<ShipState>((set) => ({
         sessionId: null,
         prUrl: null,
         acceptanceTest: null,
+        acceptanceTestApproved: false,
         createdAt: new Date().toISOString(),
         ...shipData,
       } as Ship);
@@ -81,6 +82,7 @@ export const useShipStore = create<ShipState>((set) => ({
           sessionId: null,
           prUrl: null,
           acceptanceTest: null,
+          acceptanceTestApproved: false,
           createdAt: new Date().toISOString(),
         });
       }
@@ -128,15 +130,18 @@ export const useShipStore = create<ShipState>((set) => ({
   syncShips: (shipList) => {
     set((state) => {
       const ships = new Map(state.ships);
-      // Add/update ships from server, but keep locally-known ships
-      // that may have received more recent status updates
       for (const s of shipList) {
         const existing = ships.get(s.id);
         if (!existing) {
           ships.set(s.id, s);
         } else {
-          // Keep the existing entry if it has a more advanced status
-          ships.set(s.id, { ...s, ...existing });
+          // Merge: keep local status (may be more recent), but prefer
+          // server's acceptanceTest data when the local value is null
+          ships.set(s.id, {
+            ...s,
+            ...existing,
+            acceptanceTest: existing.acceptanceTest ?? s.acceptanceTest,
+          });
         }
       }
       return { ships };
@@ -160,10 +165,28 @@ export const useShipStore = create<ShipState>((set) => ({
 
   acceptTest: (id) => {
     wsClient.send({ type: "ship:accept", data: { id } });
+    // Optimistic update: clear acceptance test and show merging status
+    set((state) => {
+      const ships = new Map(state.ships);
+      const ship = ships.get(id);
+      if (ship) {
+        ships.set(id, { ...ship, acceptanceTest: null, status: "merging" });
+      }
+      return { ships };
+    });
   },
 
   rejectTest: (id, feedback) => {
     wsClient.send({ type: "ship:reject", data: { id, feedback } });
+    // Optimistic update: clear acceptance test and show implementing status
+    set((state) => {
+      const ships = new Map(state.ships);
+      const ship = ships.get(id);
+      if (ship) {
+        ships.set(id, { ...ship, acceptanceTest: null, status: "implementing" });
+      }
+      return { ships };
+    });
   },
 
   stopShip: (id) => {
