@@ -76,10 +76,35 @@ skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 
 dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/CLAUDE.md` を参照。
 
-- コミット: `feat:` / `fix:` / `refactor:` / `test:` / `chore:` / `docs:` / `style:`
+- コミット: `feat:` / `fix:` / `refactor:` / `test:` / `skill:` / `infra:`
 - `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
 - ブランチ: `feature/<issue-num>-<short-name>`
 - `git add -A` 禁止（ファイル名指定）
 - PR に `Closes #<issue-num>`
 - パスエイリアス: `@/*` → `./src/*`
 - Engine の import は `.js` 拡張子（ESM）
+
+## ラベル体系
+
+### ステータスラベル（`status/` prefix）— Engine 自動管理、排他的
+| ラベル | 意味 |
+|--------|------|
+| `status/todo` | Sortie 可能 |
+| `status/investigating` | 調査中 |
+| `status/planning` | 計画中 |
+| `status/implementing` | 実装中 |
+| `status/testing` | テスト中 |
+| `status/reviewing` | レビュー中 |
+| `status/acceptance-test` | 人間の承認待ち |
+| `status/merging` | マージ中 |
+| `status/blocked` | 依存関係で着手不可（Bridge が付与可） |
+
+### カテゴリラベル（`type/` prefix）— 人間または Bridge が付与
+| 優先順位 | ラベル | コミット prefix |
+|----------|--------|----------------|
+| 1 | `type/bug` | `fix:` |
+| 2 | `type/skill` | `skill:` |
+| 3 | `type/infra` | `infra:` |
+| 4 | `type/test` | `test:` |
+| 5 | `type/refactor` | `refactor:` |
+| 6 | `type/feature` | `feat:` |
