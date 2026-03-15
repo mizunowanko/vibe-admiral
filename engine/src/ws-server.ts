@@ -20,6 +20,7 @@ export class EngineServer {
   private bridgeManager: BridgeManager;
   private acceptanceWatcher: AcceptanceWatcher;
   private clients = new Set<WebSocket>();
+  private launchingBridges = new Set<string>();
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -202,10 +203,26 @@ export class EngineServer {
 
         // Bridge operations
         case "bridge:send": {
-          this.bridgeManager.send(
-            data.fleetId as string,
-            data.message as string,
-          );
+          const fleetId = data.fleetId as string;
+          const message = data.message as string;
+          if (
+            !this.bridgeManager.hasSession(fleetId) &&
+            !this.launchingBridges.has(fleetId)
+          ) {
+            this.launchingBridges.add(fleetId);
+            try {
+              const fleets = await this.loadFleets();
+              const fleet = fleets.find((f) => f.id === fleetId);
+              if (!fleet) {
+                throw new Error(`Fleet not found: ${fleetId}`);
+              }
+              // TODO: Use fleet-specific path once Fleet model has a basePath field
+              this.bridgeManager.launch(fleetId, process.cwd(), []);
+            } finally {
+              this.launchingBridges.delete(fleetId);
+            }
+          }
+          this.bridgeManager.send(fleetId, message);
           break;
         }
         case "bridge:history": {

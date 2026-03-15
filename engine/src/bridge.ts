@@ -35,6 +35,10 @@ export class BridgeManager {
     return bridgeId;
   }
 
+  hasSession(fleetId: string): boolean {
+    return this.sessions.has(fleetId);
+  }
+
   send(fleetId: string, message: string): boolean {
     const session = this.sessions.get(fleetId);
     if (!session) return false;
