@@ -192,7 +192,7 @@ async function createFleet(ws: WebSocket): Promise<string> {
   log("Creating fleet...");
   send(ws, {
     type: "fleet:create",
-    data: { name: "E2E Test Fleet", repos: [{ localPath: REPO_LOCAL_PATH }] },
+    data: { name: FLEET_NAME, repos: [{ localPath: REPO_LOCAL_PATH }] },
   });
 
   const fleetMsg = await waitForMessage(
@@ -488,20 +488,21 @@ async function main(): Promise<void> {
         log("Warning: WS-based fleet delete failed.");
       }
     }
-    if (!wsCleanupOk) {
-      await purgeTestFleets();
-    }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
     if (engine && !engine.killed) {
       engine.kill("SIGTERM");
-      // Give it a moment to clean up
       await sleep(2_000);
       if (!engine.killed) {
         engine.kill("SIGKILL");
       }
+    }
+
+    // File-based fallback after engine is dead to avoid race condition
+    if (!wsCleanupOk) {
+      await purgeTestFleets();
     }
     log("Done.");
   }
