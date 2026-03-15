@@ -3,7 +3,6 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
-const host = process.env.TAURI_DEV_HOST;
 const vitePort = parseInt(process.env.VITE_PORT ?? "1420", 10);
 
 export default defineConfig({
@@ -17,10 +16,5 @@ export default defineConfig({
   server: {
     port: vitePort,
     strictPort: true,
-    host: host || false,
-    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
-    watch: {
-      ignored: ["**/src-tauri/**"],
-    },
   },
 });

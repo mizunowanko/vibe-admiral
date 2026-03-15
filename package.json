@@ -7,16 +7,14 @@
     "engine"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"vite\" \"tsx watch engine/src/index.ts\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
     "test:e2e": "playwright test",
     "test:e2e:real": "tsx e2e/real-e2e.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
@@ -28,10 +26,10 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.0.0",
-    "@tauri-apps/cli": "^2.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
