@@ -96,9 +96,9 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
         </div>
       )}
 
-      {/* PR URL */}
-      {ship.prUrl && ship.status === "done" && (
-        <div className="mt-2 pt-2 border-t border-border">
+      {/* PR URL + Review Status */}
+      {ship.prUrl && (ship.status === "reviewing" || ship.status === "done") && (
+        <div className="mt-2 pt-2 border-t border-border flex items-center gap-2">
           <a
             href={ship.prUrl}
             target="_blank"
@@ -109,6 +109,15 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
             <ExternalLink className="h-3 w-3" />
             PR
           </a>
+          {ship.prReviewStatus === "pending" && (
+            <span className="text-[10px] text-orange-400">Bridge review pending</span>
+          )}
+          {ship.prReviewStatus === "approved" && (
+            <span className="text-[10px] text-green-400">Approved</span>
+          )}
+          {ship.prReviewStatus === "changes-requested" && (
+            <span className="text-[10px] text-red-400">Changes requested</span>
+          )}
         </div>
       )}
     </div>

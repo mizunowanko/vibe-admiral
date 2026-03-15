@@ -26,6 +26,8 @@ export class BridgeRequestHandler {
         return this.handleShipStatus(fleetId);
       case "ship-stop":
         return this.handleShipStop(request);
+      case "pr-review-result":
+        return this.handlePRReviewResult(request);
     }
   }
 
@@ -112,5 +114,22 @@ export class BridgeRequestHandler {
       return `[Ship Stopped] ${request.shipId}`;
     }
     return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
+  }
+
+  private handlePRReviewResult(
+    request: Extract<BridgeRequest, { request: "pr-review-result" }>,
+  ): string {
+    const ship = this.shipManager.getShip(request.shipId);
+    if (!ship) {
+      return `[PR Review Failed] Ship ${request.shipId} not found`;
+    }
+
+    this.shipManager.respondToPRReview(request.shipId, {
+      verdict: request.verdict,
+      comments: request.comments,
+    });
+
+    const label = request.verdict === "approve" ? "APPROVED" : "CHANGES REQUESTED";
+    return `[PR Review Result] Ship #${ship.issueNumber} PR #${request.prNumber}: ${label}${request.comments ? ` — ${request.comments}` : ""}`;
   }
 }

@@ -33,6 +33,9 @@ export interface Fleet {
   createdAt: string;
 }
 
+// === PR Review Status ===
+export type PRReviewStatus = "pending" | "approved" | "changes-requested";
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -45,6 +48,7 @@ export interface Ship {
   worktreePath: string;
   sessionId: string | null;
   prUrl: string | null;
+  prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   createdAt: string;

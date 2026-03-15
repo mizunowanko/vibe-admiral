@@ -33,6 +33,9 @@ export interface Fleet {
   createdAt: string;
 }
 
+// === PR Review Status ===
+export type PRReviewStatus = "pending" | "approved" | "changes-requested";
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -45,6 +48,7 @@ export interface Ship {
   worktreePath: string;
   sessionId: string | null;
   prUrl: string | null;
+  prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   createdAt: string;
@@ -113,7 +117,21 @@ export interface ServerMessage {
 export type BridgeRequest =
   | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | { request: "ship-status" }
-  | { request: "ship-stop"; shipId: string };
+  | { request: "ship-stop"; shipId: string }
+  | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string };
+
+// === PR Review Request (file-based IPC) ===
+export interface PRReviewRequest {
+  prNumber: number;
+  prUrl: string;
+  repo: string;
+}
+
+// === PR Review Response (file-based IPC) ===
+export interface PRReviewResponse {
+  verdict: "approve" | "request-changes";
+  comments?: string;
+}
 
 // === Ship Process Info ===
 export interface ShipProcess {
@@ -127,6 +145,7 @@ export interface ShipProcess {
   sessionId: string | null;
   status: ShipStatus;
   prUrl: string | null;
+  prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   createdAt: string;

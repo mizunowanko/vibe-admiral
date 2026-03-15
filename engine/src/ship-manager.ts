@@ -8,7 +8,8 @@ import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, ShipStatus, FleetSkillSources } from "./types.js";
+import { writeFile } from "node:fs/promises";
+import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,6 +91,7 @@ export class ShipManager {
       worktreePath,
       sessionId: null,
       prUrl: null,
+      prReviewStatus: null,
       acceptanceTest: null,
       acceptanceTestApproved: false,
       createdAt: new Date().toISOString(),
@@ -185,12 +187,21 @@ export class ShipManager {
     const currentIdx = phaseOrder.indexOf(ship.status);
 
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
+    const mergingIdx = phaseOrder.indexOf("merging");
     const tryAdvance = (target: ShipStatus): void => {
       const targetIdx = phaseOrder.indexOf(target);
       if (targetIdx > currentIdx) {
-        // Gate: block advancement past acceptance-test until human approves
+        // Gate: block advancement past reviewing until Bridge approves PR
+        // Check if the transition crosses the reviewing→merging boundary
         if (
-          currentIdx === acceptanceIdx &&
+          targetIdx >= mergingIdx &&
+          ship.prReviewStatus !== "approved"
+        ) {
+          return;
+        }
+        // Gate: block advancement past acceptance-test until human approves
+        // Check if the transition crosses the acceptance-test boundary
+        if (
           targetIdx > acceptanceIdx &&
           !ship.acceptanceTestApproved
         ) {
@@ -226,6 +237,8 @@ export class ShipManager {
           : "";
         if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
           tryAdvance("testing");
+        } else if (inputStr.includes("gh pr create")) {
+          tryAdvance("reviewing");
         } else if (inputStr.includes("gh pr merge")) {
           tryAdvance("merging");
         }
@@ -238,6 +251,27 @@ export class ShipManager {
         }
       }
     }
+  }
+
+  async respondToPRReview(
+    shipId: string,
+    response: PRReviewResponse,
+  ): Promise<void> {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+
+    ship.prReviewStatus = response.verdict === "approve" ? "approved" : "changes-requested";
+
+    // On request-changes, revert phase to implementing so Ship can fix
+    if (response.verdict === "request-changes") {
+      this.updateStatus(shipId, "implementing");
+    }
+
+    // Ensure .claude directory exists and write response file for Ship CLI
+    const claudeDir = join(ship.worktreePath, ".claude");
+    await mkdir(claudeDir, { recursive: true });
+    const responseFile = join(claudeDir, "pr-review-response.json");
+    await writeFile(responseFile, JSON.stringify(response, null, 2));
   }
 
   respondToAcceptanceTest(
