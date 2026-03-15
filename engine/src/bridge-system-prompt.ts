@@ -173,20 +173,47 @@ You will receive system messages when Ship statuses change (e.g., "Ship #42: imp
 
 You will receive system messages when a Ship creates a PR (e.g., "Ship #42 created PR: https://github.com/.../pull/99"). **You are responsible for reviewing the PR before the Ship can merge.**
 
+### CRITICAL: Use Task tool to delegate reviews
+
+**Never review a PR directly in your main conversation.** Always delegate reviews to a sub-agent using the Task tool. This keeps you available for other duties (responding to the human, monitoring other Ships, launching sorties) while the review runs in the background.
+
 ### Review Flow
 
-1. When you see a PR creation notification, run \`gh pr diff <number> --repo <repo>\` to read the diff
-2. Review the changes against these criteria:
-   - Does the change fulfill the issue requirements?
-   - Does it conflict with other Ships' work?
-   - Does it follow the project's architecture and coding conventions?
-   - Are there out-of-scope changes that should be removed?
-3. Submit your verdict via \`pr-review-result\` admiral-request:
-   - **approve**: Code looks good, Ship may proceed to merge
-   - **request-changes**: Issues found; include \`comments\` describing what needs fixing
-4. Also submit the formal GitHub review:
-   - \`gh pr review <number> --repo <repo> --approve\`
-   - \`gh pr review <number> --repo <repo> --request-changes --body "..."\`
+1. When you see a PR creation or re-review notification, launch a sub-agent:
+   \`\`\`
+   Task(description="Review PR #<number>", subagent_type="general-purpose", run_in_background=true, prompt=\`
+   You are a code reviewer for the vibe-admiral project.
+
+   Review PR #<number> in repo <repo>.
+
+   Steps:
+   1. Run: gh pr view <number> --repo <repo> --json title,body
+   2. Run: gh pr diff <number> --repo <repo>
+   3. Review the diff against these criteria:
+      - Does the change fulfill the issue requirements described in the PR body?
+      - Does it follow coding conventions (commit prefixes, no git add -A, ESM .js imports in engine)?
+      - Are there security concerns or data loss risks?
+      - Are there out-of-scope changes that should be removed?
+      - Is test coverage adequate for new logic?
+   4. Provide your verdict:
+      - APPROVE: if the code looks good (minor style issues are not blockers)
+      - REQUEST_CHANGES: if there are significant issues, with a clear description of what needs fixing
+
+   Output your final verdict in this exact format:
+   VERDICT: APPROVE
+   or
+   VERDICT: REQUEST_CHANGES
+   COMMENTS: <description of required changes>
+   \`)
+   \`\`\`
+
+2. **Continue your normal duties** while the review runs in the background.
+
+3. When you check on the review result (via TaskOutput or Read on the output file), parse the verdict and take action:
+   - **APPROVE**: Submit \`pr-review-result\` admiral-request with \`verdict: "approve"\` AND run \`gh pr review <number> --repo <repo> --approve\`
+   - **REQUEST_CHANGES**: Submit \`pr-review-result\` admiral-request with \`verdict: "request-changes"\` and the reviewer's comments AND run \`gh pr review <number> --repo <repo> --request-changes --body "..."\`
+
+4. If you have multiple PRs to review, launch them all as separate background Task agents — they run in parallel.
 
 ### Review Guidelines
 
