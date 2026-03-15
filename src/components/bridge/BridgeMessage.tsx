@@ -24,6 +24,12 @@ function stripCodeFences(text: string): string {
   return text.replace(/```\w*\n?/g, "").trim();
 }
 
+function formatTime(ts?: number): string | null {
+  if (!ts) return null;
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 function getStatusColor(content: string): string {
   for (const [status, color] of Object.entries(STATUS_COLORS)) {
     if (content.includes(`: ${status}`)) return color;
@@ -182,6 +188,11 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
         <p className="whitespace-pre-wrap break-words">
           {stripCodeFences(message.content ?? "")}
         </p>
+        {message.timestamp && (
+          <span className="block text-[10px] text-muted-foreground/60 mt-1 text-right">
+            {formatTime(message.timestamp)}
+          </span>
+        )}
       </div>
     </div>
   );

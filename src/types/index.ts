@@ -63,6 +63,7 @@ export interface StreamMessage {
   content?: string;
   tool?: string;
   subtype?: string;
+  timestamp?: number;
 }
 
 // === WebSocket Messages: Frontend → Engine ===

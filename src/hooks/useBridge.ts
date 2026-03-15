@@ -28,7 +28,7 @@ export function useBridge(fleetId: string | null) {
             }
           } else {
             setIsLoading(false);
-            setMessages((prev) => [...prev, data.message]);
+            setMessages((prev) => [...prev, { ...data.message, timestamp: data.message.timestamp ?? Date.now() }]);
           }
         }
       }
@@ -42,7 +42,7 @@ export function useBridge(fleetId: string | null) {
           setIsLoading(false);
           setMessages((prev) => [
             ...prev,
-            { type: "error", content: errorData.message },
+            { type: "error", content: errorData.message, timestamp: Date.now() },
           ]);
         }
       }
@@ -59,7 +59,7 @@ export function useBridge(fleetId: string | null) {
       if (!fleetId) return;
       setMessages((prev) => [
         ...prev,
-        { type: "user", content: message },
+        { type: "user", content: message, timestamp: Date.now() },
       ]);
       setIsLoading(true);
       wsClient.send({ type: "bridge:send", data: { fleetId, message } });
