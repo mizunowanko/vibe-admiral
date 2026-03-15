@@ -499,7 +499,21 @@ export class EngineServer {
   private async loadFleets(): Promise<Fleet[]> {
     try {
       const content = await readFile(FLEETS_FILE, "utf-8");
-      return JSON.parse(content) as Fleet[];
+      const parsed = JSON.parse(content) as Fleet[];
+      let migrated = false;
+      for (const fleet of parsed) {
+        if (fleet.repos?.length > 0 && typeof fleet.repos[0] === "string") {
+          fleet.repos = (fleet.repos as unknown as string[]).map((remote) => ({
+            localPath: "",
+            remote,
+          }));
+          migrated = true;
+        }
+      }
+      if (migrated) {
+        await this.saveFleets(parsed);
+      }
+      return parsed;
     } catch {
       return [];
     }
