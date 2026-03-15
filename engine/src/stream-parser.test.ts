@@ -70,6 +70,22 @@ describe("parseStreamMessage", () => {
       });
       expect(result).toEqual({ type: "tool_result", content: "valid" });
     });
+
+    it("returns null when content is an empty string", () => {
+      const result = parseStreamMessage({
+        type: "tool_result",
+        content: "",
+      });
+      expect(result).toBeNull();
+    });
+
+    it("returns null when content is a non-string, non-array value", () => {
+      const result = parseStreamMessage({
+        type: "tool_result",
+        content: 42,
+      });
+      expect(result).toBeNull();
+    });
   });
 
   // === assistant ===
@@ -213,6 +229,35 @@ describe("parseStreamMessage", () => {
         },
       });
       expect(result).not.toHaveProperty("toolUseId");
+    });
+
+    it("uses only the first tool_use block when multiple are present", () => {
+      const result = parseStreamMessage({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "tu_first",
+              name: "Read",
+              input: { file_path: "/first" },
+            },
+            {
+              type: "tool_use",
+              id: "tu_second",
+              name: "Write",
+              input: { file_path: "/second" },
+            },
+          ],
+        },
+      });
+      expect(result).toEqual({
+        type: "tool_use",
+        tool: "Read",
+        content: JSON.stringify({ file_path: "/first" }, null, 2),
+        toolInput: { file_path: "/first" },
+        toolUseId: "tu_first",
+      });
     });
   });
 
