@@ -160,36 +160,45 @@ export class ShipManager {
 
   updatePhaseFromStream(
     id: string,
-    msg: Record<string, unknown>,
+    msg: { type: string; content?: string; tool?: string; toolInput?: Record<string, unknown> },
   ): void {
-    // Detect phase from stream-json output patterns
-    const type = msg.type as string | undefined;
-    const content = (msg.content as string) ?? "";
-    const tool = (msg.tool as string) ?? "";
+    // Detect phase from parsed stream message
+    const type = msg.type;
+    const content = msg.content ?? "";
+    const tool = msg.tool ?? "";
 
     if (type === "assistant") {
-      if (content.includes("EnterPlanMode") || tool === "EnterPlanMode") {
+      if (content.includes("EnterPlanMode")) {
         this.updateStatus(id, "planning");
-      } else if (content.includes("ExitPlanMode") || tool === "ExitPlanMode") {
+      } else if (content.includes("ExitPlanMode")) {
         this.updateStatus(id, "implementing");
       }
     }
 
-    if (type === "tool_use" || type === "tool_result") {
-      if (tool === "Edit" || tool === "Write") {
+    if (type === "tool_use") {
+      if (tool === "EnterPlanMode") {
+        this.updateStatus(id, "planning");
+      } else if (tool === "ExitPlanMode") {
+        this.updateStatus(id, "implementing");
+      } else if (tool === "Edit" || tool === "Write") {
         this.updateStatus(id, "implementing");
       } else if (tool === "Bash") {
-        const toolInput = msg.input as string | undefined;
-        if (toolInput?.includes("npm test") || toolInput?.includes("vitest")) {
+        const inputStr = msg.toolInput
+          ? JSON.stringify(msg.toolInput)
+          : "";
+        if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
           this.updateStatus(id, "testing");
         } else if (
-          toolInput?.includes("gh pr create") ||
-          toolInput?.includes("gh pr merge")
+          inputStr.includes("gh pr create") ||
+          inputStr.includes("gh pr merge")
         ) {
           this.updateStatus(id, "merging");
         }
       } else if (tool === "Skill" || tool === "Task") {
-        if (content.includes("review-pr")) {
+        const inputStr = msg.toolInput
+          ? JSON.stringify(msg.toolInput)
+          : content;
+        if (inputStr.includes("review-pr")) {
           this.updateStatus(id, "reviewing");
         }
       }

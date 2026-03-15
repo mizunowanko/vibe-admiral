@@ -133,12 +133,16 @@ export class EngineServer {
           }
         }
       } else {
-        // Ship stream
-        this.shipManager.updatePhaseFromStream(id, msg);
-        this.broadcast({
-          type: "ship:stream",
-          data: { id, message: msg },
-        });
+        // Ship stream — parse raw CLI JSON before broadcast
+        const parsed = parseStreamMessage(msg);
+        if (parsed) {
+          this.shipManager.updatePhaseFromStream(id, parsed);
+          this.logShipMessage(id, parsed);
+          this.broadcast({
+            type: "ship:stream",
+            data: { id, message: parsed },
+          });
+        }
       }
     });
 
@@ -582,6 +586,52 @@ export class EngineServer {
 
     // Send batched results to Bridge stdin as a single message
     this.processManager.sendMessage(bridgeId, results.join("\n\n"));
+  }
+
+  private logShipMessage(
+    id: string,
+    msg: import("./types.js").StreamMessage,
+  ): void {
+    const ship = this.shipManager.getShip(id);
+    const prefix = ship
+      ? `[Ship#${ship.issueNumber}]`
+      : `[Ship:${id.slice(0, 8)}]`;
+    const verbose = process.env.SHIP_LOG_VERBOSE === "true";
+    const maxLen = verbose ? 1000 : 150;
+
+    switch (msg.type) {
+      case "assistant": {
+        if (!msg.content) break;
+        const preview =
+          msg.content.length > maxLen
+            ? msg.content.slice(0, maxLen) + "..."
+            : msg.content;
+        console.log(`${prefix} ${preview}`);
+        break;
+      }
+      case "tool_use": {
+        const inputSummary = msg.toolInput
+          ? ` ${JSON.stringify(msg.toolInput).slice(0, 80)}`
+          : "";
+        console.log(`${prefix} [${msg.tool}]${inputSummary}`);
+        break;
+      }
+      case "result": {
+        if (!msg.content) break;
+        const resultPreview =
+          msg.content.length > maxLen
+            ? msg.content.slice(0, maxLen) + "..."
+            : msg.content;
+        console.log(`${prefix} [result] ${resultPreview}`);
+        break;
+      }
+      case "system": {
+        if (msg.content) {
+          console.log(`${prefix} [system] ${msg.content.slice(0, maxLen)}`);
+        }
+        break;
+      }
+    }
   }
 
   shutdown(): void {

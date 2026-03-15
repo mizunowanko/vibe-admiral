@@ -244,10 +244,12 @@ export function parseStreamMessage(
 
       if (toolUses.length > 0) {
         const toolName = toolUses[0]?.name ?? "tool";
+        const toolInput = toolUses[0]?.input;
         return {
           type: "tool_use",
           tool: toolName,
           content: toolName,
+          ...(toolInput ? { toolInput } : {}),
         };
       }
 
