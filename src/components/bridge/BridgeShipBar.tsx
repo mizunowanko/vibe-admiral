@@ -3,7 +3,7 @@ import type { ShipStatus } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { cn, isSafeUrl } from "@/lib/utils";
 import { Square, ExternalLink } from "lucide-react";
 
 const STATUS_CONFIG: Record<
@@ -92,15 +92,21 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                 {/* Acceptance test action */}
                 {ship.status === "acceptance-test" && ship.acceptanceTest && (
                   <div className="mt-1.5 pt-1.5 border-t border-border flex items-center gap-2">
-                    <a
-                      href={ship.acceptanceTest.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline inline-flex items-center gap-0.5"
-                    >
-                      <ExternalLink className="h-2.5 w-2.5" />
-                      Test
-                    </a>
+                    {isSafeUrl(ship.acceptanceTest.url) ? (
+                      <a
+                        href={ship.acceptanceTest.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5"
+                      >
+                        <ExternalLink className="h-2.5 w-2.5" />
+                        Test
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {ship.acceptanceTest.url}
+                      </span>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
