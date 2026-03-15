@@ -34,7 +34,7 @@ Set `VIBE_ADMIRAL=true` for all Ship and session resume processes. This signals 
 
 ## Exit Code 0 Does Not Guarantee Success
 
-A Ship process may exit with code 0 even on errors (e.g., "Unknown skill"). The Engine checks whether the Ship reached a late phase (merging, testing) before marking success. Early-phase exits are treated as errors.
+A Ship process may exit with code 0 even on errors (e.g., "Unknown skill"). The Engine checks whether the Ship reached the merging phase before marking success. Early-phase exits are treated as errors.
 
 ## stream-json Output Parsing
 
