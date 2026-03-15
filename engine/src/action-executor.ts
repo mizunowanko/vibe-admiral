@@ -66,7 +66,9 @@ export class ActionExecutor {
     const results: string[] = [];
     for (const req of action.requests) {
       try {
-        const repoEntry = fleetRepos.find((r) => r.remote === req.repo);
+        const repoEntry = fleetRepos.find(
+          (r) => r.remote === req.repo || r.localPath === req.repo,
+        );
         if (!repoEntry) {
           results.push(
             `Failed to launch ${req.repo}#${req.issueNumber}: No local path registered for repo "${req.repo}"`,

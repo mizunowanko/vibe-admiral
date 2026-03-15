@@ -1,6 +1,6 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { join, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -384,8 +384,9 @@ export class EngineServer {
         case "ship:sortie": {
           const fleets = await this.loadFleets();
           const fleet = fleets.find((f) => f.id === (data.fleetId as string));
+          const repoStr = data.repo as string;
           const repoEntry = fleet?.repos.find(
-            (r) => r.remote === (data.repo as string),
+            (r) => r.remote === repoStr || r.localPath === repoStr,
           );
           if (!repoEntry) {
             throw new Error(
@@ -517,9 +518,20 @@ export class EngineServer {
     }
   }
 
+  private async validateLocalPath(localPath: string): Promise<void> {
+    if (!isAbsolute(localPath)) {
+      throw new Error(`localPath must be absolute: "${localPath}"`);
+    }
+    const s = await stat(localPath).catch(() => null);
+    if (!s?.isDirectory()) {
+      throw new Error(`localPath is not a directory: "${localPath}"`);
+    }
+  }
+
   private async enrichRepos(repos: FleetRepo[]): Promise<FleetRepo[]> {
     return Promise.all(
       repos.map(async (repo) => {
+        await this.validateLocalPath(repo.localPath);
         if (repo.remote) return repo;
         const remote = await this.resolveRemote(repo.localPath);
         return remote ? { ...repo, remote } : repo;
