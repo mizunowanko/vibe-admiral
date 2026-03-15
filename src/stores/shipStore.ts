@@ -133,18 +133,8 @@ export const useShipStore = create<ShipState>((set) => ({
     set((state) => {
       const ships = new Map(state.ships);
       for (const s of shipList) {
-        const existing = ships.get(s.id);
-        if (!existing) {
-          ships.set(s.id, s);
-        } else {
-          // Merge: keep local status (may be more recent), but prefer
-          // server's acceptanceTest data when the local value is null
-          ships.set(s.id, {
-            ...s,
-            ...existing,
-            acceptanceTest: existing.acceptanceTest ?? s.acceptanceTest,
-          });
-        }
+        // Server is the source of truth — always prefer server state.
+        ships.set(s.id, s);
       }
       return { ships };
     });
@@ -167,28 +157,13 @@ export const useShipStore = create<ShipState>((set) => ({
 
   acceptTest: (id) => {
     wsClient.send({ type: "ship:accept", data: { id } });
-    // Optimistic update: clear acceptance test and show merging status
-    set((state) => {
-      const ships = new Map(state.ships);
-      const ship = ships.get(id);
-      if (ship) {
-        ships.set(id, { ...ship, acceptanceTest: null, status: "merging" });
-      }
-      return { ships };
-    });
+    // No optimistic update — Engine confirms status via ship:status message
+    // after GitHub label sync succeeds (transactional status transition).
   },
 
   rejectTest: (id, feedback) => {
     wsClient.send({ type: "ship:reject", data: { id, feedback } });
-    // Optimistic update: clear acceptance test and show implementing status
-    set((state) => {
-      const ships = new Map(state.ships);
-      const ship = ships.get(id);
-      if (ship) {
-        ships.set(id, { ...ship, acceptanceTest: null, status: "implementing" });
-      }
-      return { ships };
-    });
+    // No optimistic update — Engine confirms status via ship:status message.
   },
 
   stopShip: (id) => {

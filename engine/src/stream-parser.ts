@@ -1,4 +1,4 @@
-import type { StreamMessage, BridgeRequest } from "./types.js";
+import type { StreamMessage, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -110,7 +110,19 @@ export function parseStreamMessage(
 const REQUEST_BLOCK_RE = /```admiral-request\n([\s\S]*?)```/g;
 const REPO_PATTERN_REQ = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
-function validateRequest(obj: unknown): BridgeRequest | null {
+/** Valid statuses that Ship can request via status-transition. */
+const TRANSITION_TARGETS: ReadonlySet<ShipStatus> = new Set([
+  "investigating",
+  "planning",
+  "implementing",
+  "testing",
+  "reviewing",
+  "acceptance-test",
+  "merging",
+  "done",
+]);
+
+function validateRequest(obj: unknown): AdmiralRequest | null {
   if (typeof obj !== "object" || obj === null) return null;
   const r = obj as Record<string, unknown>;
   const req = r.request;
@@ -156,16 +168,23 @@ function validateRequest(obj: unknown): BridgeRequest | null {
       return result;
     }
 
+    case "status-transition": {
+      const status = r.status as string | undefined;
+      if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;
+      return { request: "status-transition", status: status as ShipStatus };
+    }
+
     default:
       return null;
   }
 }
 
 /**
- * Extract BridgeRequest objects from ```admiral-request ... ``` fenced blocks.
+ * Extract AdmiralRequest objects from ```admiral-request ... ``` fenced blocks.
+ * Returns both BridgeRequest and ShipRequest types — callers must filter by source.
  */
-export function extractRequests(text: string): BridgeRequest[] {
-  const requests: BridgeRequest[] = [];
+export function extractRequests(text: string): AdmiralRequest[] {
+  const requests: AdmiralRequest[] = [];
   let match: RegExpExecArray | null;
   while ((match = REQUEST_BLOCK_RE.exec(text)) !== null) {
     try {
@@ -178,6 +197,16 @@ export function extractRequests(text: string): BridgeRequest[] {
   }
   REQUEST_BLOCK_RE.lastIndex = 0;
   return requests;
+}
+
+/** Type guard: check if a request is a Bridge-only request. */
+export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
+  return req.request !== "status-transition";
+}
+
+/** Type guard: check if a request is a Ship request. */
+export function isShipRequest(req: AdmiralRequest): req is ShipRequest {
+  return req.request === "status-transition";
 }
 
 /**

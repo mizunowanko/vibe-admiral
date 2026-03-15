@@ -74,21 +74,39 @@ echo "${VIBE_ADMIRAL:-not_set}"
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
 
-## フェーズ宣言
+## ステータス遷移（admiral-request プロトコル）
 
-Ship は自分の現在フェーズを `.claude/ship-status.json` に書き込むことで Engine に通知する。
-Engine はこのファイルを監視し、GitHub Issue のステータスラベルを自動更新する。
+**`VIBE_ADMIRAL` 設定時のみ有効。**
+Ship はステータス遷移を admiral-request ブロックで Engine に表明する。
+Engine は GitHub ラベル更新に成功した場合のみ遷移を確定し、結果を `.claude/admiral-request-response.json` に書き込む。
 
-**各ステップの冒頭で、対応するフェーズを宣言すること:**
+### 遷移の表明手順
+
+**各ステップの冒頭で**、以下のコードブロックを assistant テキストとして出力する:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "<phase-name>" }
+```
+````
+
+出力後、Engine からのレスポンスを確認する:
 
 ```bash
-cat > .claude/ship-status.json << 'STATUSEOF'
-{"phase": "<phase-name>"}
-STATUSEOF
+# Wait for Engine response
+while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
+RESPONSE=$(cat .claude/admiral-request-response.json)
+rm -f .claude/admiral-request-response.json
+echo "$RESPONSE"
 ```
 
-| Step | フェーズ (`phase`) |
-|------|-------------------|
+- `ok: true` → 遷移確定、次の作業に進む
+- `ok: false` → `error` フィールドを確認して対処
+
+### ステップ対応表
+
+| Step | ステータス (`status`) |
+|------|---------------------|
 | 3 (調査) | `investigating` |
 | 4 (計画) | `planning` |
 | 5 (実装) | `implementing` |
@@ -97,6 +115,11 @@ STATUSEOF
 | 9 (コミット & PR) | `reviewing` |
 | 11 (受け入れテスト) | `acceptance-test` |
 | 15 (マージ) | `merging` |
+| 15.5 (完了) | `done` |
+
+### `VIBE_ADMIRAL` 未設定時
+
+admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。
 
 ## ワークフロー
 
@@ -372,7 +395,21 @@ gh pr merge "$PR_NUM" --squash
 
 - マージ後に `already used by worktree` エラーが出ても、`gh pr view --json state --jq '.state'` が `MERGED` なら無視してよい
 
-### Step 15.5: 掃除
+### Step 15.5: 完了表明と掃除
+
+**`VIBE_ADMIRAL` 設定時**: まず `done` ステータスを表明する:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "done" }
+```
+````
+
+```bash
+while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
+cat .claude/admiral-request-response.json
+rm -f .claude/admiral-request-response.json
+```
 
 1. workflow-state.json の削除:
    ```bash

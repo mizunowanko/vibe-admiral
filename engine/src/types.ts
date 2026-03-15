@@ -123,6 +123,19 @@ export type BridgeRequest =
   | { request: "ship-stop"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string };
 
+// === Ship Requests (Ship → Engine via admiral-request) ===
+export type ShipRequest =
+  | { request: "status-transition"; status: ShipStatus };
+
+// === Admiral Request (union of Bridge + Ship requests) ===
+export type AdmiralRequest = BridgeRequest | ShipRequest;
+
+// === Admiral Request Response (file-based IPC: Ship ← Engine) ===
+export interface AdmiralRequestResponse {
+  ok: boolean;
+  error?: string;
+}
+
 // === PR Review Request (file-based IPC) ===
 export interface PRReviewRequest {
   prNumber: number;
