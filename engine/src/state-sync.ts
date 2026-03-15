@@ -18,7 +18,7 @@ export class StateSync {
 
   /**
    * Pre-sortie validation: check for duplicate ships, existing worktrees,
-   * and doing labels that indicate an issue is already in progress.
+   * and status/* labels that indicate an issue is already in progress.
    */
   async sortieGuard(
     repo: string,
@@ -33,12 +33,12 @@ export class StateSync {
       };
     }
 
-    // 2. Check if issue already has "doing" status
+    // 2. Check if issue already has an active status (not status/todo)
     try {
       if (await this.statusManager.isDoing(repo, issueNumber)) {
         return {
           ok: false,
-          reason: `Issue #${issueNumber} already has the "doing" label`,
+          reason: `Issue #${issueNumber} already has an active status label`,
         };
       }
     } catch (err) {
@@ -52,7 +52,7 @@ export class StateSync {
   }
 
   /**
-   * Rollback issue status from "doing" to "todo" via StatusManager.
+   * Rollback issue status to "status/todo" via StatusManager.
    */
   async rollbackLabel(
     repo: string,
@@ -127,7 +127,7 @@ export class StateSync {
   }
 
   /**
-   * Startup reconciliation: audit "doing" labels and orphan worktrees.
+   * Startup reconciliation: audit active status/* labels and orphan worktrees.
    * Called once when Engine starts.
    */
   async reconcileOnStartup(
@@ -140,20 +140,33 @@ export class StateSync {
     for (const repo of repos) {
       if (!repo.remote) continue;
 
-      // 1. Audit "doing" labels: if no active Ship, roll back to "todo"
+      // 1. Audit active status/* labels: if no active Ship, roll back to "status/todo"
+      // Note: "status/blocked" is excluded — it is set manually by Bridge/human
+      // to indicate dependency blocks and should persist across Engine restarts.
+      const activeStatusLabels = [
+        "status/investigating",
+        "status/planning",
+        "status/implementing",
+        "status/testing",
+        "status/reviewing",
+        "status/acceptance-test",
+        "status/merging",
+      ];
       try {
-        const doingIssues = await github.listIssues(repo.remote, "doing");
-        for (const issue of doingIssues) {
-          if (!activeIssues.includes(issue.number)) {
-            console.warn(
-              `[state-sync] Orphan "doing" label on #${issue.number} — rolling back to "todo"`,
-            );
-            await this.rollbackLabel(repo.remote, issue.number);
+        for (const label of activeStatusLabels) {
+          const labeledIssues = await github.listIssues(repo.remote, label);
+          for (const issue of labeledIssues) {
+            if (!activeIssues.includes(issue.number)) {
+              console.warn(
+                `[state-sync] Orphan "${label}" label on #${issue.number} — rolling back to "status/todo"`,
+              );
+              await this.rollbackLabel(repo.remote, issue.number);
+            }
           }
         }
       } catch (err) {
         console.warn(
-          `[state-sync] Failed to audit "doing" labels for ${repo.remote}:`,
+          `[state-sync] Failed to audit status labels for ${repo.remote}:`,
           err,
         );
       }
