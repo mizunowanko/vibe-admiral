@@ -10,8 +10,8 @@ export interface UnblockedIssue extends Issue {
  * Issues with priority/critical override this entirely and come first.
  */
 const TYPE_PRIORITY_ORDER: string[] = [
-  "type/bug",
   "type/skill",
+  "type/bug",
   "type/infra",
   "type/test",
   "type/refactor",
@@ -21,7 +21,7 @@ const TYPE_PRIORITY_ORDER: string[] = [
 /**
  * Sort issues by sortie priority:
  * 1. priority/critical issues first (regardless of type)
- * 2. Remaining sorted by type label priority (bug > skill > infra > test > refactor > feature)
+ * 2. Remaining sorted by type label priority (skill > bug > infra > test > refactor > feature)
  * 3. Issues without a recognized type label come last
  * 4. Stable sort within same tier (preserves original order, typically issue number ascending)
  */

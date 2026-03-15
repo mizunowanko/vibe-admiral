@@ -106,8 +106,8 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 ### カテゴリラベル（`type/` prefix）— 人間または Bridge が付与
 | 優先順位 | ラベル | コミット prefix |
 |----------|--------|----------------|
-| 1 | `type/bug` | `fix:` |
-| 2 | `type/skill` | `skill:` |
+| 1 | `type/skill` | `skill:` |
+| 2 | `type/bug` | `fix:` |
 | 3 | `type/infra` | `infra:` |
 | 4 | `type/test` | `test:` |
 | 5 | `type/refactor` | `refactor:` |
