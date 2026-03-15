@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
+import { Settings, Plus, Trash2, X } from "lucide-react";
 import type { FleetRepo } from "@/types";
 
 export function FleetSettings() {
@@ -37,18 +37,6 @@ export function FleetSettings() {
     if (!trimmed || repos.some((r) => r.localPath === trimmed)) return;
     setRepos([...repos, { localPath: trimmed }]);
     setNewRepoPath("");
-  };
-
-  const handleBrowse = async () => {
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected === "string") {
-        setNewRepoPath(selected);
-      }
-    } catch {
-      // Not in Tauri environment — ignore
-    }
   };
 
   const handleRemoveRepo = (localPath: string) => {
@@ -119,15 +107,6 @@ export function FleetSettings() {
                     if (e.key === "Enter") handleAddRepo();
                   }}
                 />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={handleBrowse}
-                  title="Browse..."
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
                 <Button
                   variant="outline"
                   size="sm"
