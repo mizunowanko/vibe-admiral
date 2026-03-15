@@ -49,14 +49,17 @@ export class ProcessManager extends EventEmitter {
   ): ChildProcess {
     const args = [
       "-p",
-      systemPrompt ?? "",
+      "",
       "--input-format",
       "stream-json",
       "--output-format",
       "stream-json",
       "--verbose",
-      "--permission-mode",
-      "plan",
+      "--allowedTools",
+      "Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      ...(systemPrompt
+        ? ["--append-system-prompt", systemPrompt]
+        : []),
       ...additionalDirs.flatMap((d) => ["--add-dir", d]),
     ];
 
