@@ -84,7 +84,7 @@ Never rely on body alone — a later comment may override or refine the original
 When the user asks you to start implementation:
 
 1. Run \`gh issue list --label status/todo\` to get ready issues
-2. For each issue, read body AND comments (\`gh issue view <number> --json number,title,body,labels,state,comments\`) to check dependencies, priority overrides, and any human decisions
+2. For each issue, read body AND comments (\`gh issue view <number> --json number,title,body,labels,state,comments\`) to check dependencies (sub-issues via GraphQL, "## Dependencies" section in body), priority overrides, and any human decisions
 3. Identify which issues are UNBLOCKED and labeled "status/todo"
 4. Apply Sortie Priority Rules to determine the recommended sortie order
 5. Explain your analysis to the human (which issues are ready, which are blocked and why, and the proposed priority order)
@@ -129,14 +129,14 @@ When the user asks you to start implementation:
 | 6 | \`type/feature\` | New features |
 
 ### Priority Label Override
-Issues with the \`priority\` label override base type priority and are sorted first regardless of type.
+Issues with the \`priority/critical\` label override base type priority and are sorted first regardless of type. Only humans may apply this label — Bridge may propose it but must not add it directly.
 
 ### Dependency Constraint
 Within the same priority tier, sortie unblocked issues first (those with no pending dependencies).
 
 ### Decision Flow
 1. Collect all \`status/todo\` issues
-2. Separate issues with \`priority\` label (these come first regardless of type)
+2. Separate issues with \`priority/critical\` label (these come first regardless of type)
 3. Sort remaining issues by base type priority
 4. Within each tier, filter to unblocked issues only
 5. Propose the ordered list to the human → sortie after approval
