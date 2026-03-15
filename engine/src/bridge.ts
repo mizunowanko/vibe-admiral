@@ -59,8 +59,12 @@ export class BridgeManager {
 
     const bridgeId = `bridge-${fleetId}`;
 
-    // Store user message in history
-    session.history.push({ type: "user", content: message });
+    // Store user message in history (include image count, not full data, to limit memory)
+    const historyEntry: StreamMessage = { type: "user", content: message };
+    if (images && images.length > 0) {
+      historyEntry.imageCount = images.length;
+    }
+    session.history.push(historyEntry);
 
     // If process died, re-launch it
     if (!this.processManager.isRunning(bridgeId)) {

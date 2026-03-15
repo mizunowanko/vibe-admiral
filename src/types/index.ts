@@ -87,6 +87,7 @@ export interface StreamMessage {
   timestamp?: number;
   toolUseId?: string;
   images?: ImageAttachment[];
+  imageCount?: number;
 }
 
 // === Image Attachment ===

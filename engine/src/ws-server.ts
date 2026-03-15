@@ -357,7 +357,13 @@ export class EngineServer {
         case "bridge:send": {
           const fleetId = data.fleetId as string;
           const message = data.message as string;
-          const images = data.images as Array<{ base64: string; mediaType: string }> | undefined;
+          const rawImages = data.images as Array<{ base64: string; mediaType: string }> | undefined;
+          const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+          const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB base64 (~3.75 MB raw)
+          const MAX_IMAGES = 10;
+          const images = rawImages
+            ?.filter((img) => ALLOWED_MEDIA.has(img.mediaType) && img.base64.length <= MAX_IMAGE_SIZE)
+            .slice(0, MAX_IMAGES);
           if (
             !this.bridgeManager.hasSession(fleetId) &&
             !this.launchingBridges.has(fleetId)

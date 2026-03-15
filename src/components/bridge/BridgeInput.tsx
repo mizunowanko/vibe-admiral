@@ -22,6 +22,9 @@ const ACCEPTED_TYPES = new Set([
 
 type ImageMediaType = ImageAttachment["mediaType"];
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image
+const MAX_IMAGES = 10;
+
 function fileToAttachment(file: File): Promise<ImageAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -70,10 +73,12 @@ export function BridgeInput({
   }, [value, resetHeight]);
 
   const addImages = useCallback(async (files: File[]) => {
-    const valid = files.filter((f) => ACCEPTED_TYPES.has(f.type));
+    const valid = files.filter(
+      (f) => ACCEPTED_TYPES.has(f.type) && f.size <= MAX_IMAGE_BYTES,
+    );
     if (valid.length === 0) return;
     const attachments = await Promise.all(valid.map(fileToAttachment));
-    setImages((prev) => [...prev, ...attachments]);
+    setImages((prev) => [...prev, ...attachments].slice(0, MAX_IMAGES));
   }, []);
 
   const removeImage = useCallback((index: number) => {

@@ -237,6 +237,11 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
             ))}
           </div>
         )}
+        {isUser && !message.images && message.imageCount && message.imageCount > 0 && (
+          <span className="text-xs text-primary-foreground/60 block mb-1">
+            {message.imageCount} image{message.imageCount > 1 ? "s" : ""} attached
+          </span>
+        )}
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : (
