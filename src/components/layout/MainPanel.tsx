@@ -6,9 +6,9 @@ import { FleetSettings } from "@/components/fleet/FleetSettings";
 
 export function MainPanel() {
   const mainView = useUIStore((s) => s.mainView);
-  const selectedFleet = useFleetStore((s) => s.selectedFleet);
+  const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
 
-  if (!selectedFleet && mainView !== "fleet-settings") {
+  if (!selectedFleetId && mainView !== "fleet-settings") {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
         <div className="text-center">
@@ -23,9 +23,9 @@ export function MainPanel() {
 
   switch (mainView) {
     case "bridge":
-      return <Bridge fleetId={selectedFleet?.id ?? null} />;
+      return <Bridge fleetId={selectedFleetId} />;
     case "ships":
-      return <ShipGrid fleetId={selectedFleet?.id ?? null} />;
+      return <ShipGrid fleetId={selectedFleetId} />;
     case "fleet-settings":
       return <FleetSettings />;
     default:
