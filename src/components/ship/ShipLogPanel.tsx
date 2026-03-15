@@ -1,5 +1,6 @@
 import { useRef, useEffect, useMemo, useCallback } from "react";
 import { useShip } from "@/hooks/useShip";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ const LOG_TAIL_LIMIT = 100;
 export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
   const { ship, logs } = useShip(shipId);
   const scrollRef = useRef<HTMLDivElement>(null);
+  useEscapeKey(onClose);
   const isAtBottomRef = useRef(true);
 
   const tailLogs = useMemo(

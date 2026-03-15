@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
 import { useShip } from "@/hooks/useShip";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { AcceptanceTestBanner } from "./AcceptanceTestBanner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ interface ShipDetailProps {
 export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
   const { ship, logs } = useShip(shipId);
   const scrollRef = useRef<HTMLDivElement>(null);
+  useEscapeKey(onClose);
 
   useEffect(() => {
     if (scrollRef.current) {
