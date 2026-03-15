@@ -19,6 +19,11 @@ const STATUS_COLORS: Record<string, string> = {
   error: "text-red-400",
 };
 
+/** Strip code fence markers (```lang / ```) while keeping inner content. */
+function stripCodeFences(text: string): string {
+  return text.replace(/```\w*\n?/g, "").trim();
+}
+
 function getStatusColor(content: string): string {
   for (const [status, color] of Object.entries(STATUS_COLORS)) {
     if (content.includes(`: ${status}`)) return color;
@@ -175,7 +180,7 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
           </span>
         )}
         <p className="whitespace-pre-wrap break-words">
-          {message.content ?? ""}
+          {stripCodeFences(message.content ?? "")}
         </p>
       </div>
     </div>
