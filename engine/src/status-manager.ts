@@ -43,7 +43,7 @@ export class StatusManager {
 
   /**
    * Transition an issue from one status to another.
-   * Validates the transition and updates GitHub labels atomically.
+   * Validates the transition and updates GitHub labels.
    */
   async transition(
     repo: string,
