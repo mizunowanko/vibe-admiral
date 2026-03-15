@@ -54,6 +54,7 @@ export interface StreamMessage {
   type: string;
   content?: string;
   tool?: string;
+  toolInput?: Record<string, unknown>;
   subtype?: string;
   [key: string]: unknown;
 }

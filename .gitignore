@@ -15,6 +15,9 @@ engine/dist/
 .vscode/
 .idea/
 
+# Test
+test-results/
+
 # Environment
 .env
 .env.*
