@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
+import { getStatusColor } from "@/lib/ship-status";
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -19,30 +20,10 @@ interface BridgeMessageProps {
   repeatCount?: number;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  sortie: "text-yellow-400",
-  investigating: "text-blue-400",
-  planning: "text-indigo-400",
-  implementing: "text-violet-400",
-  testing: "text-cyan-400",
-  reviewing: "text-orange-400",
-  "acceptance-test": "text-amber-400",
-  merging: "text-emerald-400",
-  done: "text-green-400",
-  error: "text-red-400",
-};
-
 function formatTime(ts?: number): string | null {
   if (!ts) return null;
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function getStatusColor(content: string): string {
-  for (const [status, color] of Object.entries(STATUS_COLORS)) {
-    if (content.includes(`: ${status}`)) return color;
-  }
-  return "text-muted-foreground";
 }
 
 export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
