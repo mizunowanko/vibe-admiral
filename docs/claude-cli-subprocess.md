@@ -148,15 +148,11 @@ proc.stdout?.on("data", (chunk: Buffer) => {
 | `tool_result` | Result of a tool invocation | `content` |
 | `result` | Final result (session complete) | `content`, `subtype` (`success`/`error`) |
 
-### Phase detection from stream
+### Phase detection via file message board
 
-The `ShipManager.updatePhaseFromStream()` method detects Ship progress by inspecting stream messages:
-
-- **`assistant`** content containing `EnterPlanMode` / `ExitPlanMode` -- planning/implementing phases.
-- **`tool_use`** with tool `Edit` or `Write` -- implementing phase.
-- **`tool_use`** with tool `Bash` containing `npm test` or `vitest` -- testing phase.
-- **`tool_use`** with tool `Bash` containing `gh pr create` or `gh pr merge` -- merging phase.
-- **`tool_use`** with tool `Skill` or `Task` containing `review-pr` -- reviewing phase.
+Ship self-declares its phase by writing `.claude/ship-status.json` (e.g. `{"phase": "testing"}`).
+The `ShipStatusWatcher` monitors this file via `fs.watch` and emits phase events to `ShipManager.advancePhase()`.
+Phase transitions are forward-only and gated by PR review approval and acceptance test approval.
 
 ## Useful CLI Flags
 
