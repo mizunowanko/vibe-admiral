@@ -1,3 +1,16 @@
+/**
+ * Build the system prompt for Bridge (central command AI) sessions.
+ *
+ * Architecture note — CLAUDE.md vs. this prompt:
+ *   - Each repo's CLAUDE.md contains repo-specific dev conventions (tech stack,
+ *     directory layout, commands, coding rules). Claude Code reads it automatically
+ *     from the cwd.
+ *   - This function generates Admiral operational instructions (admiral-request
+ *     protocol, sortie flow, label rules, PR review process). These are injected
+ *     via --append-system-prompt so they stay separate from the repo's own CLAUDE.md.
+ *   - Fleet.sharedRulePaths / bridgeRulePaths are appended on top of this prompt
+ *     by ws-server.ts to allow per-fleet customization.
+ */
 export function buildBridgeSystemPrompt(
   fleetName: string,
   repos: string[],
