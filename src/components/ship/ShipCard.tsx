@@ -1,7 +1,7 @@
 import type { Ship, ShipStatus } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, isSafeUrl } from "@/lib/utils";
 import { Square, ExternalLink } from "lucide-react";
 
 interface ShipCardProps {
@@ -77,16 +77,22 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
       {/* Acceptance Test URL */}
       {ship.acceptanceTest && ship.status === "acceptance-test" && (
         <div className="mt-2 pt-2 border-t border-border">
-          <a
-            href={ship.acceptanceTest.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-xs text-primary hover:underline inline-flex items-center gap-1"
-          >
-            <ExternalLink className="h-3 w-3" />
-            {ship.acceptanceTest.url}
-          </a>
+          {isSafeUrl(ship.acceptanceTest.url) ? (
+            <a
+              href={ship.acceptanceTest.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {ship.acceptanceTest.url}
+            </a>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {ship.acceptanceTest.url}
+            </span>
+          )}
         </div>
       )}
 

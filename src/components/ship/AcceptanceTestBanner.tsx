@@ -3,6 +3,7 @@ import type { Ship } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useShipStore } from "@/stores/shipStore";
+import { isSafeUrl } from "@/lib/utils";
 import { ExternalLink, Check, X } from "lucide-react";
 
 interface AcceptanceTestBannerProps {
@@ -23,15 +24,21 @@ export function AcceptanceTestBanner({ ship }: AcceptanceTestBannerProps) {
         <h3 className="text-sm font-semibold text-amber-400">
           Acceptance Test Required
         </h3>
-        <a
-          href={ship.acceptanceTest.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-primary hover:underline inline-flex items-center gap-1"
-        >
-          <ExternalLink className="h-3 w-3" />
-          Open in browser
-        </a>
+        {isSafeUrl(ship.acceptanceTest.url) ? (
+          <a
+            href={ship.acceptanceTest.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Open in browser
+          </a>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {ship.acceptanceTest.url}
+          </span>
+        )}
       </div>
 
       {/* Checks */}
