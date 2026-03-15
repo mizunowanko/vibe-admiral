@@ -135,6 +135,10 @@ export class ProcessManager extends EventEmitter {
     return proc !== undefined && proc.exitCode === null;
   }
 
+  getPid(id: string): number | undefined {
+    return this.processes.get(id)?.pid;
+  }
+
   private setupProcess(id: string, proc: ChildProcess): void {
     this.processes.set(id, proc);
 

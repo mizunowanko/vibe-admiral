@@ -113,6 +113,29 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
     );
   }
 
+  // Bridge status (CLI lifecycle)
+  if (isSystem && message.subtype === "bridge-status") {
+    const content = message.content ?? "";
+    const isErrorStatus = content.includes("Failed");
+    const isConnected = content.includes("connected");
+    return (
+      <div className="flex w-full justify-center">
+        <div
+          className={cn(
+            "rounded px-3 py-1 text-xs font-mono",
+            isErrorStatus
+              ? "text-red-400/80 bg-red-500/10"
+              : isConnected
+                ? "text-emerald-400/80 bg-emerald-500/10"
+                : "text-muted-foreground bg-muted/30",
+          )}
+        >
+          {content}
+        </div>
+      </div>
+    );
+  }
+
   // Acceptance test banner
   if (isSystem && message.subtype === "acceptance-test") {
     return (
