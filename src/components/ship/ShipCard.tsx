@@ -1,0 +1,110 @@
+import type { Ship, ShipStatus } from "@/types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Square, ExternalLink } from "lucide-react";
+
+interface ShipCardProps {
+  ship: Ship;
+  onSelect: () => void;
+  onStop: () => void;
+}
+
+const STATUS_CONFIG: Record<
+  ShipStatus,
+  { label: string; color: string; animate?: boolean }
+> = {
+  sortie: { label: "Sortie", color: "bg-yellow-500/20 text-yellow-400", animate: true },
+  investigating: { label: "Investigating", color: "bg-blue-500/20 text-blue-400", animate: true },
+  planning: { label: "Planning", color: "bg-indigo-500/20 text-indigo-400", animate: true },
+  implementing: { label: "Implementing", color: "bg-violet-500/20 text-violet-400", animate: true },
+  testing: { label: "Testing", color: "bg-cyan-500/20 text-cyan-400", animate: true },
+  reviewing: { label: "Reviewing", color: "bg-orange-500/20 text-orange-400", animate: true },
+  "acceptance-test": { label: "Acceptance Test", color: "bg-amber-500/20 text-amber-400" },
+  merging: { label: "Merging", color: "bg-emerald-500/20 text-emerald-400", animate: true },
+  done: { label: "Done", color: "bg-green-500/20 text-green-400" },
+  error: { label: "Error", color: "bg-red-500/20 text-red-400" },
+};
+
+export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
+  const config = STATUS_CONFIG[ship.status];
+  const isActive = ship.status !== "done" && ship.status !== "error";
+
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        "cursor-pointer rounded-lg border border-border bg-card p-4 transition-all hover:border-primary/50 hover:shadow-md",
+        ship.status === "acceptance-test" && "border-amber-500/50 ring-1 ring-amber-500/20",
+      )}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-mono text-muted-foreground">
+            #{ship.issueNumber}
+          </span>
+          <Badge className={cn("text-[10px]", config.color)}>
+            {config.animate && (
+              <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+            )}
+            {config.label}
+          </Badge>
+        </div>
+        {isActive && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onStop();
+            }}
+          >
+            <Square className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+
+      {/* Title */}
+      <p className="text-sm font-medium truncate">{ship.issueTitle || `Issue #${ship.issueNumber}`}</p>
+
+      {/* Repo */}
+      <p className="text-xs text-muted-foreground truncate mt-1">
+        {ship.repo}
+      </p>
+
+      {/* Acceptance Test URL */}
+      {ship.acceptanceTest && ship.status === "acceptance-test" && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <a
+            href={ship.acceptanceTest.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {ship.acceptanceTest.url}
+          </a>
+        </div>
+      )}
+
+      {/* PR URL */}
+      {ship.prUrl && ship.status === "done" && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <a
+            href={ship.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+          >
+            <ExternalLink className="h-3 w-3" />
+            PR
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,109 @@
+import { useEffect } from "react";
+import { wsClient } from "@/lib/ws-client";
+import { useFleetStore } from "@/stores/fleetStore";
+import { useShipStore } from "@/stores/shipStore";
+import { useUIStore } from "@/stores/uiStore";
+import type { ServerMessage, Fleet, ShipStatus, StreamMessage } from "@/types";
+
+export function useEngine() {
+  const setFleets = useFleetStore((s) => s.setFleets);
+  const setShipStatus = useShipStore((s) => s.setShipStatus);
+  const addShipLog = useShipStore((s) => s.addShipLog);
+  const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
+  const setShipDone = useShipStore((s) => s.setShipDone);
+  const setEngineConnected = useUIStore((s) => s.setEngineConnected);
+  const fetchFleets = useFleetStore((s) => s.fetchFleets);
+
+  useEffect(() => {
+    wsClient.connect();
+
+    const checkConnection = setInterval(() => {
+      setEngineConnected(wsClient.connected);
+    }, 1000);
+
+    const unsub = wsClient.onMessage((msg: ServerMessage) => {
+      switch (msg.type) {
+        case "fleet:data":
+          setFleets(msg.data as unknown as Fleet[]);
+          break;
+
+        case "ship:status": {
+          const statusData = msg.data as {
+            id: string;
+            status: ShipStatus;
+            detail?: string;
+          };
+          setShipStatus(statusData.id, statusData.status, statusData.detail);
+          break;
+        }
+
+        case "ship:stream": {
+          const streamData = msg.data as {
+            id: string;
+            message: StreamMessage;
+          };
+          addShipLog(streamData.id, streamData.message);
+          break;
+        }
+
+        case "ship:acceptance-test": {
+          const atData = msg.data as {
+            id: string;
+            url: string;
+            checks: string[];
+          };
+          setAcceptanceTest(atData.id, {
+            url: atData.url,
+            checks: atData.checks,
+          });
+          break;
+        }
+
+        case "ship:done": {
+          const doneData = msg.data as {
+            id: string;
+            prUrl?: string;
+            merged: boolean;
+          };
+          setShipDone(doneData.id, doneData.prUrl, doneData.merged);
+          break;
+        }
+
+        case "bridge:stream":
+          // Bridge messages are handled by useBridge hook
+          break;
+
+        case "issue:data":
+          // Issue data handled by specific components
+          break;
+
+        case "error": {
+          const errorData = msg.data as { source: string; message: string };
+          console.error(`Engine error [${errorData.source}]:`, errorData.message);
+          break;
+        }
+      }
+    });
+
+    // Fetch initial data
+    setTimeout(() => {
+      if (wsClient.connected) {
+        fetchFleets();
+      }
+    }, 500);
+
+    return () => {
+      unsub();
+      clearInterval(checkConnection);
+      wsClient.disconnect();
+    };
+  }, [
+    setFleets,
+    setShipStatus,
+    addShipLog,
+    setAcceptanceTest,
+    setShipDone,
+    setEngineConnected,
+    fetchFleets,
+  ]);
+}

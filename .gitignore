@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.worktrees/
+
+# Tauri
+src-tauri/target/
+
+# Engine build
+engine/dist/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*

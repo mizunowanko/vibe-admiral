@@ -1,0 +1,321 @@
+---
+name: implement
+description: Issue ベースの機能実装ワークフロー。調査→計画→実装→テスト→コミット→PR→レビュー→受け入れテスト→CI→マージまで一気通貫で実行する。"/implement", "実装して" などで起動。
+user-invocable: true
+---
+
+# /implement — 統合実装スキル
+
+GitHub Issues をベースに、機能実装→テスト→レビュー→マージまでを一気通貫で行うスキル。
+feature + cleanup + merge の統合版。
+
+## 引数
+
+- Issue 番号（例: `#42`, `42`）または Issue タイトルの一部（省略可）
+  - 省略時は GH Issue 一覧から unblocked かつ `todo` ラベルのものを自動選択する
+
+## CRITICAL: Resume Check
+
+ワークフロー開始前に `.claude/workflow-state.json` を確認する。
+存在する場合は `currentStep` から再開する。存在しない場合は Step 1 から開始する。
+各ステップ完了時に state file を更新する（Bash で書き込み）。
+
+```bash
+# 確認
+cat .claude/workflow-state.json 2>/dev/null || echo "NO_STATE"
+```
+
+### workflow-state.json 形式
+
+```json
+{
+  "skill": "implement",
+  "issueNumber": 42,
+  "currentStep": 5,
+  "completedSteps": [1, 2, 3, 4],
+  "branchName": "feature/42-add-login",
+  "prNumber": null,
+  "reviewTaskId": null,
+  "acceptanceTestAttempts": 0
+}
+```
+
+### State 更新テンプレート
+
+各ステップ完了後に実行する:
+```bash
+cat > .claude/workflow-state.json << 'STATEEOF'
+{
+  "skill": "implement",
+  "issueNumber": <NUMBER>,
+  "currentStep": <NEXT_STEP>,
+  "completedSteps": [<COMPLETED>],
+  "branchName": "<BRANCH>",
+  "prNumber": <PR_OR_NULL>,
+  "reviewTaskId": "<ID_OR_NULL>",
+  "acceptanceTestAttempts": <N>
+}
+STATEEOF
+```
+
+## vibe-admiral 連携判定
+
+```bash
+echo "${VIBE_ADMIRAL:-not_set}"
+```
+
+- `VIBE_ADMIRAL` が設定されている場合:
+  - **Worktree 作成/削除**: スキップ（vibe-admiral が実施済み）
+  - **ラベル変更**: スキップ（vibe-admiral が実施済み）
+  - **受け入れテスト**: ファイル伝言板方式（後述）
+  - **Ship 完了後の後処理**: スキップ（vibe-admiral が実施）
+- 設定されていない場合:
+  - **Worktree 作成/削除**: スキル内で実行
+  - **ラベル変更**: スキル内で実行
+  - **受け入れテスト**: AskUserQuestion + open URL を使用
+
+## ワークフロー
+
+### Step 1: GH Issue の特定
+
+リポ情報を取得する:
+```bash
+REMOTE_URL=$(git remote get-url origin)
+REPO=$(echo "$REMOTE_URL" | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')
+DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')
+```
+
+- 引数で指定されている場合:
+  ```bash
+  gh issue view <番号> --repo "$REPO" --json number,title,labels
+  ```
+  **重要: `doing` ラベルが付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
+
+- 指定がない場合: **必ず `--label todo` を指定して** `todo` ラベルの Issue のみを取得する:
+  ```bash
+  gh issue list --repo "$REPO" --label todo --state open --json number,title
+  ```
+  取得した Issue の Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
+
+**`VIBE_ADMIRAL` 未設定の場合のみ**: 選択した Issue のラベルを変更:
+```bash
+gh issue edit <番号> --repo "$REPO" --remove-label todo --add-label doing
+```
+
+### Step 2: Worktree 作成
+
+**`VIBE_ADMIRAL` 設定時**: このステップをスキップする（すでに worktree 内にいる）。
+
+```bash
+REPO_ROOT=$(git rev-parse --show-toplevel)
+ISSUE_NUM=<番号>
+SHORT_NAME=<kebab-case要約>
+BRANCH_NAME="feature/${ISSUE_NUM}-${SHORT_NAME}"
+WORKTREE_DIR="${REPO_ROOT}/.worktrees/feature/${ISSUE_NUM}-${SHORT_NAME}"
+
+git fetch origin "$DEFAULT_BRANCH"
+git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" "origin/${DEFAULT_BRANCH}"
+
+# .claude/settings.local.json をシンボリックリンク
+if [ -f "${REPO_ROOT}/.claude/settings.local.json" ]; then
+  mkdir -p "${WORKTREE_DIR}/.claude"
+  ln -sf "${REPO_ROOT}/.claude/settings.local.json" "${WORKTREE_DIR}/.claude/settings.local.json"
+fi
+
+# .worktrees/ を .gitignore に追加（未追加の場合）
+if ! grep -q '\.worktrees/' "${REPO_ROOT}/.gitignore" 2>/dev/null; then
+  echo '.worktrees/' >> "${REPO_ROOT}/.gitignore"
+fi
+```
+
+- **Web プロジェクトの場合**: worktree ディレクトリで `npm install` を実行する
+
+worktree 作成後、以降のファイル操作はすべて **worktree ディレクトリ内のパス** を使って行う。
+
+### Step 3: 調査
+
+- Task ツールで並列調査する（影響範囲の特定）
+- CLAUDE.md の Conflict Risk Areas を参照する
+
+### Step 4: 計画
+
+- EnterPlanMode で実装計画を立てる
+- CLAUDE.md の Implementation Layer Order に従って変更レイヤーを分類する
+- **plan 確定後、`.claude/plans/` 内のファイルをすべて削除する**
+
+### Step 5: 実装
+
+CLAUDE.md に記載されたレイヤー順序で実装する。
+
+### Step 6: ビルド検証
+
+CLAUDE.md の Commands テーブルに記載されたビルド・テスト・リントコマンドを実行する。
+テストやリントが失敗したら修正して再実行する。
+
+### Step 7: 統合
+
+最新のデフォルトブランチをマージし、コンフリクトがあれば解消する。
+
+```bash
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
+```
+
+- コンフリクトが発生したら解消してからコミットする
+- **Web プロジェクトの場合**: `npm install` も実行する
+
+### Step 8: テスト再実行
+
+ビルド・テスト・リントを再度実行して統合後の問題がないことを確認する。
+
+### Step 9: コミット & PR
+
+1. `git status && git diff --stat && git diff` で変更を把握
+2. 変更を論理的にグルーピングしてコミット（共通 CLAUDE.md のコミット規約に従う）
+   - `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>` を含める
+   - `git add -A` は使わない（ファイル名指定）
+3. `git push -u origin <current-branch>` で push
+4. ブランチ名から Issue 番号を抽出し、PR を作成:
+   ```bash
+   gh pr create --base "$DEFAULT_BRANCH" --title "<Issue タイトル>" --body "$(cat <<'EOF'
+   ## Summary
+   <変更内容の要約>
+
+   ## Changes
+   <コミット内容の箇条書き>
+
+   Closes #<Issue 番号>
+
+   ## Test plan
+   <ビルド・テスト・リントコマンドの実行結果>
+
+   🤖 Generated with [Claude Code](https://claude.com/claude-code)
+   EOF
+   )"
+   ```
+
+### Step 10: コードレビュー（CI 並行）
+
+push した時点で CI が走り始める。CI の完了を待たずにコードレビューを実施する。
+
+1. `/review-pr` スキルをバックグラウンドで起動する（Task ツール `run_in_background: true`）
+2. Step 11 へ進む
+
+### Step 11: 受け入れテスト
+
+**Native プロジェクトの場合**: このステップをスキップして Step 12 へ進む。
+
+#### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
+
+1. 受け入れテストに到達したら `.claude/acceptance-test-request.json` を作成:
+   ```bash
+   cat > .claude/acceptance-test-request.json << 'ATEOF'
+   {
+     "url": "http://localhost:<port>",
+     "checks": [
+       "確認ポイント1",
+       "確認ポイント2"
+     ]
+   }
+   ATEOF
+   ```
+
+2. `.claude/acceptance-test-response.json` の出現を待機:
+   ```bash
+   echo "Waiting for acceptance test response..."
+   while [ ! -f .claude/acceptance-test-response.json ]; do
+     sleep 2
+   done
+   cat .claude/acceptance-test-response.json
+   ```
+
+3. レスポンスに基づいて処理:
+   - `accepted: true` → アプリ停止 → Step 12 へ
+   - `accepted: false` → フィードバックを取得 → 修正 → commit & push → request.json を削除 → response.json を削除 → 再度 request.json を作成して再待機
+
+#### VIBE_ADMIRAL 未設定時
+
+1. ポートマネージャーに接続確認:
+   ```bash
+   curl -s http://127.0.0.1:53100/status
+   ```
+2. ポートを割り当て、アプリを起動する
+3. `open http://localhost:<port>` でブラウザを開く
+4. AskUserQuestion で確認する
+5. OK → アプリ停止 → Step 12 へ
+6. NG → 修正 → commit & push → 再確認ループ
+
+### Step 12: CI パス確認
+
+```bash
+PR_NUM=$(gh pr list --head "$(git branch --show-current)" --json number --jq '.[0].number')
+gh pr checks "$PR_NUM" --watch
+```
+
+- CI が全てパスしたら Step 13 へ
+- CI が失敗した場合は修正ループ（ログ取得 → 修正 → commit & push → 再確認）
+- CI が未設定の場合はスキップ
+
+### Step 13: レビュー結果の対応（マージ前に必須）
+
+**このステップを完了するまで絶対に Step 14 に進んではならない。**
+
+バックグラウンドのレビュー結果を確認する（Read ツールで output_file を確認）。
+レビューエージェントがまだ実行中の場合は完了を待機する。
+
+指摘を以下の 3 カテゴリに再分類する:
+
+- **BLOCKER**: 同意する。この PR で修正が必要 → 修正 → commit & push → Step 12 に戻る
+- **NICE TO HAVE**: 同意するが別 Issue で対応 → `gh issue create --label todo` で別 Issue を作成
+- **NO NEED**: 同意しない → 対応不要
+- **LGTM**: 指摘なし → Step 14 へ
+
+### Step 14: マージ
+
+```bash
+gh pr merge "$PR_NUM" --squash
+```
+
+- `--delete-branch` は付けない（worktree 環境では競合する）
+- マージ後に `already used by worktree` エラーが出ても、`gh pr view --json state --jq '.state'` が `MERGED` なら無視してよい
+
+### Step 15: 掃除
+
+1. plan ファイルの削除:
+   ```bash
+   rm -f .claude/plans/*.md
+   ```
+
+2. workflow-state.json の削除:
+   ```bash
+   rm -f .claude/workflow-state.json
+   ```
+
+**`VIBE_ADMIRAL` 未設定の場合のみ**:
+
+3. Worktree 削除:
+   ```bash
+   REPO_ROOT=$(git worktree list | head -1 | awk '{print $1}')
+   WORKTREE_PATH=$(git rev-parse --show-toplevel)
+   cd "$REPO_ROOT" && git worktree remove "$WORKTREE_PATH" --force
+   ```
+
+4. GH Issue を close:
+   ```bash
+   ISSUE_NUM=$(echo "<branch-name>" | sed -E 's#(feature|refactor)/([0-9]+)-.+#\2#')
+   gh issue close "$ISSUE_NUM" --comment "Closed via PR merge"
+   gh issue edit "$ISSUE_NUM" --remove-label doing
+   ```
+
+## 競合リスク
+
+CLAUDE.md の Conflict Risk Areas を参照すること。
+
+## 注意事項
+
+- `.env` は読み書きしない
+- 大きな変更は複数回に分けてコミットしてよい
+- GH Issue のラベル更新を忘れないこと
+- 各ステップで問題が発生したらその場で解決してから次に進む
+- ローカルでは関連テストのみ実行し、コンテキスト消費を最小限にする
+- 全テストの網羅的な確認は CI に委ねる
