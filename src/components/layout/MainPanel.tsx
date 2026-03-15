@@ -1,6 +1,7 @@
 import { useUIStore } from "@/stores/uiStore";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Bridge } from "@/components/bridge/Bridge";
+import { BridgeShipBar } from "@/components/bridge/BridgeShipBar";
 import { ShipGrid } from "@/components/ship/ShipGrid";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
 
@@ -23,7 +24,12 @@ export function MainPanel() {
 
   switch (mainView) {
     case "bridge":
-      return <Bridge fleetId={selectedFleetId} />;
+      return (
+        <div className="flex flex-1 min-h-0">
+          <Bridge fleetId={selectedFleetId} />
+          <BridgeShipBar fleetId={selectedFleetId!} />
+        </div>
+      );
     case "ships":
       return <ShipGrid fleetId={selectedFleetId} />;
     case "fleet-settings":
