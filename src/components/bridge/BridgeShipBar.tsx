@@ -1,4 +1,5 @@
 import { useShipStore } from "@/stores/shipStore";
+import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
 import type { ShipStatus } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ interface BridgeShipBarProps {
 
 export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   const ships = useShipStore((s) => s.ships);
+  const selectedShipId = useShipStore((s) => s.selectedShipId);
+  const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
   const acceptTest = useShipStore((s) => s.acceptTest);
 
@@ -36,6 +39,10 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   );
 
   if (fleetShips.length === 0) return null;
+
+  // Only show log panel for ships belonging to this fleet
+  const showLogPanel =
+    selectedShipId && fleetShips.some((s) => s.id === selectedShipId);
 
   return (
     <div className="w-72 shrink-0 border-l border-border bg-background/50 flex flex-col">
@@ -49,14 +56,18 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
           {fleetShips.map((ship) => {
             const config = STATUS_CONFIG[ship.status];
             const isActive = ship.status !== "done" && ship.status !== "error";
+            const isSelected = ship.id === selectedShipId;
 
             return (
               <div
                 key={ship.id}
+                onClick={() => selectShip(isSelected ? null : ship.id)}
                 className={cn(
-                  "rounded-md border border-border bg-card px-3 py-2 text-xs",
+                  "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
                   ship.status === "acceptance-test" &&
                     "border-amber-500/50 ring-1 ring-amber-500/20",
+                  isSelected &&
+                    "border-primary/70 bg-primary/5",
                 )}
               >
                 <div className="flex items-center justify-between gap-2 mb-1">
@@ -76,7 +87,10 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                       variant="ghost"
                       size="icon"
                       className="h-5 w-5 shrink-0"
-                      onClick={() => stopShip(ship.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        stopShip(ship.id);
+                      }}
                     >
                       <Square className="h-2.5 w-2.5" />
                     </Button>
@@ -97,6 +111,7 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                         href={ship.acceptanceTest.url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="text-primary hover:underline inline-flex items-center gap-0.5"
                       >
                         <ExternalLink className="h-2.5 w-2.5" />
@@ -111,7 +126,10 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                       variant="outline"
                       size="sm"
                       className="h-5 text-[10px] px-1.5"
-                      onClick={() => acceptTest(ship.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        acceptTest(ship.id);
+                      }}
                     >
                       Accept
                     </Button>
@@ -122,6 +140,14 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
           })}
         </div>
       </ScrollArea>
+
+      {/* Ship Log Panel */}
+      {showLogPanel && (
+        <ShipLogPanel
+          shipId={selectedShipId!}
+          onClose={() => selectShip(null)}
+        />
+      )}
     </div>
   );
 }
