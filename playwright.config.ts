@@ -14,7 +14,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run dev",
+    command: "npm run dev:frontend",
     url: "http://localhost:1420",
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
