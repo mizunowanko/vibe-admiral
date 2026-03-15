@@ -1,10 +1,10 @@
-import { memo, useRef, useEffect, useMemo } from "react";
+import { memo, useRef, useEffect, useMemo, useState, useCallback } from "react";
 import { useBridge } from "@/hooks/useBridge";
 import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
 import { BridgeInput } from "./BridgeInput";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageSquare, Loader2 } from "lucide-react";
+import { MessageSquare, Loader2, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StreamMessage } from "@/types";
 
@@ -38,11 +38,47 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const { messages, sendMessage, answerQuestion, pendingQuestion, isLoading } = useBridge(fleetId);
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(0);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
   const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
 
-  useEffect(() => {
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const threshold = 100;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    isAtBottomRef.current = atBottom;
+    if (atBottom) {
+      setHasNewMessages(false);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+    isAtBottomRef.current = true;
+    setHasNewMessages(false);
+  }, []);
+
+  // Reset scroll state when fleet changes
+  useEffect(() => {
+    setHasNewMessages(false);
+    isAtBottomRef.current = true;
+    prevMessageCountRef.current = 0;
+  }, [fleetId]);
+
+  useEffect(() => {
+    const grew = messages.length > prevMessageCountRef.current;
+    prevMessageCountRef.current = messages.length;
+
+    if (isAtBottomRef.current) {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    } else if (grew) {
+      setHasNewMessages(true);
     }
   }, [messages, isLoading]);
 
@@ -84,24 +120,38 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
       )}
 
       {/* Messages */}
-      <ScrollArea ref={scrollRef} className="flex-1 p-4">
-        <div className="space-y-3">
-          {messages.length === 0 && (
-            <p className="text-center text-sm text-muted-foreground py-8">
-              Bridge is ready. Send a command to manage issues and coordinate ships.
-            </p>
-          )}
-          {displayMessages.map((msg, i) => (
-            <BridgeMessage key={i} message={msg} repeatCount={msg.repeatCount} />
-          ))}
-          {isLoading && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span className="text-xs">Bridge is thinking...</span>
-            </div>
-          )}
-        </div>
-      </ScrollArea>
+      <div className="relative flex-1 min-h-0">
+        <ScrollArea ref={scrollRef} className="h-full p-4" onScroll={handleScroll}>
+          <div className="space-y-3">
+            {messages.length === 0 && (
+              <p className="text-center text-sm text-muted-foreground py-8">
+                Bridge is ready. Send a command to manage issues and coordinate ships.
+              </p>
+            )}
+            {displayMessages.map((msg, i) => (
+              <BridgeMessage key={i} message={msg} repeatCount={msg.repeatCount} />
+            ))}
+            {isLoading && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span className="text-xs">Bridge is thinking...</span>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+
+        {/* New messages indicator */}
+        {hasNewMessages && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-opacity hover:opacity-90"
+          >
+            <ArrowDown className="h-3 w-3" />
+            New messages
+          </button>
+        )}
+      </div>
 
       {/* Input */}
       <BridgeInput
