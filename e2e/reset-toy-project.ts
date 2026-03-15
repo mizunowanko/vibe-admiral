@@ -11,7 +11,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, writeFile, readFile, cp } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -284,8 +284,6 @@ async function setupProjectFiles(): Promise<void> {
   const skillSrc = join(
     __dirname,
     "..",
-    "plugins",
-    "vibe-admiral-skills",
     "skills",
     "implement",
     "SKILL.md",

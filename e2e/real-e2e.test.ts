@@ -29,7 +29,6 @@ const ENGINE_PORT = 9799;
 const WS_URL = `ws://127.0.0.1:${ENGINE_PORT}`;
 const REPO = "mizunowanko-org/toy-admiral-test";
 const EXPECTED_ISSUES = [1, 3]; // issues that should be sortied
-const SHIP_TIMEOUT_MS = 10 * 60 * 1000; // 10 min per ship
 const TOTAL_TIMEOUT_MS = 15 * 60 * 1000; // 15 min overall
 const ENGINE_STARTUP_MS = 3_000; // time to wait for engine to start
 

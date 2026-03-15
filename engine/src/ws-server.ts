@@ -14,7 +14,7 @@ import {
   stripActionBlocks,
 } from "./stream-parser.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
-import type { Fleet, ClientMessage } from "./types.js";
+import type { Fleet, ClientMessage, BridgeAction, StreamMessage } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -538,7 +538,7 @@ export class EngineServer {
   private async executeActionsSequentially(
     fleetId: string,
     bridgeId: string,
-    actions: import("./types.js").BridgeAction[],
+    actions: BridgeAction[],
   ): Promise<void> {
     // Load fleet repos for whitelist validation
     const fleets = await this.loadFleets();
@@ -590,7 +590,7 @@ export class EngineServer {
 
   private logShipMessage(
     id: string,
-    msg: import("./types.js").StreamMessage,
+    msg: StreamMessage,
   ): void {
     const ship = this.shipManager.getShip(id);
     const prefix = ship
