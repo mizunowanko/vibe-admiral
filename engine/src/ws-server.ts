@@ -518,9 +518,12 @@ export class EngineServer {
         "origin",
       ], { cwd: localPath });
       const url = stdout.trim();
-      // Extract owner/repo from GitHub URL
-      const match = url.match(/github\.com[:/](.+?)(?:\.git)?$/);
-      return match?.[1];
+      if (!url) return undefined;
+      // Extract owner/repo from GitHub URL (handle trailing slashes)
+      const match = url.match(/github\.com[:/](.+?)(?:\.git)?\/*$/);
+      if (match) return match[1];
+      // For non-GitHub remotes (GitLab, Bitbucket, etc.), return the full URL
+      return url;
     } catch {
       return undefined;
     }
