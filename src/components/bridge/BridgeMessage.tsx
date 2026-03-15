@@ -38,9 +38,10 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
   if (message.type === "tool_use") {
     return (
       <div className="flex w-full justify-start">
-        <div
+        <button
+          type="button"
           className={cn(
-            "max-w-[90%] rounded border-l-2 border-muted-foreground/30 px-3 py-1.5 cursor-pointer select-none",
+            "max-w-[90%] rounded border-l-2 border-muted-foreground/30 px-3 py-1.5 cursor-pointer select-none text-left",
             "hover:bg-muted/30 transition-colors",
           )}
           onClick={() => setToolExpanded(!toolExpanded)}
@@ -56,7 +57,7 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
               {message.content}
             </pre>
           )}
-        </div>
+        </button>
       </div>
     );
   }
