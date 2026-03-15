@@ -87,26 +87,18 @@ export async function createIssue(
     title,
     "--body",
     body,
-    "--json",
-    "number,title,body,labels",
   ];
   for (const label of labelList) {
     args.push("--label", label);
   }
-  const raw = await gh(args);
-  const i = JSON.parse(raw) as {
-    number: number;
-    title: string;
-    body: string;
-    labels: Array<{ name: string }>;
-  };
-  return {
-    number: i.number,
-    title: i.title,
-    body: i.body,
-    labels: i.labels.map((l) => l.name),
-    state: "open",
-  };
+  // gh issue create outputs the issue URL (e.g. https://github.com/owner/repo/issues/123)
+  const url = await gh(args);
+  const match = url.match(/\/issues\/(\d+)$/);
+  if (!match) {
+    throw new Error(`Failed to parse issue number from gh output: ${url}`);
+  }
+  const issueNumber = Number(match[1]);
+  return getIssue(repo, issueNumber);
 }
 
 export async function updateLabels(
