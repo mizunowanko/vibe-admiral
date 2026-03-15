@@ -15,6 +15,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile, writeFile } from "node:fs/promises";
 import WebSocket from "ws";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,9 @@ const EXPECTED_ISSUES = [1, 3]; // issues that should be sortied
 const TOTAL_TIMEOUT_MS = 15 * 60 * 1000; // 15 min overall
 const ENGINE_STARTUP_MS = 3_000; // time to wait for engine to start
 
+const FLEET_NAME = "E2E Test Fleet";
+const FLEETS_FILE = join(process.env.HOME ?? "~", ".vibe-admiral", "fleets.json");
+
 // ── Types ───────────────────────────────────────────────────────────
 
 interface WsMessage {
@@ -48,6 +52,20 @@ interface ShipInfo {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+async function purgeTestFleets(): Promise<void> {
+  try {
+    const raw = await readFile(FLEETS_FILE, "utf-8");
+    const fleets = JSON.parse(raw) as Array<{ name: string }>;
+    const filtered = fleets.filter((f) => f.name !== FLEET_NAME);
+    if (filtered.length < fleets.length) {
+      await writeFile(FLEETS_FILE, JSON.stringify(filtered, null, 2));
+      log(`Purged ${fleets.length - filtered.length} leftover test fleet(s) from fleets.json`);
+    }
+  } catch {
+    // File doesn't exist or is unreadable — nothing to purge
+  }
+}
 
 function log(msg: string): void {
   const ts = new Date().toISOString().slice(11, 19);
@@ -429,6 +447,9 @@ async function main(): Promise<void> {
   let exitCode = 0;
 
   try {
+    // Step 0: Purge leftover test fleets from previous failed runs
+    await purgeTestFleets();
+
     // Step 1: Reset
     await resetToyProject();
 
@@ -455,15 +476,20 @@ async function main(): Promise<void> {
     log("Cleaning up...");
 
     // Delete the test fleet before killing the engine
+    let wsCleanupOk = false;
     if (fleetId && ws && ws.readyState === WebSocket.OPEN) {
       log(`Deleting test fleet ${fleetId}...`);
       try {
         send(ws, { type: "fleet:delete", data: { id: fleetId } });
         await waitForMessage(ws, (m) => m.type === "fleet:data", 5_000, "fleet:data");
         log("Test fleet deleted.");
+        wsCleanupOk = true;
       } catch {
-        log("Warning: failed to delete test fleet (timeout or error).");
+        log("Warning: WS-based fleet delete failed.");
       }
+    }
+    if (!wsCleanupOk) {
+      await purgeTestFleets();
     }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
