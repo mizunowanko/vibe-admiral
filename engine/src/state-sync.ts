@@ -3,6 +3,17 @@ import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
+/** status/* labels that indicate work-in-progress (not todo, not blocked). */
+export const ACTIVE_STATUS_LABELS = new Set([
+  "status/investigating",
+  "status/planning",
+  "status/implementing",
+  "status/testing",
+  "status/reviewing",
+  "status/acceptance-test",
+  "status/merging",
+]);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -18,7 +29,7 @@ export class StateSync {
 
   /**
    * Pre-sortie validation: check for duplicate ships, existing worktrees,
-   * and status/* labels that indicate an issue is already in progress.
+   * and active status/* labels that indicate an issue is already in progress.
    */
   async sortieGuard(
     repo: string,
@@ -143,17 +154,8 @@ export class StateSync {
       // 1. Audit active status/* labels: if no active Ship, roll back to "status/todo"
       // Note: "status/blocked" is excluded — it is set manually by Bridge/human
       // to indicate dependency blocks and should persist across Engine restarts.
-      const activeStatusLabels = [
-        "status/investigating",
-        "status/planning",
-        "status/implementing",
-        "status/testing",
-        "status/reviewing",
-        "status/acceptance-test",
-        "status/merging",
-      ];
       try {
-        for (const label of activeStatusLabels) {
+        for (const label of ACTIVE_STATUS_LABELS) {
           const labeledIssues = await github.listIssues(repo.remote, label);
           for (const issue of labeledIssues) {
             if (!activeIssues.includes(issue.number)) {

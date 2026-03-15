@@ -53,7 +53,7 @@ export class ShipManager {
   ): Promise<ShipProcess> {
     const shipId = randomUUID();
 
-    // 1. Get issue info
+    // 1. Get issue info (used later for title, slug, etc.)
     const issue = await github.getIssue(repo, issueNumber);
 
     // 2. Update issue status: todo → doing (via StatusManager)

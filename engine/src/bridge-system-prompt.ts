@@ -72,7 +72,7 @@ Stop a running Ship by its ID.
 
 When the user asks you to start implementation:
 
-1. Run \`gh issue list\` to get issues with their labels
+1. Run \`gh issue list --label status/todo\` to get ready issues
 2. For each issue, check dependencies (sub-issues via GraphQL, "## Dependencies" section in body)
 3. Identify which issues are UNBLOCKED and labeled "status/todo"
 4. Explain your analysis to the human (which issues are ready, which are blocked and why)
