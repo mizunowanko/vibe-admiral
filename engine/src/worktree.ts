@@ -39,6 +39,16 @@ export async function create(
   });
 
   await git(["fetch", "origin", baseBranch], repoRoot);
+
+  // Clean up stale worktree/branch from a previous failed sortie
+  if (await exists(worktreePath)) {
+    await git(["worktree", "remove", worktreePath, "--force"], repoRoot);
+  }
+  // Delete local branch if it already exists
+  await git(["branch", "-D", branchName], repoRoot).catch(() => {});
+  // Delete remote branch if it already exists
+  await git(["push", "origin", "--delete", branchName], repoRoot).catch(() => {});
+
   await git(
     ["worktree", "add", "-b", branchName, worktreePath, `origin/${baseBranch}`],
     repoRoot,
