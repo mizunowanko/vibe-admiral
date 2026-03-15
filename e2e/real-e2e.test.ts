@@ -169,7 +169,7 @@ function waitForMessage(
 
 // ── Step 4-6: Main test flow ────────────────────────────────────────
 
-async function runTest(ws: WebSocket): Promise<void> {
+async function runTest(ws: WebSocket): Promise<string> {
   // Track ships and their statuses
   const ships = new Map<string, ShipInfo>();
   const doneShips = new Set<string>();
@@ -354,6 +354,8 @@ async function runTest(ws: WebSocket): Promise<void> {
   } else {
     throw new Error(`FAIL: Only ${passCount} ships completed (need >= 2).`);
   }
+
+  return fleetId;
 }
 
 // ── Step 6: Verify GitHub state ─────────────────────────────────────
@@ -422,6 +424,7 @@ async function verifyGitHubState(): Promise<void> {
 async function main(): Promise<void> {
   let engine: ChildProcess | null = null;
   let ws: WebSocket | null = null;
+  let fleetId: string | null = null;
   let exitCode = 0;
 
   try {
@@ -436,7 +439,7 @@ async function main(): Promise<void> {
     ws = await connectWithRetry();
 
     // Steps 4-6: Run test
-    await runTest(ws);
+    fleetId = await runTest(ws);
   } catch (err) {
     console.error(
       "\nTest failed:",
@@ -446,6 +449,19 @@ async function main(): Promise<void> {
   } finally {
     // Step 7: Cleanup
     log("Cleaning up...");
+
+    // Delete the test fleet before killing the engine
+    if (fleetId && ws && ws.readyState === WebSocket.OPEN) {
+      log(`Deleting test fleet ${fleetId}...`);
+      try {
+        send(ws, { type: "fleet:delete", data: { id: fleetId } });
+        await waitForMessage(ws, (m) => m.type === "fleet:data", 5_000, "fleet:data");
+        log("Test fleet deleted.");
+      } catch {
+        log("Warning: failed to delete test fleet (timeout or error).");
+      }
+    }
+
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
