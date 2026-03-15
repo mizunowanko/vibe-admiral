@@ -419,10 +419,17 @@ export async function addSubIssue(
   ]);
 }
 
-// Shared regex to match the "## Dependencies" section in issue bodies.
-// Captures the section content (group 1). Works whether the section is
-// followed by another heading or sits at the end of the body.
-const DEPENDENCIES_SECTION_RE = /## Dependencies\s*\n([\s\S]*?)(?=\n##|$)/;
+// Regex to locate the "## Dependencies" heading at the start of a line.
+// Uses the m flag so ^ matches line starts. [^\S\r\n]* allows trailing
+// horizontal whitespace after the heading. Anchoring to ^## prevents
+// false positives from "### Dependencies" or deeper headings.
+const DEPENDENCIES_HEADING_RE = /^## Dependencies[^\S\r\n]*\r?\n/m;
+
+// Regex used by editIssue to replace the full Dependencies section
+// (heading + content). Greedily captures content, then stops at the next
+// h2 heading (\n## followed by a non-# char or end of line) or end of string.
+const DEPENDENCIES_SECTION_RE =
+  /^## Dependencies[^\S\r\n]*\r?\n[\s\S]*?(?=\r?\n## |\r?\n##\r?$|$(?![\r\n]))/m;
 
 /**
  * Parse "## Dependencies" section from issue body and extract issue numbers.
@@ -430,9 +437,16 @@ const DEPENDENCIES_SECTION_RE = /## Dependencies\s*\n([\s\S]*?)(?=\n##|$)/;
  */
 export function parseDependencies(body: string): number[] {
   if (!body) return [];
-  const sectionMatch = body.match(DEPENDENCIES_SECTION_RE);
-  if (!sectionMatch?.[1]) return [];
-  const section = sectionMatch[1];
+  const headingMatch = DEPENDENCIES_HEADING_RE.exec(body);
+  if (!headingMatch) return [];
+
+  // Extract the content after the heading until the next ## heading or end
+  const start = headingMatch.index + headingMatch[0].length;
+  const rest = body.slice(start);
+  // Find the next h2 heading (## at line start, not ### or deeper)
+  const nextH2 = rest.match(/\r?\n##(?!#)/);
+  const section = nextH2 ? rest.slice(0, nextH2.index) : rest;
+
   const nums = new Set<number>();
   for (const m of section.matchAll(/#(\d+)/g)) {
     nums.add(Number(m[1]));
@@ -465,42 +479,3 @@ export async function getOpenBodyDependencies(
   return results.filter((n): n is number => n !== null);
 }
 
-export async function getSubIssues(
-  repo: string,
-  issueNumber: number,
-): Promise<Array<{ number: number; title: string; state: string }>> {
-  const [owner, repoName] = repo.split("/");
-  if (!owner || !repoName) return [];
-  const raw = await gh([
-    "api",
-    "graphql",
-    "-f",
-    `query=query($owner: String!, $repo: String!, $number: Int!) {
-      repository(owner: $owner, name: $repo) {
-        issue(number: $number) {
-          subIssues(first: 50) {
-            nodes { number title state }
-          }
-        }
-      }
-    }`,
-    "-f",
-    `owner=${owner}`,
-    "-f",
-    `repo=${repoName}`,
-    "-F",
-    `number=${issueNumber}`,
-  ]);
-  const result = JSON.parse(raw) as {
-    data: {
-      repository: {
-        issue: {
-          subIssues: {
-            nodes: Array<{ number: number; title: string; state: string }>;
-          };
-        };
-      };
-    };
-  };
-  return result.data.repository.issue.subIssues.nodes;
-}
