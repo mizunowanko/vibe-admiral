@@ -65,6 +65,14 @@ skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 | Type check (engine) | `cd engine && npx tsc --noEmit` |
 | Build | `npm run build` |
 
+## このプロジェクトが解決する問題
+
+1. **dev-shared の `/feature` と `/cleanup` が分離** → 手動で繋ぐのが面倒 → `/implement` で統合
+2. **Claude Code の plan mode 承認後にコンテキスト消失** → 後続ステップを忘れる → `workflow-state.json` で状態永続化
+3. **並列で複数 issue を捌く UI がない** → Ship Grid で並列セッションを一望
+4. **LLM に任せるとブレる制御が確定的でない** → issue ラベル・worktree・ポート管理はスクリプトに移譲
+5. **CLI の stream-json 出力をそのまま全表示するとメモリを大量消費** → Engine 側でフィルタリング・要約し、フロントエンドにはステータス変化と重要メッセージのみ転送する設計が必要
+
 ## コーディング規約
 
 dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/CLAUDE.md` を参照。
