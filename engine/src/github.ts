@@ -352,8 +352,12 @@ export async function addSubIssue(
  */
 export function parseDependencies(body: string): number[] {
   if (!body) return [];
-  const sectionMatch = body.match(/## Dependencies\s*\n([\s\S]*?)(?:\n##|$)/);
-  if (!sectionMatch?.[1]) return [];
+  // Match "## Dependencies" at line start (excludes ### Dependencies),
+  // capture everything until the next ## header or end of string.
+  const sectionMatch = body.match(
+    /^## Dependencies[^\S\r\n]*\r?\n([\s\S]*?)(?:\r?\n(?=##)|$(?![\s\S]))/m,
+  );
+  if (!sectionMatch?.[1]?.trim()) return [];
   const section = sectionMatch[1];
   const nums = new Set<number>();
   for (const m of section.matchAll(/#(\d+)/g)) {
@@ -387,42 +391,3 @@ export async function getOpenBodyDependencies(
   return results.filter((n): n is number => n !== null);
 }
 
-export async function getSubIssues(
-  repo: string,
-  issueNumber: number,
-): Promise<Array<{ number: number; title: string; state: string }>> {
-  const [owner, repoName] = repo.split("/");
-  if (!owner || !repoName) return [];
-  const raw = await gh([
-    "api",
-    "graphql",
-    "-f",
-    `query=query($owner: String!, $repo: String!, $number: Int!) {
-      repository(owner: $owner, name: $repo) {
-        issue(number: $number) {
-          subIssues(first: 50) {
-            nodes { number title state }
-          }
-        }
-      }
-    }`,
-    "-f",
-    `owner=${owner}`,
-    "-f",
-    `repo=${repoName}`,
-    "-F",
-    `number=${issueNumber}`,
-  ]);
-  const result = JSON.parse(raw) as {
-    data: {
-      repository: {
-        issue: {
-          subIssues: {
-            nodes: Array<{ number: number; title: string; state: string }>;
-          };
-        };
-      };
-    };
-  };
-  return result.data.repository.issue.subIssues.nodes;
-}

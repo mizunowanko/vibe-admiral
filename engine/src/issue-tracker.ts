@@ -9,29 +9,30 @@ export async function getUnblockedTodoIssues(
   repo: string,
 ): Promise<UnblockedIssue[]> {
   const issues = await github.listIssues(repo, "todo");
-  const unblocked: UnblockedIssue[] = [];
 
-  for (const issue of issues) {
-    const blocked = await isBlocked(repo, issue.number);
-    if (!blocked) {
-      unblocked.push({ ...issue, repo });
-    }
-  }
+  const results = await Promise.all(
+    issues.map(async (issue) => {
+      const blocked = await isBlocked(repo, issue.number, issue.body);
+      return blocked ? null : { ...issue, repo };
+    }),
+  );
 
-  return unblocked;
+  return results.filter((r): r is UnblockedIssue => r !== null);
 }
 
 export async function isBlocked(
   repo: string,
   number: number,
+  body?: string,
 ): Promise<boolean> {
   const subIssues = await github.listSubIssues(repo, number);
   const blockedBySub = subIssues.some((s) => s.state === "open");
   if (blockedBySub) return true;
 
-  // Also check body-based dependencies
-  const issue = await github.getIssue(repo, number);
-  const openBodyDeps = await github.getOpenBodyDependencies(repo, issue.body);
+  // Use provided body to avoid redundant API call
+  const issueBody =
+    body ?? (await github.getIssue(repo, number)).body;
+  const openBodyDeps = await github.getOpenBodyDependencies(repo, issueBody);
   return openBodyDeps.length > 0;
 }
 
