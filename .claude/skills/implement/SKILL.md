@@ -74,30 +74,6 @@ echo "${VIBE_ADMIRAL:-not_set}"
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
 
-## フェーズ宣言
-
-Ship は自分の現在フェーズを `.claude/ship-status.json` に書き込むことで Engine に通知する。
-Engine はこのファイルを監視し、GitHub Issue のステータスラベルを自動更新する。
-
-**各ステップの冒頭で、対応するフェーズを宣言すること:**
-
-```bash
-cat > .claude/ship-status.json << 'STATUSEOF'
-{"phase": "<phase-name>"}
-STATUSEOF
-```
-
-| Step | フェーズ (`phase`) |
-|------|-------------------|
-| 3 (調査) | `investigating` |
-| 4 (計画) | `planning` |
-| 5 (実装) | `implementing` |
-| 6 (ビルド検証) | `testing` |
-| 8 (テスト再実行) | `testing` |
-| 9 (コミット & PR) | `reviewing` |
-| 11 (受け入れテスト) | `acceptance-test` |
-| 15 (マージ) | `merging` |
-
 ## ワークフロー
 
 ### Step 1: GH Issue の特定
@@ -234,23 +210,6 @@ PR URL をユーザーに報告して Step 10 へ進む。
 
 push した時点で CI が走り始める。CI の完了を待たずにコードレビューを実施する。
 
-#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
-
-Bridge が PR を検出して自動的にレビューする。Ship 側は `.claude/pr-review-response.json` の出現を待機する:
-
-```bash
-echo "Waiting for Bridge PR review..."
-while [ ! -f .claude/pr-review-response.json ]; do
-  sleep 3
-done
-cat .claude/pr-review-response.json
-```
-
-- `verdict: "approve"` → Step 11 へ進む
-- `verdict: "request-changes"` → `comments` を読んで修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機ループ
-
-#### VIBE_ADMIRAL 未設定時
-
 1. `/review-pr` スキルをバックグラウンドで起動する（Task ツール `run_in_background: true`）
 2. Step 11 へ進む
 
@@ -329,26 +288,6 @@ gh pr checks "$PR_NUM" --watch
 
 **このステップを完了するまで絶対に Step 15 に進んではならない。**
 レビュー結果の確認はマージの前提条件である。レビューが未完了の場合は完了を待つこと。
-
-#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
-
-Step 10 で Bridge レビューの approve/request-changes の対応が完了している場合は、そのまま Step 15 へ進む。
-Step 10 で Bridge レビューをスキップした場合（レスポンスファイルが存在しない場合）は、待機する:
-
-```bash
-if [ ! -f .claude/pr-review-response.json ]; then
-  echo "Waiting for Bridge PR review..."
-  while [ ! -f .claude/pr-review-response.json ]; do
-    sleep 3
-  done
-fi
-cat .claude/pr-review-response.json
-```
-
-- `verdict: "approve"` → Step 15 へ
-- `verdict: "request-changes"` → 修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機
-
-#### VIBE_ADMIRAL 未設定時
 
 バックグラウンドのレビュー結果を確認する（Read ツールで output_file を確認）。
 レビューエージェントがまだ実行中の場合は、完了するまで待機する（output_file を定期的に確認）。

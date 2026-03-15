@@ -22,7 +22,6 @@ Claude Code CLI (claude -p --output-format stream-json)
 ```
 
 - **Frontend**: React 19 + Vite 6 + Tailwind CSS v4 + Zustand 5 + shadcn/ui
-- **Desktop**: Tauri v2 (`tauri-plugin-shell`)
 - **Engine**: Node.js + `ws`
 - **Data**: GitHub Issues が真実の源（ローカル DB なし）
 - **確定的制御**: issue ラベル / worktree / ポート管理はスクリプト。LLM は知性が必要な作業のみ
@@ -53,7 +52,6 @@ engine/               Node.js sidecar
     issue-tracker.ts  issue 状態トラッキング
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
-src-tauri/            Tauri shell
 skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 ```
 
@@ -63,7 +61,6 @@ skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 |---------|---------|
 | Frontend dev | `npm run dev` |
 | Engine dev | `npx tsx engine/src/index.ts` |
-| Tauri dev | `npm run tauri dev` |
 | Type check (frontend) | `npx tsc --noEmit` |
 | Type check (engine) | `cd engine && npx tsc --noEmit` |
 | Build | `npm run build` |
