@@ -46,7 +46,9 @@ export function parseStreamMessage(
         return {
           type: "tool_use",
           tool: toolName,
-          content: toolName,
+          content: toolInput
+            ? JSON.stringify(toolInput, null, 2)
+            : toolName,
           ...(toolInput ? { toolInput } : {}),
         };
       }
@@ -74,6 +76,15 @@ export function parseStreamMessage(
         type: "system",
         subtype,
         content: (raw.content as string) ?? subtype ?? "system",
+      };
+    }
+
+    case "tool_result": {
+      const content = raw.content as string | undefined;
+      if (!content) return null;
+      return {
+        type: "tool_result",
+        content,
       };
     }
 

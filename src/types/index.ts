@@ -81,6 +81,7 @@ export interface StreamMessage {
     | "history";
   content?: string;
   tool?: string;
+  toolInput?: Record<string, unknown>;
   subtype?: string;
   timestamp?: number;
 }

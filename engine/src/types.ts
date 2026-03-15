@@ -27,8 +27,11 @@ export interface Fleet {
   name: string;
   repos: FleetRepo[];
   skillSources?: FleetSkillSources;
+  /** Rule files loaded for both Bridge and Ship sessions (fleet-wide context). */
   sharedRulePaths?: string[];
+  /** Rule files loaded only for the Bridge session (e.g. triage policies). */
   bridgeRulePaths?: string[];
+  /** Rule files loaded only for Ship sessions (e.g. implementation constraints). */
   shipRulePaths?: string[];
   createdAt: string;
 }

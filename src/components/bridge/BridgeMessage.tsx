@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
+import { getStatusColor } from "@/lib/ship-status";
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -19,30 +20,10 @@ interface BridgeMessageProps {
   repeatCount?: number;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  sortie: "text-yellow-400",
-  investigating: "text-blue-400",
-  planning: "text-indigo-400",
-  implementing: "text-violet-400",
-  testing: "text-cyan-400",
-  reviewing: "text-orange-400",
-  "acceptance-test": "text-amber-400",
-  merging: "text-emerald-400",
-  done: "text-green-400",
-  error: "text-red-400",
-};
-
 function formatTime(ts?: number): string | null {
   if (!ts) return null;
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function getStatusColor(content: string): string {
-  for (const [status, color] of Object.entries(STATUS_COLORS)) {
-    if (content.includes(`: ${status}`)) return color;
-  }
-  return "text-muted-foreground";
 }
 
 export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
@@ -55,6 +36,8 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
 
   // Tool use — collapsible by default
   if (message.type === "tool_use") {
+    const hasContent = Boolean(message.toolInput) ||
+      (message.content && message.content !== message.tool);
     return (
       <div className="flex w-full justify-start">
         <button
@@ -71,8 +54,34 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
               [{message.tool}]
             </span>
           </div>
-          {toolExpanded && message.content && message.content !== message.tool && (
+          {toolExpanded && hasContent && (
             <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground/80 mt-1.5 font-mono leading-relaxed">
+              {message.content}
+            </pre>
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  // Tool result — collapsible
+  if (message.type === "tool_result") {
+    return (
+      <div className="flex w-full justify-start">
+        <button
+          type="button"
+          className={cn(
+            "max-w-[90%] rounded border-l-2 border-emerald-500/30 px-3 py-1.5 cursor-pointer select-none text-left",
+            "hover:bg-muted/30 transition-colors",
+          )}
+          onClick={() => setResultExpanded(!resultExpanded)}
+        >
+          <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-400/70">
+            <span className="text-[10px]">{resultExpanded ? "▼" : "▶"}</span>
+            <span>result</span>
+          </div>
+          {resultExpanded && message.content && (
+            <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground/80 mt-1.5 font-mono leading-relaxed max-h-60 overflow-y-auto">
               {message.content}
             </pre>
           )}
