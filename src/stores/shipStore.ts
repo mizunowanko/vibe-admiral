@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Ship, ShipStatus, StreamMessage, AcceptanceTestRequest } from "@/types";
+import type { Ship, ShipStatus, StreamMessage, AcceptanceTestRequest, GateCheckState } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
 interface ShipStatusData {
@@ -19,6 +19,8 @@ interface ShipState {
   setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
   setAcceptanceTest: (id: string, test: AcceptanceTestRequest) => void;
+  setGateCheck: (id: string, gateCheck: GateCheckState) => void;
+  clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
   selectShip: (id: string | null) => void;
 
@@ -52,6 +54,7 @@ export const useShipStore = create<ShipState>((set) => ({
         prReviewStatus: null,
         acceptanceTest: null,
         acceptanceTestApproved: false,
+        gateCheck: null,
         createdAt: new Date().toISOString(),
         ...shipData,
       } as Ship);
@@ -88,6 +91,7 @@ export const useShipStore = create<ShipState>((set) => ({
           prReviewStatus: null,
           acceptanceTest: null,
           acceptanceTestApproved: false,
+          gateCheck: null,
           createdAt: new Date().toISOString(),
         });
       }
@@ -121,6 +125,28 @@ export const useShipStore = create<ShipState>((set) => ({
       const ship = ships.get(id);
       if (ship) {
         ships.set(id, { ...ship, acceptanceTest: test, status: "acceptance-test" });
+      }
+      return { ships };
+    });
+  },
+
+  setGateCheck: (id, gateCheck) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      const ship = ships.get(id);
+      if (ship) {
+        ships.set(id, { ...ship, gateCheck });
+      }
+      return { ships };
+    });
+  },
+
+  clearGateCheck: (id) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      const ship = ships.get(id);
+      if (ship) {
+        ships.set(id, { ...ship, gateCheck: null });
       }
       return { ships };
     });

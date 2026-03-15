@@ -36,6 +36,23 @@ export interface Fleet {
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
+// === Gate ===
+export type GateTransition =
+  | "planning→implementing"
+  | "testing→reviewing"
+  | "reviewing→acceptance-test"
+  | "acceptance-test→merging";
+
+export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+export type GateStatus = "pending" | "approved" | "rejected";
+
+export interface GateCheckState {
+  transition: GateTransition;
+  gateType: GateType;
+  status: GateStatus;
+  feedback?: string;
+}
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -52,6 +69,7 @@ export interface Ship {
   prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
+  gateCheck: GateCheckState | null;
   createdAt: string;
 }
 
@@ -170,6 +188,27 @@ export type ServerMessage =
   | {
       type: "ship:done";
       data: { id: string; prUrl?: string; merged: boolean };
+    }
+  | {
+      type: "ship:gate-pending";
+      data: {
+        id: string;
+        transition: GateTransition;
+        gateType: GateType;
+        fleetId: string;
+        issueNumber: number;
+        issueTitle: string;
+      };
+    }
+  | {
+      type: "ship:gate-resolved";
+      data: {
+        id: string;
+        transition: GateTransition;
+        gateType: GateType;
+        approved: boolean;
+        feedback?: string;
+      };
     }
   | { type: "ship:data"; data: Ship[] }
   | { type: "fleet:data"; data: Fleet[] }

@@ -11,6 +11,44 @@ export type ShipStatus =
   | "done"
   | "error";
 
+// === Gate ===
+
+/** A transition key in the format "from→to" (using full-width arrow). */
+export type GateTransition =
+  | "planning→implementing"
+  | "testing→reviewing"
+  | "reviewing→acceptance-test"
+  | "acceptance-test→merging";
+
+/** Gate type determines which sub-agent or mechanism handles the check. */
+export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+
+/** Per-gate configuration: true = default type, string = specific type, false = disabled. */
+export type GateConfig = boolean | GateType;
+
+/** Fleet-level gate settings. Omitted transitions use defaults. */
+export type FleetGateSettings = Partial<Record<GateTransition, GateConfig>>;
+
+/** Default gate types for each transition. */
+export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
+  "planning→implementing": "plan-review",
+  "testing→reviewing": "code-review",
+  "reviewing→acceptance-test": "playwright",
+  "acceptance-test→merging": "human",
+};
+
+/** Status of a pending gate check. */
+export type GateStatus = "pending" | "approved" | "rejected";
+
+/** Gate check state stored on a Ship. */
+export interface GateCheckState {
+  transition: GateTransition;
+  gateType: GateType;
+  status: GateStatus;
+  feedback?: string;
+  requestedAt: string;
+}
+
 // === Fleet ===
 export interface FleetRepo {
   localPath: string;
@@ -33,6 +71,8 @@ export interface Fleet {
   bridgeRulePaths?: string[];
   /** Rule files loaded only for Ship sessions (e.g. implementation constraints). */
   shipRulePaths?: string[];
+  /** Gate settings: which transition gates are enabled and their types. */
+  gates?: FleetGateSettings;
   createdAt: string;
 }
 
@@ -55,6 +95,7 @@ export interface Ship {
   prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
+  gateCheck: GateCheckState | null;
   createdAt: string;
 }
 
@@ -122,7 +163,8 @@ export type BridgeRequest =
   | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
-  | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string };
+  | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
+  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
@@ -166,6 +208,19 @@ export interface ShipProcess {
   prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
+  gateCheck: GateCheckState | null;
   createdAt: string;
   completedAt?: number;
+}
+
+// === Gate File IPC (Engine → Ship file message board) ===
+export interface GateFileRequest {
+  transition: GateTransition;
+  gateType: GateType;
+  message: string;
+}
+
+export interface GateFileResponse {
+  approved: boolean;
+  feedback?: string;
 }

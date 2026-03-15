@@ -21,6 +21,7 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
       className={cn(
         "cursor-pointer rounded-lg border border-border bg-card p-4 transition-all hover:border-primary/50 hover:shadow-md",
         ship.status === "acceptance-test" && "border-amber-500/50 ring-1 ring-amber-500/20",
+        ship.gateCheck?.status === "pending" && "border-sky-500/50 ring-1 ring-sky-500/20",
       )}
     >
       {/* Header */}
@@ -39,6 +40,12 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
             <Badge className="text-[10px] bg-purple-500/20 text-purple-400">
               <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
               Compacting
+            </Badge>
+          )}
+          {ship.gateCheck && ship.gateCheck.status === "pending" && (
+            <Badge className="text-[10px] bg-sky-500/20 text-sky-400">
+              <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+              Gate
             </Badge>
           )}
         </div>
@@ -83,6 +90,28 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
             <span className="text-xs text-muted-foreground">
               {ship.acceptanceTest.url}
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Gate Check Status */}
+      {ship.gateCheck && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              {ship.gateCheck.transition}
+            </span>
+            {ship.gateCheck.status === "pending" && (
+              <span className="text-[10px] text-sky-400">Awaiting review</span>
+            )}
+            {ship.gateCheck.status === "rejected" && (
+              <span className="text-[10px] text-red-400">Rejected</span>
+            )}
+          </div>
+          {ship.gateCheck.feedback && (
+            <p className="text-[10px] text-muted-foreground mt-1 truncate">
+              {ship.gateCheck.feedback}
+            </p>
           )}
         </div>
       )}

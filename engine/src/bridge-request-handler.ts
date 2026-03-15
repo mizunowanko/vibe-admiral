@@ -1,14 +1,39 @@
 import type { ShipManager } from "./ship-manager.js";
+import type { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StateSync } from "./state-sync.js";
-import type { BridgeRequest, FleetRepo, FleetSkillSources } from "./types.js";
+import type { BridgeRequest, FleetRepo, FleetSkillSources, GateTransition } from "./types.js";
+import { parseTransition } from "./gate-config.js";
 
 export class BridgeRequestHandler {
   private shipManager: ShipManager;
   private stateSync: StateSync;
+  private shipRequestHandler: ShipRequestHandler | null = null;
+  private onGateApproved:
+    | ((shipId: string, transition: GateTransition) => void)
+    | null = null;
+  private onGateRejected:
+    | ((shipId: string, transition: GateTransition, feedback?: string) => void)
+    | null = null;
 
   constructor(shipManager: ShipManager, stateSync: StateSync) {
     this.shipManager = shipManager;
     this.stateSync = stateSync;
+  }
+
+  setShipRequestHandler(handler: ShipRequestHandler): void {
+    this.shipRequestHandler = handler;
+  }
+
+  setGateApprovedHandler(
+    handler: (shipId: string, transition: GateTransition) => void,
+  ): void {
+    this.onGateApproved = handler;
+  }
+
+  setGateRejectedHandler(
+    handler: (shipId: string, transition: GateTransition, feedback?: string) => void,
+  ): void {
+    this.onGateRejected = handler;
   }
 
   async handle(
@@ -28,6 +53,8 @@ export class BridgeRequestHandler {
         return this.handleShipStop(request);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
+      case "gate-result":
+        return this.handleGateResult(request);
     }
   }
 
@@ -101,7 +128,7 @@ export class BridgeRequestHandler {
     }
     const lines = ships.map(
       (s) =>
-        `  Ship ${s.id.slice(0, 8)}... #${s.issueNumber} (${s.issueTitle}): ${s.status}`,
+        `  Ship ${s.id.slice(0, 8)}... #${s.issueNumber} (${s.issueTitle}): ${s.status}${s.gateCheck ? ` [gate: ${s.gateCheck.transition} ${s.gateCheck.status}]` : ""}`,
     );
     return `[Ship Status]\n${lines.join("\n")}`;
   }
@@ -131,5 +158,49 @@ export class BridgeRequestHandler {
 
     const label = request.verdict === "approve" ? "APPROVED" : "CHANGES REQUESTED";
     return `[PR Review Result] Ship #${ship.issueNumber} PR #${request.prNumber}: ${label}${request.comments ? ` — ${request.comments}` : ""}`;
+  }
+
+  private async handleGateResult(
+    request: Extract<BridgeRequest, { request: "gate-result" }>,
+  ): Promise<string> {
+    const ship = this.shipManager.getShip(request.shipId);
+    if (!ship) {
+      return `[Gate Result Failed] Ship ${request.shipId} not found`;
+    }
+
+    if (!ship.gateCheck || ship.gateCheck.transition !== request.transition) {
+      return `[Gate Result Failed] Ship #${ship.issueNumber} has no pending gate for ${request.transition}`;
+    }
+
+    if (ship.gateCheck.status !== "pending") {
+      return `[Gate Result Failed] Ship #${ship.issueNumber} gate for ${request.transition} is already ${ship.gateCheck.status}`;
+    }
+
+    const approved = request.verdict === "approve";
+    await this.shipManager.respondToGate(
+      request.shipId,
+      approved,
+      request.feedback,
+    );
+
+    if (approved) {
+      // Execute the gated transition
+      const { to } = parseTransition(request.transition);
+      if (this.shipRequestHandler) {
+        const result = await this.shipRequestHandler.executeGatedTransition(
+          request.shipId,
+          to,
+        );
+        if (result.ok) {
+          this.onGateApproved?.(request.shipId, request.transition);
+          return `[Gate Approved] Ship #${ship.issueNumber}: ${request.transition} — transition confirmed`;
+        }
+        return `[Gate Approved but Transition Failed] Ship #${ship.issueNumber}: ${result.error}`;
+      }
+      return `[Gate Approved] Ship #${ship.issueNumber}: ${request.transition}`;
+    }
+
+    this.onGateRejected?.(request.shipId, request.transition, request.feedback);
+    return `[Gate Rejected] Ship #${ship.issueNumber}: ${request.transition}${request.feedback ? ` — ${request.feedback}` : ""}`;
   }
 }
