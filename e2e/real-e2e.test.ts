@@ -288,8 +288,8 @@ async function runTest(ws: WebSocket, fleetId: string): Promise<void> {
             // Truncate for readability
             const preview = content.length > 200 ? content.slice(0, 200) + "..." : content;
             log(`Bridge: ${preview}`);
-          } else if (type === "system" && message.subtype === "action-result") {
-            log(`Action result: ${content.slice(0, 200)}`);
+          } else if (type === "system" && message.subtype === "request-result") {
+            log(`Request result: ${content.slice(0, 200)}`);
           }
           break;
         }
