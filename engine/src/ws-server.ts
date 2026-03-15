@@ -11,7 +11,6 @@ import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
-import { ShipStatusWatcher } from "./ship-status-watcher.js";
 import { StatusManager } from "./status-manager.js";
 import { StateSync } from "./state-sync.js";
 import { BridgeRequestHandler } from "./bridge-request-handler.js";
@@ -20,7 +19,10 @@ import {
   parseStreamMessage,
   extractRequests,
   stripRequestBlocks,
+  isBridgeRequest,
+  isShipRequest,
 } from "./stream-parser.js";
+import { ShipRequestHandler } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeRequest, StreamMessage } from "./types.js";
 
@@ -34,10 +36,10 @@ export class EngineServer {
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
   private acceptanceWatcher: AcceptanceWatcher;
-  private shipStatusWatcher: ShipStatusWatcher;
   private statusManager: StatusManager;
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
+  private shipRequestHandler: ShipRequestHandler;
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
@@ -45,17 +47,16 @@ export class EngineServer {
   constructor(port: number) {
     this.processManager = new ProcessManager();
     this.acceptanceWatcher = new AcceptanceWatcher();
-    this.shipStatusWatcher = new ShipStatusWatcher();
     this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
       this.acceptanceWatcher,
-      this.shipStatusWatcher,
       this.statusManager,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
+    this.shipRequestHandler = new ShipRequestHandler(this.shipManager, this.statusManager);
 
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
@@ -63,6 +64,8 @@ export class EngineServer {
     this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
+    // Note: ShipStatusWatcher (file-based IPC) has been replaced by
+    // admiral-request protocol for Ship → Engine status transitions.
 
     console.log(`Engine WebSocket server running on port ${port}`);
   }
@@ -135,7 +138,9 @@ export class EngineServer {
             });
           // Check for admiral-request blocks in assistant text
           } else if (parsed.type === "assistant" && parsed.content) {
-            const requests = extractRequests(parsed.content);
+            const allRequests = extractRequests(parsed.content);
+            // Filter to Bridge-only requests (Ship requests from Bridge are ignored)
+            const requests = allRequests.filter(isBridgeRequest);
             const cleanContent = stripRequestBlocks(parsed.content);
 
             // Broadcast clean text (without request blocks) to frontend
@@ -167,16 +172,53 @@ export class EngineServer {
         // Ship stream — parse raw CLI JSON before broadcast
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          this.logShipMessage(id, parsed);
-          this.broadcast({
-            type: "ship:stream",
-            data: { id, message: parsed },
-          });
+          // Check for admiral-request blocks in Ship assistant text
+          if (parsed.type === "assistant" && parsed.content) {
+            const requests = extractRequests(parsed.content);
+            const cleanContent = stripRequestBlocks(parsed.content);
 
-          // Detect PR URL in result messages and notify Bridge
-          this.detectPRCreation(id, parsed);
-          // Detect git push after request-changes for re-review
-          this.detectPushForReReview(id, parsed);
+            // Broadcast clean text (without request blocks) to frontend
+            if (cleanContent) {
+              const cleanMessage = { ...parsed, content: cleanContent };
+              this.logShipMessage(id, cleanMessage);
+              this.broadcast({
+                type: "ship:stream",
+                data: { id, message: cleanMessage },
+              });
+            }
+
+            // Execute Ship requests (only status-transition allowed)
+            const shipRequests = requests.filter(isShipRequest);
+            if (shipRequests.length > 0) {
+              this.executeShipRequests(id, shipRequests);
+            }
+
+            // Reject any Bridge-only requests from Ship
+            const bridgeOnly = requests.filter(isBridgeRequest);
+            if (bridgeOnly.length > 0) {
+              console.warn(
+                `[ws-server] Ship ${id} attempted Bridge-only requests: ${bridgeOnly.map((r) => r.request).join(", ")}`,
+              );
+            }
+
+            // Detect PR URL and push for re-review in clean content
+            if (cleanContent) {
+              const cleanMsg = { ...parsed, content: cleanContent };
+              this.detectPRCreation(id, cleanMsg);
+              this.detectPushForReReview(id, cleanMsg);
+            }
+          } else {
+            this.logShipMessage(id, parsed);
+            this.broadcast({
+              type: "ship:stream",
+              data: { id, message: parsed },
+            });
+
+            // Detect PR URL in result messages and notify Bridge
+            this.detectPRCreation(id, parsed);
+            // Detect git push after request-changes for re-review
+            this.detectPushForReReview(id, parsed);
+          }
         }
       }
     });
@@ -202,20 +244,14 @@ export class EngineServer {
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
         const ship = this.shipManager.getShip(id);
-        const completedPhases = new Set(["merging"]);
-        if (code === 0 && ship && completedPhases.has(ship.status)) {
-          // Ship reached a late phase — treat as successful completion
+        // Ship explicitly declares "done" via admiral-request status-transition.
+        // If the process exits while in "done" status, treat as success.
+        // If in "merging" status (squash merge may kill the process), also treat as success.
+        const successPhases = new Set(["done", "merging"]);
+        if (ship && successPhases.has(ship.status)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
-        } else if (code === 0) {
-          // Ship exited code 0 but never got past early phases — likely a
-          // startup error (e.g. unknown skill). Don't close the issue.
-          this.shipManager.updateStatus(
-            id,
-            "error",
-            "Process exited before completing implementation",
-          );
-          this.stateSync.rollbackLabel(ship?.repo ?? "", ship?.issueNumber ?? 0).catch(console.error);
         } else {
+          // Process exited without declaring done — treat as failure
           this.stateSync.onProcessExit(id, false).catch(console.error);
         }
       }
@@ -796,6 +832,30 @@ export class EngineServer {
     this.processManager.sendMessage(bridgeId, results.join("\n\n"));
   }
 
+  private async executeShipRequests(
+    shipId: string,
+    requests: import("./types.js").ShipRequest[],
+  ): Promise<void> {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) return;
+
+    for (const request of requests) {
+      const response = await this.shipRequestHandler.handle(shipId, request);
+      // Write response file so Ship CLI can poll for the result
+      await ShipRequestHandler.writeResponse(ship.worktreePath, response);
+
+      if (response.ok) {
+        console.log(
+          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
+        );
+      } else {
+        console.warn(
+          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
+        );
+      }
+    }
+  }
+
   private runStartupReconciliation(): void {
     this.loadFleets()
       .then((fleets) => {
@@ -970,7 +1030,6 @@ export class EngineServer {
     this.bridgeManager.stopAll();
     this.processManager.killAll();
     this.acceptanceWatcher.unwatchAll();
-    this.shipStatusWatcher.unwatchAll();
     this.wss.close();
   }
 }
