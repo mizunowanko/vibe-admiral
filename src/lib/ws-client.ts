@@ -2,7 +2,8 @@ import type { ClientMessage, ServerMessage } from "@/types";
 
 type MessageHandler = (msg: ServerMessage) => void;
 
-const ENGINE_URL = "ws://localhost:9721";
+const ENGINE_PORT = import.meta.env.VITE_ENGINE_PORT ?? "9721";
+const ENGINE_URL = `ws://localhost:${ENGINE_PORT}`;
 
 export class WSClient {
   private ws: WebSocket | null = null;
