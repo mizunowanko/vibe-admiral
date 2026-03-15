@@ -17,10 +17,19 @@ export interface FleetRepo {
   remote?: string;
 }
 
+export interface FleetSkillSources {
+  implement?: string;
+  devSharedDir?: string;
+}
+
 export interface Fleet {
   id: string;
   name: string;
   repos: FleetRepo[];
+  skillSources?: FleetSkillSources;
+  sharedRulePaths?: string[];
+  bridgeRulePaths?: string[];
+  shipRulePaths?: string[];
   createdAt: string;
 }
 

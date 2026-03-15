@@ -66,12 +66,56 @@ Launch Ships (Claude Code implementation sessions) for issues. Supports multiple
 - Only sortie issues that are UNBLOCKED and have the "todo" label
 - Prefer launching dependency-free issues first
 - Multiple issues can be launched simultaneously via the \`requests\` array
+- Optional \`skill\` field per request: defaults to "/implement". Use "/test", "/refactor", etc. for specialized sorties
 
 ### 4. ship-status
 Get the current status of all Ships in this fleet.
 
 \`\`\`admiral-action
 { "action": "ship-status" }
+\`\`\`
+
+### 5. close-issue
+Close an issue, optionally with a comment.
+
+\`\`\`admiral-action
+{ "action": "close-issue", "repo": "${repos[0] ?? "owner/repo"}", "issueNumber": 42, "comment": "Resolved" }
+\`\`\`
+
+### 6. edit-issue
+Edit an existing issue's title, body, labels, or add a comment.
+
+\`\`\`admiral-action
+{
+  "action": "edit-issue",
+  "repo": "${repos[0] ?? "owner/repo"}",
+  "issueNumber": 42,
+  "title": "Updated title",
+  "labels": { "add": ["priority"], "remove": ["backlog"] },
+  "comment": "Reprioritized"
+}
+\`\`\`
+
+### 7. stop-ship
+Stop a running Ship by its ID.
+
+\`\`\`admiral-action
+{ "action": "stop-ship", "shipId": "uuid-of-ship" }
+\`\`\`
+
+### 8. organize-issues
+Batch multiple issue operations (create, edit, close) in a single action. Useful for reorganizing the issue backlog.
+
+\`\`\`admiral-action
+{
+  "action": "organize-issues",
+  "repo": "${repos[0] ?? "owner/repo"}",
+  "operations": [
+    { "op": "create", "title": "New task", "body": "Description", "labels": ["todo"] },
+    { "op": "edit", "issueNumber": 10, "labels": { "add": ["priority"] } },
+    { "op": "close", "issueNumber": 5, "comment": "Superseded by #10" }
+  ]
+}
 \`\`\`
 
 ## Autonomous Sortie Flow

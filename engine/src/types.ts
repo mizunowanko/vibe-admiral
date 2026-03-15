@@ -17,10 +17,19 @@ export interface FleetRepo {
   remote?: string;
 }
 
+export interface FleetSkillSources {
+  implement?: string;
+  devSharedDir?: string;
+}
+
 export interface Fleet {
   id: string;
   name: string;
   repos: FleetRepo[];
+  skillSources?: FleetSkillSources;
+  sharedRulePaths?: string[];
+  bridgeRulePaths?: string[];
+  shipRulePaths?: string[];
   createdAt: string;
 }
 
@@ -97,8 +106,13 @@ export interface ServerMessage {
 }
 
 // === Bridge Actions ===
+export type OrganizeOperation =
+  | { op: "create"; title: string; body: string; labels?: string[]; parentIssue?: number; dependsOn?: number[] }
+  | { op: "edit"; issueNumber: number; title?: string; body?: string; labels?: { add?: string[]; remove?: string[] }; comment?: string }
+  | { op: "close"; issueNumber: number; comment?: string };
+
 export type BridgeAction =
-  | { action: "sortie"; requests: Array<{ repo: string; issueNumber: number }> }
+  | { action: "sortie"; requests: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | {
       action: "create-issue";
       repo: string;
@@ -109,7 +123,19 @@ export type BridgeAction =
       dependsOn?: number[];
     }
   | { action: "list-issues"; repo: string; label?: string }
-  | { action: "ship-status" };
+  | { action: "ship-status" }
+  | { action: "close-issue"; repo: string; issueNumber: number; comment?: string }
+  | {
+      action: "edit-issue";
+      repo: string;
+      issueNumber: number;
+      title?: string;
+      body?: string;
+      labels?: { add?: string[]; remove?: string[] };
+      comment?: string;
+    }
+  | { action: "stop-ship"; shipId: string }
+  | { action: "organize-issues"; repo: string; operations: OrganizeOperation[] };
 
 // === Ship Process Info ===
 export interface ShipProcess {

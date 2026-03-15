@@ -14,23 +14,32 @@ export class ProcessManager extends EventEmitter {
     id: string,
     worktreePath: string,
     issueNumber: number,
+    extraPrompt?: string,
+    skill?: string,
   ): ChildProcess {
     // stdin must be 'ignore' — Bun-based Claude CLI replaces pipe FDs
     // with unix sockets when stdin is a pipe, breaking stdout capture.
+    const skillCmd = skill ?? "/implement";
+    const args = [
+      "-p",
+      `${skillCmd} ${issueNumber}`,
+      "--output-format",
+      "stream-json",
+      "--dangerously-skip-permissions",
+      "--disallowedTools",
+      "EnterPlanMode,ExitPlanMode",
+      "--max-turns",
+      "200",
+      "--verbose",
+    ];
+
+    if (extraPrompt) {
+      args.push("--append-system-prompt", extraPrompt);
+    }
+
     const proc = spawn(
       "claude",
-      [
-        "-p",
-        `/implement ${issueNumber}`,
-        "--output-format",
-        "stream-json",
-        "--dangerously-skip-permissions",
-        "--disallowedTools",
-        "EnterPlanMode,ExitPlanMode",
-        "--max-turns",
-        "200",
-        "--verbose",
-      ],
+      args,
       {
         cwd: worktreePath,
         env: {

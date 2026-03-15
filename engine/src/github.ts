@@ -134,9 +134,66 @@ export async function closeIssue(
     String(number),
     "--repo",
     repo,
-    "--comment",
-    "Closed via vibe-admiral Ship completion",
   ]);
+}
+
+export async function reopenIssue(
+  repo: string,
+  number: number,
+): Promise<void> {
+  await gh([
+    "issue",
+    "reopen",
+    String(number),
+    "--repo",
+    repo,
+  ]);
+}
+
+export async function addComment(
+  repo: string,
+  number: number,
+  body: string,
+): Promise<void> {
+  await gh([
+    "issue",
+    "comment",
+    String(number),
+    "--repo",
+    repo,
+    "--body",
+    body,
+  ]);
+}
+
+export async function editIssue(
+  repo: string,
+  number: number,
+  opts: {
+    title?: string;
+    body?: string;
+    labels?: { add?: string[]; remove?: string[] };
+    comment?: string;
+  },
+): Promise<void> {
+  const args = ["issue", "edit", String(number), "--repo", repo];
+  if (opts.title) args.push("--title", opts.title);
+  if (opts.body) args.push("--body", opts.body);
+  if (opts.labels?.add) {
+    for (const label of opts.labels.add) {
+      args.push("--add-label", label);
+    }
+  }
+  if (opts.labels?.remove) {
+    for (const label of opts.labels.remove) {
+      args.push("--remove-label", label);
+    }
+  }
+  await gh(args);
+
+  if (opts.comment) {
+    await addComment(repo, number, opts.comment);
+  }
 }
 
 export async function getDefaultBranch(repo: string): Promise<string> {
