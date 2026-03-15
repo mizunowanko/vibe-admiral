@@ -173,13 +173,13 @@ export class ShipManager {
     if (!ship) return;
     const currentIdx = phaseOrder.indexOf(ship.status);
 
+    const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     const tryAdvance = (target: ShipStatus): void => {
       const targetIdx = phaseOrder.indexOf(target);
       if (targetIdx > currentIdx) {
         // Gate: block advancement past acceptance-test until human approves
-        const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
         if (
-          ship.status === "acceptance-test" &&
+          currentIdx === acceptanceIdx &&
           targetIdx > acceptanceIdx &&
           !ship.acceptanceTestApproved
         ) {
