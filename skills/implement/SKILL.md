@@ -74,6 +74,30 @@ echo "${VIBE_ADMIRAL:-not_set}"
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
 
+## フェーズ宣言
+
+Ship は自分の現在フェーズを `.claude/ship-status.json` に書き込むことで Engine に通知する。
+Engine はこのファイルを監視し、GitHub Issue のステータスラベルを自動更新する。
+
+**各ステップの冒頭で、対応するフェーズを宣言すること:**
+
+```bash
+cat > .claude/ship-status.json << 'STATUSEOF'
+{"phase": "<phase-name>"}
+STATUSEOF
+```
+
+| Step | フェーズ (`phase`) |
+|------|-------------------|
+| 3 (調査) | `investigating` |
+| 4 (計画) | `planning` |
+| 5 (実装) | `implementing` |
+| 6 (ビルド検証) | `testing` |
+| 8 (テスト再実行) | `testing` |
+| 9 (コミット & PR) | `reviewing` |
+| 11 (受け入れテスト) | `acceptance-test` |
+| 15 (マージ) | `merging` |
+
 ## ワークフロー
 
 ### Step 1: GH Issue の特定

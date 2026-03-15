@@ -5,6 +5,7 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import { ShipStatusWatcher } from "./ship-status-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
@@ -17,6 +18,7 @@ export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private shipStatusWatcher: ShipStatusWatcher;
   private statusManager: StatusManager;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
@@ -25,11 +27,14 @@ export class ShipManager {
   constructor(
     processManager: ProcessManager,
     acceptanceWatcher: AcceptanceWatcher,
+    shipStatusWatcher: ShipStatusWatcher,
     statusManager: StatusManager,
   ) {
     this.processManager = processManager;
     this.acceptanceWatcher = acceptanceWatcher;
+    this.shipStatusWatcher = shipStatusWatcher;
     this.statusManager = statusManager;
+    this.setupShipStatusEvents();
   }
 
   setStatusChangeHandler(
@@ -103,8 +108,9 @@ export class ShipManager {
     // 7. Launch Claude CLI process
     this.processManager.sortie(shipId, worktreePath, issueNumber, extraPrompt, skill);
 
-    // 8. Start acceptance test watcher
+    // 8. Start acceptance test watcher and ship status watcher
     this.acceptanceWatcher.watch(worktreePath, shipId);
+    this.shipStatusWatcher.watch(worktreePath, shipId);
 
     this.updateStatus(shipId, "investigating");
     return ship;
@@ -114,6 +120,7 @@ export class ShipManager {
     const killed = this.processManager.kill(shipId);
     if (killed) {
       this.acceptanceWatcher.unwatch(shipId);
+      this.shipStatusWatcher.unwatch(shipId);
       this.updateStatus(shipId, "error", "Manually stopped");
     }
     return killed;
@@ -175,84 +182,45 @@ export class ShipManager {
     }
   }
 
-  updatePhaseFromStream(
-    id: string,
-    msg: { type: string; content?: string; tool?: string; toolInput?: Record<string, unknown> },
-  ): void {
-    // Phase progression order — never go backwards
+  /**
+   * Handle phase declarations from ShipStatusWatcher.
+   * Ship self-declares its phase via `.claude/ship-status.json`.
+   * Phase transitions are forward-only and gated by PR review / acceptance test.
+   */
+  advancePhase(id: string, target: ShipStatus): void {
     const phaseOrder: ShipStatus[] = [
       "sortie", "investigating", "planning", "implementing",
       "testing", "reviewing", "acceptance-test", "merging",
     ];
     const ship = this.ships.get(id);
     if (!ship) return;
+
     const currentIdx = phaseOrder.indexOf(ship.status);
+    const targetIdx = phaseOrder.indexOf(target);
+    if (targetIdx < 0 || targetIdx <= currentIdx) return;
 
-    const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
+    // Gate: block advancement past reviewing until Bridge approves PR
     const mergingIdx = phaseOrder.indexOf("merging");
-    const tryAdvance = (target: ShipStatus): void => {
-      const targetIdx = phaseOrder.indexOf(target);
-      if (targetIdx > currentIdx) {
-        // Gate: block advancement past reviewing until Bridge approves PR
-        // Check if the transition crosses the reviewing→merging boundary
-        if (
-          targetIdx >= mergingIdx &&
-          ship.prReviewStatus !== "approved"
-        ) {
-          return;
-        }
-        // Gate: block advancement past acceptance-test until human approves
-        // Check if the transition crosses the acceptance-test boundary
-        if (
-          targetIdx > acceptanceIdx &&
-          !ship.acceptanceTestApproved
-        ) {
-          return;
-        }
-        this.updateStatus(id, target);
-      }
-    };
-
-    // Detect phase from parsed stream message
-    const type = msg.type;
-    const content = msg.content ?? "";
-    const tool = msg.tool ?? "";
-
-    if (type === "assistant") {
-      if (content.includes("EnterPlanMode")) {
-        tryAdvance("planning");
-      } else if (content.includes("ExitPlanMode")) {
-        tryAdvance("implementing");
-      }
+    if (targetIdx >= mergingIdx && ship.prReviewStatus !== "approved") {
+      return;
     }
 
-    if (type === "tool_use") {
-      if (tool === "EnterPlanMode") {
-        tryAdvance("planning");
-      } else if (tool === "ExitPlanMode") {
-        tryAdvance("implementing");
-      } else if (tool === "Edit" || tool === "Write") {
-        tryAdvance("implementing");
-      } else if (tool === "Bash") {
-        const inputStr = msg.toolInput
-          ? JSON.stringify(msg.toolInput)
-          : "";
-        if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
-          tryAdvance("testing");
-        } else if (inputStr.includes("gh pr create")) {
-          tryAdvance("reviewing");
-        } else if (inputStr.includes("gh pr merge")) {
-          tryAdvance("merging");
-        }
-      } else if (tool === "Skill" || tool === "Task") {
-        const inputStr = msg.toolInput
-          ? JSON.stringify(msg.toolInput)
-          : content;
-        if (inputStr.includes("review-pr")) {
-          tryAdvance("reviewing");
-        }
-      }
+    // Gate: block advancement past acceptance-test until human approves
+    const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
+    if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
+      return;
     }
+
+    this.updateStatus(id, target);
+  }
+
+  private setupShipStatusEvents(): void {
+    this.shipStatusWatcher.on(
+      "phase",
+      (shipId: string, phase: ShipStatus) => {
+        this.advancePhase(shipId, phase);
+      },
+    );
   }
 
   async respondToPRReview(
@@ -337,5 +305,6 @@ export class ShipManager {
       this.processManager.kill(id);
     }
     this.acceptanceWatcher.unwatchAll();
+    this.shipStatusWatcher.unwatchAll();
   }
 }
