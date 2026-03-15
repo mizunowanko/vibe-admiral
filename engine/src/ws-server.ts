@@ -101,6 +101,11 @@ export class EngineServer {
               this.executeActionsSequentially(fleetId, bridgeId, actions);
             }
           } else {
+            // Detect init message and mark bridge as ready
+            if (parsed.type === "system" && parsed.subtype === "init") {
+              this.bridgeManager.onBridgeReady(fleetId);
+            }
+
             // Non-assistant or no content — pass through normally
             this.bridgeManager.addToHistory(fleetId, parsed);
             this.broadcast({
