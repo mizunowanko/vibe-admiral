@@ -190,7 +190,7 @@ export class EngineServer {
             // Execute Ship requests (only status-transition allowed)
             const shipRequests = requests.filter(isShipRequest);
             if (shipRequests.length > 0) {
-              this.executeShipRequests(id, shipRequests);
+              this.executeShipRequests(id, shipRequests).catch(console.error);
             }
 
             // Reject any Bridge-only requests from Ship
@@ -547,11 +547,18 @@ export class EngineServer {
         case "ship:accept": {
           const acceptId = data.id as string;
           this.shipManager.respondToAcceptanceTest(acceptId, true);
-          // Clear acceptance test state and advance status so frontend sees immediate feedback
+          // Transactional: sync GitHub label before updating internal state
           const acceptShip = this.shipManager.getShip(acceptId);
           if (acceptShip) {
             acceptShip.acceptanceTest = null;
-            this.shipManager.updateStatus(acceptId, "merging");
+            try {
+              await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");
+              this.shipManager.updateStatus(acceptId, "merging");
+            } catch (err) {
+              console.warn(`[ws-server] Failed to sync label for ship:accept #${acceptShip.issueNumber}:`, err);
+              // Still update internal state — the Ship already received the accept response
+              this.shipManager.updateStatus(acceptId, "merging");
+            }
           }
           break;
         }
@@ -562,11 +569,18 @@ export class EngineServer {
             false,
             data.feedback as string,
           );
-          // Clear acceptance test state; Ship CLI will re-request after fixing
+          // Transactional: sync GitHub label before updating internal state
           const rejectShip = this.shipManager.getShip(rejectId);
           if (rejectShip) {
             rejectShip.acceptanceTest = null;
-            this.shipManager.updateStatus(rejectId, "implementing");
+            try {
+              await this.statusManager.syncPhaseLabel(rejectShip.repo, rejectShip.issueNumber, "implementing");
+              this.shipManager.updateStatus(rejectId, "implementing");
+            } catch (err) {
+              console.warn(`[ws-server] Failed to sync label for ship:reject #${rejectShip.issueNumber}:`, err);
+              // Still update internal state — the Ship already received the reject response
+              this.shipManager.updateStatus(rejectId, "implementing");
+            }
           }
           break;
         }

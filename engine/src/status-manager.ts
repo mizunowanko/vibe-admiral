@@ -169,6 +169,9 @@ export class StatusManager {
   /**
    * Sync Ship phase to GitHub Issue label.
    * Replaces the current status/* label with the one matching the new phase.
+   *
+   * Throws on failure so callers (e.g. ShipRequestHandler) can enforce
+   * transactional guarantees — internal state is only updated after label sync succeeds.
    */
   async syncPhaseLabel(
     repo: string,
@@ -181,17 +184,10 @@ export class StatusManager {
     const currentLabel = await this.getCurrentStatusLabel(repo, issueNumber);
     if (currentLabel === newLabel) return; // already correct
 
-    try {
-      await github.updateLabels(repo, issueNumber, {
-        remove: currentLabel,
-        add: newLabel,
-      });
-    } catch (err) {
-      console.warn(
-        `[status-manager] Failed to sync phase label for #${issueNumber}: ${phase}`,
-        err,
-      );
-    }
+    await github.updateLabels(repo, issueNumber, {
+      remove: currentLabel,
+      add: newLabel,
+    });
   }
 
   private async applyTransition(
