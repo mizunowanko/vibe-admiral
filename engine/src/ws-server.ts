@@ -482,11 +482,20 @@ export class EngineServer {
     bridgeId: string,
     actions: import("./types.js").BridgeAction[],
   ): Promise<void> {
+    // Load fleet repos for whitelist validation
+    const fleets = await this.loadFleets();
+    const fleet = fleets.find((f) => f.id === fleetId);
+    const fleetRepos = fleet?.repos ?? [];
+
     const results: string[] = [];
 
     for (const action of actions) {
       try {
-        const result = await this.actionExecutor.execute(fleetId, action);
+        const result = await this.actionExecutor.execute(
+          fleetId,
+          action,
+          fleetRepos,
+        );
         results.push(result);
 
         // Broadcast each result to frontend as it completes

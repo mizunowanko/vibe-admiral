@@ -2,6 +2,21 @@ import type { ShipManager } from "./ship-manager.js";
 import type { BridgeAction } from "./types.js";
 import * as github from "./github.js";
 
+/**
+ * Extract all repo strings referenced by a BridgeAction.
+ */
+function getActionRepos(action: BridgeAction): string[] {
+  switch (action.action) {
+    case "list-issues":
+    case "create-issue":
+      return [action.repo];
+    case "sortie":
+      return action.requests.map((r) => r.repo);
+    case "ship-status":
+      return [];
+  }
+}
+
 export class ActionExecutor {
   private shipManager: ShipManager;
 
@@ -11,7 +26,23 @@ export class ActionExecutor {
     this.shipManager = shipManager;
   }
 
-  async execute(fleetId: string, action: BridgeAction): Promise<string> {
+  async execute(
+    fleetId: string,
+    action: BridgeAction,
+    fleetRepos: string[],
+  ): Promise<string> {
+    // Validate that all repos in the action are in the fleet's whitelist
+    const actionRepos = getActionRepos(action);
+    const repoSet = new Set(fleetRepos);
+    for (const repo of actionRepos) {
+      if (!repoSet.has(repo)) {
+        console.warn(
+          `[action-executor] Repo "${repo}" is not in fleet's registered repos: [${fleetRepos.join(", ")}]`,
+        );
+        return `[Action Rejected] Repo "${repo}" is not registered in this fleet. Registered repos: ${fleetRepos.join(", ")}`;
+      }
+    }
+
     switch (action.action) {
       case "sortie":
         return this.executeSortie(fleetId, action);
