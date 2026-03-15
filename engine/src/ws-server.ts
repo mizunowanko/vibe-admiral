@@ -29,6 +29,7 @@ export class EngineServer {
   private actionExecutor: ActionExecutor;
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
+  private bridgeFirstData = new Set<string>();
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -78,6 +79,23 @@ export class EngineServer {
       // Route to bridge or ship
       if (id.startsWith("bridge-")) {
         const fleetId = id.replace("bridge-", "");
+
+        // Emit "connected" status on first data from bridge CLI
+        if (!this.bridgeFirstData.has(id)) {
+          this.bridgeFirstData.add(id);
+          const pid = this.processManager.getPid(id);
+          const connMsg = {
+            type: "system" as const,
+            subtype: "bridge-status",
+            content: `Bridge CLI connected${pid ? ` (pid: ${pid})` : ""}`,
+          };
+          this.bridgeManager.addToHistory(fleetId, connMsg);
+          this.broadcast({
+            type: "bridge:stream",
+            data: { fleetId, message: connMsg },
+          });
+        }
+
         const parsed = parseStreamMessage(msg);
         if (parsed) {
           // Check for admiral-action blocks in assistant text
@@ -121,6 +139,7 @@ export class EngineServer {
 
     this.processManager.on("exit", (id: string, code: number | null) => {
       if (id.startsWith("bridge-")) {
+        this.bridgeFirstData.delete(id);
         const fleetId = id.replace("bridge-", "");
         console.log(`Bridge ${id} exited with code ${code}`);
         this.broadcast({
@@ -152,6 +171,19 @@ export class EngineServer {
 
     this.processManager.on("error", (id: string, error: Error) => {
       console.error(`Process ${id} error:`, error.message);
+      if (id.startsWith("bridge-")) {
+        const fleetId = id.replace("bridge-", "");
+        const errMsg = {
+          type: "system" as const,
+          subtype: "bridge-status",
+          content: `Failed to start Bridge CLI: ${error.message}`,
+        };
+        this.bridgeManager.addToHistory(fleetId, errMsg);
+        this.broadcast({
+          type: "bridge:stream",
+          data: { fleetId, message: errMsg },
+        });
+      }
       this.broadcast({
         type: "error",
         data: { source: id, message: error.message },
@@ -288,12 +320,26 @@ export class EngineServer {
                 fleet.name,
                 fleet.repos,
               );
+              // Notify frontend that bridge is starting
+              const startMsg = {
+                type: "system" as const,
+                subtype: "bridge-status",
+                content: "Starting Bridge session...",
+              };
+              this.broadcast({
+                type: "bridge:stream",
+                data: { fleetId, message: startMsg },
+              });
+
               this.bridgeManager.launch(
                 fleetId,
                 process.cwd(),
                 [],
                 prompt,
               );
+
+              // Store the start message in history after launch
+              this.bridgeManager.addToHistory(fleetId, startMsg);
             } finally {
               this.launchingBridges.delete(fleetId);
             }
