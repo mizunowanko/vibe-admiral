@@ -8,7 +8,8 @@ import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, ShipStatus, FleetSkillSources } from "./types.js";
+import { writeFile } from "node:fs/promises";
+import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,6 +91,7 @@ export class ShipManager {
       worktreePath,
       sessionId: null,
       prUrl: null,
+      prReviewStatus: null,
       acceptanceTest: null,
       acceptanceTestApproved: false,
       createdAt: new Date().toISOString(),
@@ -184,10 +186,20 @@ export class ShipManager {
     if (!ship) return;
     const currentIdx = phaseOrder.indexOf(ship.status);
 
+    const reviewingIdx = phaseOrder.indexOf("reviewing");
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
+    const mergingIdx = phaseOrder.indexOf("merging");
     const tryAdvance = (target: ShipStatus): void => {
       const targetIdx = phaseOrder.indexOf(target);
       if (targetIdx > currentIdx) {
+        // Gate: block advancement past reviewing to merging until Bridge approves PR
+        if (
+          currentIdx >= reviewingIdx &&
+          targetIdx >= mergingIdx &&
+          ship.prReviewStatus !== "approved"
+        ) {
+          return;
+        }
         // Gate: block advancement past acceptance-test until human approves
         if (
           currentIdx === acceptanceIdx &&
@@ -226,6 +238,8 @@ export class ShipManager {
           : "";
         if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
           tryAdvance("testing");
+        } else if (inputStr.includes("gh pr create")) {
+          tryAdvance("reviewing");
         } else if (inputStr.includes("gh pr merge")) {
           tryAdvance("merging");
         }
@@ -238,6 +252,22 @@ export class ShipManager {
         }
       }
     }
+  }
+
+  respondToPRReview(
+    shipId: string,
+    response: PRReviewResponse,
+  ): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+
+    ship.prReviewStatus = response.verdict === "approve" ? "approved" : "changes-requested";
+
+    // Write response file for Ship CLI to pick up
+    const responseFile = join(ship.worktreePath, ".claude", "pr-review-response.json");
+    writeFile(responseFile, JSON.stringify(response, null, 2)).catch((err) => {
+      console.error(`Failed to write PR review response for ${shipId}:`, err);
+    });
   }
 
   respondToAcceptanceTest(

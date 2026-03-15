@@ -151,6 +151,9 @@ export class EngineServer {
             type: "ship:stream",
             data: { id, message: parsed },
           });
+
+          // Detect PR URL in result messages and notify Bridge
+          this.detectPRCreation(id, parsed);
         }
       }
     });
@@ -754,6 +757,64 @@ export class EngineServer {
       .catch((err) => {
         console.warn("[engine] Startup reconciliation failed:", err);
       });
+  }
+
+  private detectPRCreation(
+    id: string,
+    msg: StreamMessage,
+  ): void {
+    if (!msg.content) return;
+    // Match GitHub PR URLs in assistant or result messages
+    if (msg.type !== "assistant" && msg.type !== "result") return;
+
+    const prUrlMatch = msg.content.match(
+      /https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/,
+    );
+    if (!prUrlMatch) return;
+
+    const ship = this.shipManager.getShip(id);
+    if (!ship || ship.prUrl) return; // Already detected
+
+    const prUrl = prUrlMatch[0];
+    const repo = prUrlMatch[1]!;
+    const prNumber = parseInt(prUrlMatch[2]!, 10);
+
+    // Store PR URL on ship
+    ship.prUrl = prUrl;
+    ship.prReviewStatus = "pending";
+
+    // Broadcast PR creation to frontend
+    this.broadcast({
+      type: "ship:status",
+      data: {
+        id,
+        status: ship.status,
+        detail: `PR created: ${prUrl}`,
+        fleetId: ship.fleetId,
+        repo: ship.repo,
+        issueNumber: ship.issueNumber,
+        issueTitle: ship.issueTitle,
+      },
+    });
+
+    // Notify Bridge for code review
+    const reviewMessage = {
+      type: "system" as const,
+      subtype: "pr-review-request",
+      content: `Ship #${ship.issueNumber} (${ship.issueTitle}) created PR #${prNumber}: ${prUrl}\nRepo: ${repo}\nShip ID: ${ship.id}\n\nPlease review the PR using \`gh pr diff ${prNumber} --repo ${repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
+    };
+    this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
+    this.broadcast({
+      type: "bridge:stream",
+      data: { fleetId: ship.fleetId, message: reviewMessage },
+    });
+
+    // Send the review request to Bridge's stdin so it processes it
+    const bridgeId = `bridge-${ship.fleetId}`;
+    this.processManager.sendMessage(
+      bridgeId,
+      `[PR Review Request] Ship #${ship.issueNumber} created PR #${prNumber}: ${prUrl} (repo: ${repo}, shipId: ${ship.id}). Please review the diff and submit your verdict.`,
+    );
   }
 
   private logShipMessage(

@@ -34,7 +34,7 @@ For operations that ONLY the Engine can perform (Ship management), use \`admiral
 
 The Engine intercepts these blocks, executes them, and returns results to you.
 
-### Available Requests (3 total)
+### Available Requests (4 total)
 
 #### 1. sortie
 Launch Ships (Claude Code implementation sessions) for issues.
@@ -60,6 +60,17 @@ Stop a running Ship by its ID.
 
 \`\`\`admiral-request
 { "request": "ship-stop", "shipId": "uuid-of-ship" }
+\`\`\`
+
+#### 4. pr-review-result
+Submit the result of a PR code review. The Engine will notify the Ship and write a response file so it can proceed (approve) or fix issues (request-changes).
+
+\`\`\`admiral-request
+{ "request": "pr-review-result", "shipId": "uuid-of-ship", "prNumber": 42, "verdict": "approve" }
+\`\`\`
+
+\`\`\`admiral-request
+{ "request": "pr-review-result", "shipId": "uuid-of-ship", "prNumber": 42, "verdict": "request-changes", "comments": "Description of required changes" }
 \`\`\`
 
 ## Issue Reading Rules
@@ -157,6 +168,32 @@ When the user describes work to be done:
 ## Ship Status Updates
 
 You will receive system messages when Ship statuses change (e.g., "Ship #42: implementing → testing"). Use these to keep the user informed about progress.
+
+## PR Code Review
+
+You will receive system messages when a Ship creates a PR (e.g., "Ship #42 created PR: https://github.com/.../pull/99"). **You are responsible for reviewing the PR before the Ship can merge.**
+
+### Review Flow
+
+1. When you see a PR creation notification, run \`gh pr diff <number> --repo <repo>\` to read the diff
+2. Review the changes against these criteria:
+   - Does the change fulfill the issue requirements?
+   - Does it conflict with other Ships' work?
+   - Does it follow the project's architecture and coding conventions?
+   - Are there out-of-scope changes that should be removed?
+3. Submit your verdict via \`pr-review-result\` admiral-request:
+   - **approve**: Code looks good, Ship may proceed to merge
+   - **request-changes**: Issues found; include \`comments\` describing what needs fixing
+4. Also submit the formal GitHub review:
+   - \`gh pr review <number> --repo <repo> --approve\`
+   - \`gh pr review <number> --repo <repo> --request-changes --body "..."\`
+
+### Review Guidelines
+
+- Minor style issues: approve and note them, don't block the merge
+- Missing tests for new logic: request changes
+- Security concerns or data loss risks: request changes and escalate to the human
+- Out-of-scope refactoring: request changes
 
 ## Response Style
 
