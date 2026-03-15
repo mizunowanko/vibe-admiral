@@ -15,6 +15,8 @@ export class ProcessManager extends EventEmitter {
     worktreePath: string,
     issueNumber: number,
   ): ChildProcess {
+    // stdin must be 'ignore' — Bun-based Claude CLI replaces pipe FDs
+    // with unix sockets when stdin is a pipe, breaking stdout capture.
     const proc = spawn(
       "claude",
       [
@@ -23,6 +25,8 @@ export class ProcessManager extends EventEmitter {
         "--output-format",
         "stream-json",
         "--dangerously-skip-permissions",
+        "--disallowedTools",
+        "EnterPlanMode,ExitPlanMode",
         "--max-turns",
         "200",
         "--verbose",
@@ -33,7 +37,7 @@ export class ProcessManager extends EventEmitter {
           ...process.env,
           VIBE_ADMIRAL: "true",
         },
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
 
@@ -89,6 +93,7 @@ export class ProcessManager extends EventEmitter {
     message: string,
     cwd: string,
   ): ChildProcess {
+    // stdin must be 'ignore' — same Bun pipe issue as sortie()
     const proc = spawn(
       "claude",
       [
@@ -100,6 +105,8 @@ export class ProcessManager extends EventEmitter {
         "stream-json",
         "--verbose",
         "--dangerously-skip-permissions",
+        "--disallowedTools",
+        "EnterPlanMode,ExitPlanMode",
       ],
       {
         cwd,
@@ -107,7 +114,7 @@ export class ProcessManager extends EventEmitter {
           ...process.env,
           VIBE_ADMIRAL: "true",
         },
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
 
@@ -141,6 +148,9 @@ export class ProcessManager extends EventEmitter {
 
   private setupProcess(id: string, proc: ChildProcess): void {
     this.processes.set(id, proc);
+    const shortId = id.slice(0, 8);
+
+    console.log(`[proc:${shortId}] spawned (pid=${proc.pid})`);
 
     let buffer = "";
     proc.stdout?.on("data", (chunk: Buffer) => {
@@ -162,16 +172,19 @@ export class ProcessManager extends EventEmitter {
     proc.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
       if (text) {
+        console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
         this.emit("error", id, new Error(text));
       }
     });
 
     proc.on("exit", (code) => {
+      console.log(`[proc:${shortId}] exited (code=${code})`);
       this.processes.delete(id);
       this.emit("exit", id, code);
     });
 
     proc.on("error", (err) => {
+      console.error(`[proc:${shortId}] error: ${err.message}`);
       this.processes.delete(id);
       this.emit("error", id, err);
     });
