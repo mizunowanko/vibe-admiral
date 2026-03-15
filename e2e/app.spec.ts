@@ -2,18 +2,40 @@ import { test, expect, type Page } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 
+/**
+ * Reset mock engine state via a special WebSocket message.
+ * This ensures test isolation by clearing accumulated fleets.
+ */
+async function resetMockEngine(page: Page) {
+  await page.evaluate(() => {
+    const ws = new WebSocket("ws://localhost:9720");
+    return new Promise<void>((resolve) => {
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "__test:reset" }));
+        ws.close();
+        resolve();
+      };
+      ws.onerror = () => resolve();
+    });
+  });
+}
+
 test.describe("Connection", () => {
   test("shows engine connected indicator when mock engine is running", async ({
     page,
   }) => {
     await page.goto("/");
-    // Wait for the green connection dot in the sidebar header
-    const dot = page.locator("div.rounded-full.bg-green-500").first();
+    const dot = page.getByTestId("engine-status");
     await expect(dot).toBeVisible({ timeout: 10000 });
+    await expect(dot).toHaveClass(/bg-green-500/, { timeout: 10000 });
   });
 });
 
 test.describe("Fleet management", () => {
+  test.beforeEach(async ({ page }) => {
+    await resetMockEngine(page);
+  });
+
   test("creates a fleet from the + button", async ({ page }) => {
     await page.goto("/");
     await waitForConnection(page);
@@ -43,8 +65,10 @@ test.describe("Fleet management", () => {
     // Create the fleet
     await page.getByRole("button", { name: "Create Fleet" }).click();
 
-    // Fleet should appear in sidebar (fleet:data updates the list)
-    const fleetItem = page.locator("button").filter({ hasText: "Test Fleet Alpha" });
+    // Fleet should appear in sidebar
+    const fleetItem = page
+      .locator("button")
+      .filter({ hasText: "Test Fleet Alpha" });
     await expect(fleetItem).toBeVisible({ timeout: 5000 });
   });
 
@@ -75,6 +99,10 @@ test.describe("Fleet management", () => {
 });
 
 test.describe("Bridge", () => {
+  test.beforeEach(async ({ page }) => {
+    await resetMockEngine(page);
+  });
+
   test("sends a message and receives a response", async ({ page }) => {
     await page.goto("/");
     await waitForConnection(page);
@@ -83,7 +111,7 @@ test.describe("Bridge", () => {
     await createAndSelectFleet(page, "Chat Test Fleet");
 
     // Bridge view should show the input
-    const input = page.getByPlaceholder(/Bridge|command/i);
+    const input = page.getByPlaceholder("Send a command to the Bridge...");
     await expect(input).toBeVisible({ timeout: 5000 });
 
     // Type and send a message
@@ -101,6 +129,10 @@ test.describe("Bridge", () => {
 });
 
 test.describe("Ships", () => {
+  test.beforeEach(async ({ page }) => {
+    await resetMockEngine(page);
+  });
+
   test("shows ships view with sortie button", async ({ page }) => {
     await page.goto("/");
     await waitForConnection(page);
@@ -111,7 +143,7 @@ test.describe("Ships", () => {
     // Switch to Ships view
     await page.getByRole("button", { name: "Ships" }).click();
 
-    // Should see Ships header or Sortie button
+    // Should see Sortie button
     await expect(
       page.getByRole("button", { name: /Sortie/i }),
     ).toBeVisible({ timeout: 5000 });
@@ -121,8 +153,8 @@ test.describe("Ships", () => {
 // --- Helpers ---
 
 async function waitForConnection(page: Page) {
-  const dot = page.locator("div.rounded-full.bg-green-500").first();
-  await expect(dot).toBeVisible({ timeout: 10000 });
+  const dot = page.getByTestId("engine-status");
+  await expect(dot).toHaveClass(/bg-green-500/, { timeout: 10000 });
 }
 
 async function createFleet(page: Page, name: string) {
@@ -153,7 +185,10 @@ async function createAndSelectFleet(page: Page, name: string) {
   await fleetButton.click();
 
   // Wait for view switcher to appear
-  const bridgeButton = page.getByRole("button", { name: "Bridge", exact: true });
+  const bridgeButton = page.getByRole("button", {
+    name: "Bridge",
+    exact: true,
+  });
   await expect(bridgeButton).toBeVisible({ timeout: 3000 });
 
   // Switch to Bridge view

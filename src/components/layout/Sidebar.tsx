@@ -26,6 +26,7 @@ export function Sidebar() {
         <Anchor className="h-5 w-5 text-primary" />
         <h1 className="text-sm font-bold tracking-tight">vibe-admiral</h1>
         <div
+          data-testid="engine-status"
           className={cn(
             "ml-auto h-2 w-2 rounded-full",
             engineConnected ? "bg-green-500" : "bg-red-500",

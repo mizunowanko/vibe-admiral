@@ -37,6 +37,11 @@ export class MockEngine {
     const data = msg.data ?? {};
 
     switch (msg.type) {
+      case "__test:reset": {
+        this.fleets = [];
+        this.sendTo(ws, { type: "fleet:data", data: this.fleets });
+        break;
+      }
       case "fleet:list": {
         this.sendTo(ws, { type: "fleet:data", data: this.fleets });
         break;
@@ -49,12 +54,10 @@ export class MockEngine {
           createdAt: new Date().toISOString(),
         };
         this.fleets.push(fleet);
-        // Send both fleet:created (for #2 fix) and fleet:data (for main compatibility)
         this.sendTo(ws, {
           type: "fleet:created",
           data: { id: fleet.id, fleets: this.fleets },
         });
-        this.sendTo(ws, { type: "fleet:data", data: this.fleets });
         break;
       }
       case "fleet:select": {
