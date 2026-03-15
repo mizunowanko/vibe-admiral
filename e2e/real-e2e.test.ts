@@ -169,7 +169,25 @@ function waitForMessage(
 
 // ── Step 4-6: Main test flow ────────────────────────────────────────
 
-async function runTest(ws: WebSocket): Promise<void> {
+async function createFleet(ws: WebSocket): Promise<string> {
+  log("Creating fleet...");
+  send(ws, {
+    type: "fleet:create",
+    data: { name: "E2E Test Fleet", repos: [REPO] },
+  });
+
+  const fleetMsg = await waitForMessage(
+    ws,
+    (m) => m.type === "fleet:created",
+    10_000,
+    "fleet:created",
+  );
+  const fleetId = fleetMsg.data!.id as string;
+  log(`Fleet created: ${fleetId}`);
+  return fleetId;
+}
+
+async function runTest(ws: WebSocket, fleetId: string): Promise<void> {
   // Track ships and their statuses
   const ships = new Map<string, ShipInfo>();
   const doneShips = new Set<string>();
@@ -266,22 +284,6 @@ async function runTest(ws: WebSocket): Promise<void> {
       // ignore parse errors
     }
   });
-
-  // 4a. Create Fleet
-  log("Creating fleet...");
-  send(ws, {
-    type: "fleet:create",
-    data: { name: "E2E Test Fleet", repos: [REPO] },
-  });
-
-  const fleetMsg = await waitForMessage(
-    ws,
-    (m) => m.type === "fleet:created",
-    10_000,
-    "fleet:created",
-  );
-  const fleetId = fleetMsg.data!.id as string;
-  log(`Fleet created: ${fleetId}`);
 
   // 4b. Send Bridge message to sortie all todo issues
   log("Sending Bridge command...");
@@ -422,6 +424,7 @@ async function verifyGitHubState(): Promise<void> {
 async function main(): Promise<void> {
   let engine: ChildProcess | null = null;
   let ws: WebSocket | null = null;
+  let fleetId: string | null = null;
   let exitCode = 0;
 
   try {
@@ -435,8 +438,11 @@ async function main(): Promise<void> {
     // Step 3: Connect
     ws = await connectWithRetry();
 
-    // Steps 4-6: Run test
-    await runTest(ws);
+    // Step 4a: Create fleet (captured early for cleanup)
+    fleetId = await createFleet(ws);
+
+    // Steps 4b-6: Run test
+    await runTest(ws, fleetId);
   } catch (err) {
     console.error(
       "\nTest failed:",
@@ -446,6 +452,19 @@ async function main(): Promise<void> {
   } finally {
     // Step 7: Cleanup
     log("Cleaning up...");
+
+    // Delete the test fleet before killing the engine
+    if (fleetId && ws && ws.readyState === WebSocket.OPEN) {
+      log(`Deleting test fleet ${fleetId}...`);
+      try {
+        send(ws, { type: "fleet:delete", data: { id: fleetId } });
+        await waitForMessage(ws, (m) => m.type === "fleet:data", 5_000, "fleet:data");
+        log("Test fleet deleted.");
+      } catch {
+        log("Warning: failed to delete test fleet (timeout or error).");
+      }
+    }
+
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
