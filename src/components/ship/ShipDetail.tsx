@@ -32,19 +32,19 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
   return (
     <div className="flex flex-1 flex-col border-l border-border">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-mono text-muted-foreground">
+      <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+          <span className="text-sm font-mono text-muted-foreground shrink-0">
             #{ship.issueNumber}
           </span>
-          <span className="text-sm font-medium">
+          <span className="text-sm font-medium break-all">
             {ship.issueTitle || `Issue #${ship.issueNumber}`}
           </span>
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-[10px] shrink-0">
             {ship.status}
           </Badge>
         </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
