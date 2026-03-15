@@ -222,10 +222,7 @@ export class ShipManager {
           : "";
         if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
           tryAdvance("testing");
-        } else if (
-          inputStr.includes("gh pr create") ||
-          inputStr.includes("gh pr merge")
-        ) {
+        } else if (inputStr.includes("gh pr merge")) {
           tryAdvance("merging");
         }
       } else if (tool === "Skill" || tool === "Task") {

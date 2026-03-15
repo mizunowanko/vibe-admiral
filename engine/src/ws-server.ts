@@ -167,9 +167,7 @@ export class EngineServer {
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
         const ship = this.shipManager.getShip(id);
-        const completedPhases = new Set([
-          "merging", "reviewing", "acceptance-test", "testing",
-        ]);
+        const completedPhases = new Set(["merging"]);
         if (code === 0 && ship && completedPhases.has(ship.status)) {
           // Ship reached a late phase — treat as successful completion
           this.shipManager.onShipComplete(id).catch(console.error);
