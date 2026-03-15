@@ -81,8 +81,11 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
                   >
                     <option value="">Select repo...</option>
                     {fleet.repos.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
+                      <option
+                        key={r.remote ?? r.localPath}
+                        value={r.remote ?? r.localPath}
+                      >
+                        {r.remote ?? r.localPath}
                       </option>
                     ))}
                   </select>

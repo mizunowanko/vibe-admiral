@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Fleet } from "@/types";
+import type { Fleet, FleetRepo } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
 interface FleetState {
@@ -9,8 +9,8 @@ interface FleetState {
 
   setFleets: (fleets: Fleet[]) => void;
   selectFleet: (id: string | null) => void;
-  createFleet: (name: string, repos: string[]) => void;
-  updateFleet: (id: string, name?: string, repos?: string[]) => void;
+  createFleet: (name: string, repos: FleetRepo[]) => void;
+  updateFleet: (id: string, name?: string, repos?: FleetRepo[]) => void;
   deleteFleet: (id: string) => void;
   fetchFleets: () => void;
 }

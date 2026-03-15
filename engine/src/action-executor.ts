@@ -1,5 +1,5 @@
 import type { ShipManager } from "./ship-manager.js";
-import type { BridgeAction } from "./types.js";
+import type { BridgeAction, FleetRepo } from "./types.js";
 import * as github from "./github.js";
 
 /**
@@ -29,23 +29,24 @@ export class ActionExecutor {
   async execute(
     fleetId: string,
     action: BridgeAction,
-    fleetRepos: string[],
+    repoRemotes: string[],
+    fleetRepos: FleetRepo[],
   ): Promise<string> {
     // Validate that all repos in the action are in the fleet's whitelist
     const actionRepos = getActionRepos(action);
-    const repoSet = new Set(fleetRepos);
+    const repoSet = new Set(repoRemotes);
     for (const repo of actionRepos) {
       if (!repoSet.has(repo)) {
         console.warn(
-          `[action-executor] Repo "${repo}" is not in fleet's registered repos: [${fleetRepos.join(", ")}]`,
+          `[action-executor] Repo "${repo}" is not in fleet's registered repos: [${repoRemotes.join(", ")}]`,
         );
-        return `[Action Rejected] Repo "${repo}" is not registered in this fleet. Registered repos: ${fleetRepos.join(", ")}`;
+        return `[Action Rejected] Repo "${repo}" is not registered in this fleet. Registered repos: ${repoRemotes.join(", ")}`;
       }
     }
 
     switch (action.action) {
       case "sortie":
-        return this.executeSortie(fleetId, action);
+        return this.executeSortie(fleetId, action, fleetRepos);
       case "create-issue":
         return this.executeCreateIssue(action);
       case "list-issues":
@@ -60,14 +61,25 @@ export class ActionExecutor {
   private async executeSortie(
     fleetId: string,
     action: Extract<BridgeAction, { action: "sortie" }>,
+    fleetRepos: FleetRepo[],
   ): Promise<string> {
     const results: string[] = [];
     for (const req of action.requests) {
       try {
+        const repoEntry = fleetRepos.find(
+          (r) => r.remote === req.repo || r.localPath === req.repo,
+        );
+        if (!repoEntry) {
+          results.push(
+            `Failed to launch ${req.repo}#${req.issueNumber}: No local path registered for repo "${req.repo}"`,
+          );
+          continue;
+        }
         const ship = await this.shipManager.sortie(
           fleetId,
           req.repo,
           req.issueNumber,
+          repoEntry.localPath,
         );
         results.push(
           `Ship ${ship.id} launched for ${req.repo}#${req.issueNumber} (${ship.issueTitle})`,

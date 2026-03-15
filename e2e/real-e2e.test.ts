@@ -28,6 +28,7 @@ const execFileAsync = promisify(execFile);
 const ENGINE_PORT = 9799;
 const WS_URL = `ws://127.0.0.1:${ENGINE_PORT}`;
 const REPO = "mizunowanko-org/toy-admiral-test";
+const REPO_LOCAL_PATH = `${process.env.HOME}/Projects/Development/toy-admiral-test`;
 const EXPECTED_ISSUES = [1, 3]; // issues that should be sortied
 const TOTAL_TIMEOUT_MS = 15 * 60 * 1000; // 15 min overall
 const ENGINE_STARTUP_MS = 3_000; // time to wait for engine to start
@@ -173,7 +174,7 @@ async function createFleet(ws: WebSocket): Promise<string> {
   log("Creating fleet...");
   send(ws, {
     type: "fleet:create",
-    data: { name: "E2E Test Fleet", repos: [REPO] },
+    data: { name: "E2E Test Fleet", repos: [{ localPath: REPO_LOCAL_PATH }] },
   });
 
   const fleetMsg = await waitForMessage(

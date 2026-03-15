@@ -1,7 +1,11 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { join, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
@@ -14,7 +18,7 @@ import {
   stripActionBlocks,
 } from "./stream-parser.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
-import type { Fleet, ClientMessage, BridgeAction, StreamMessage } from "./types.js";
+import type { Fleet, FleetRepo, ClientMessage, BridgeAction, StreamMessage } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -279,7 +283,7 @@ export class EngineServer {
         case "fleet:create": {
           const newFleet = await this.createFleet(
             data.name as string,
-            data.repos as string[],
+            data.repos as FleetRepo[],
           );
           const fleets = await this.loadFleets();
           this.sendTo(ws, {
@@ -302,7 +306,7 @@ export class EngineServer {
           await this.updateFleet(
             data.id as string,
             data.name as string | undefined,
-            data.repos as string[] | undefined,
+            data.repos as FleetRepo[] | undefined,
           );
           const fleets = await this.loadFleets();
           this.sendTo(ws, { type: "fleet:data", data: fleets });
@@ -330,10 +334,12 @@ export class EngineServer {
               if (!fleet) {
                 throw new Error(`Fleet not found: ${fleetId}`);
               }
-              // TODO: Use fleet-specific path once Fleet model has a basePath field
+              const remoteNames = fleet.repos
+                .map((r) => r.remote)
+                .filter((r): r is string => r !== undefined);
               const prompt = buildBridgeSystemPrompt(
                 fleet.name,
-                fleet.repos,
+                remoteNames,
               );
               this.bridgeManager.launch(
                 fleetId,
@@ -376,10 +382,22 @@ export class EngineServer {
 
         // Ship operations
         case "ship:sortie": {
+          const fleets = await this.loadFleets();
+          const fleet = fleets.find((f) => f.id === (data.fleetId as string));
+          const repoStr = data.repo as string;
+          const repoEntry = fleet?.repos.find(
+            (r) => r.remote === repoStr || r.localPath === repoStr,
+          );
+          if (!repoEntry) {
+            throw new Error(
+              `Repo "${data.repo}" not found in fleet. Register the local path first.`,
+            );
+          }
           const ship = await this.shipManager.sortie(
             data.fleetId as string,
             data.repo as string,
             data.issueNumber as number,
+            repoEntry.localPath,
           );
           this.broadcast({
             type: "ship:created",
@@ -484,15 +502,53 @@ export class EngineServer {
     await writeFile(FLEETS_FILE, JSON.stringify(fleets, null, 2));
   }
 
+  private async resolveRemote(localPath: string): Promise<string | undefined> {
+    try {
+      const { stdout } = await execFileAsync("git", [
+        "remote",
+        "get-url",
+        "origin",
+      ], { cwd: localPath });
+      const url = stdout.trim();
+      // Extract owner/repo from GitHub URL
+      const match = url.match(/github\.com[:/](.+?)(?:\.git)?$/);
+      return match?.[1];
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async validateLocalPath(localPath: string): Promise<void> {
+    if (!isAbsolute(localPath)) {
+      throw new Error(`localPath must be absolute: "${localPath}"`);
+    }
+    const s = await stat(localPath).catch(() => null);
+    if (!s?.isDirectory()) {
+      throw new Error(`localPath is not a directory: "${localPath}"`);
+    }
+  }
+
+  private async enrichRepos(repos: FleetRepo[]): Promise<FleetRepo[]> {
+    return Promise.all(
+      repos.map(async (repo) => {
+        await this.validateLocalPath(repo.localPath);
+        if (repo.remote) return repo;
+        const remote = await this.resolveRemote(repo.localPath);
+        return remote ? { ...repo, remote } : repo;
+      }),
+    );
+  }
+
   private async createFleet(
     name: string,
-    repos: string[],
+    repos: FleetRepo[],
   ): Promise<Fleet> {
+    const enriched = await this.enrichRepos(repos);
     const fleets = await this.loadFleets();
     const fleet: Fleet = {
       id: randomUUID(),
       name,
-      repos,
+      repos: enriched,
       createdAt: new Date().toISOString(),
     };
     fleets.push(fleet);
@@ -503,13 +559,13 @@ export class EngineServer {
   private async updateFleet(
     id: string,
     name?: string,
-    repos?: string[],
+    repos?: FleetRepo[],
   ): Promise<void> {
     const fleets = await this.loadFleets();
     const fleet = fleets.find((f) => f.id === id);
     if (!fleet) throw new Error(`Fleet not found: ${id}`);
     if (name !== undefined) fleet.name = name;
-    if (repos !== undefined) fleet.repos = repos;
+    if (repos !== undefined) fleet.repos = await this.enrichRepos(repos);
     await this.saveFleets(fleets);
   }
 
@@ -541,10 +597,13 @@ export class EngineServer {
     bridgeId: string,
     actions: BridgeAction[],
   ): Promise<void> {
-    // Load fleet repos for whitelist validation
+    // Load fleet repos for whitelist validation (use remote identifiers)
     const fleets = await this.loadFleets();
     const fleet = fleets.find((f) => f.id === fleetId);
     const fleetRepos = fleet?.repos ?? [];
+    const repoRemotes = fleetRepos
+      .map((r) => r.remote)
+      .filter((r): r is string => r !== undefined);
 
     const results: string[] = [];
 
@@ -553,6 +612,7 @@ export class EngineServer {
         const result = await this.actionExecutor.execute(
           fleetId,
           action,
+          repoRemotes,
           fleetRepos,
         );
         results.push(result);

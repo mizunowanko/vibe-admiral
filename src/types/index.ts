@@ -12,10 +12,15 @@ export type ShipStatus =
   | "error"; // エラー
 
 // === Fleet ===
+export interface FleetRepo {
+  localPath: string;
+  remote?: string;
+}
+
 export interface Fleet {
   id: string;
   name: string;
-  repos: string[];
+  repos: FleetRepo[];
   createdAt: string;
 }
 
@@ -67,12 +72,12 @@ export interface StreamMessage {
 
 // === WebSocket Messages: Frontend → Engine ===
 export type ClientMessage =
-  | { type: "fleet:create"; data: { name: string; repos: string[] } }
+  | { type: "fleet:create"; data: { name: string; repos: FleetRepo[] } }
   | { type: "fleet:list" }
   | { type: "fleet:select"; data: { id: string } }
   | {
       type: "fleet:update";
-      data: { id: string; name?: string; repos?: string[] };
+      data: { id: string; name?: string; repos?: FleetRepo[] };
     }
   | { type: "fleet:delete"; data: { id: string } }
   | { type: "bridge:send"; data: { fleetId: string; message: string } }
