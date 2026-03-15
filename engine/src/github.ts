@@ -152,7 +152,6 @@ export async function editIssue(
     args.push("--body", fields.body);
   }
   if (fields.labels) {
-    // Clear existing labels and set new ones
     for (const label of fields.labels) {
       args.push("--add-label", label);
     }

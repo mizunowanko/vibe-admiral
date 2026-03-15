@@ -154,7 +154,13 @@ export class ActionExecutor {
         );
       }
 
-      return `[Issue Updated] #${action.number} (${action.repo})`;
+      const changes: string[] = [];
+      if (action.title) changes.push("title");
+      if (action.body) changes.push("body");
+      if (action.labels) changes.push("labels");
+      if (action.parentIssue) changes.push(`parentIssue=#${action.parentIssue}`);
+      const detail = changes.length > 0 ? ` [${changes.join(", ")}]` : "";
+      return `[Issue Updated] #${action.number}${detail} (${action.repo})`;
     } catch (err) {
       return `[Issue Edit Failed] ${err instanceof Error ? err.message : String(err)}`;
     }
