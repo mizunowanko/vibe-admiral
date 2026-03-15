@@ -1,6 +1,6 @@
 import { EngineServer } from "./ws-server.js";
 
-const PORT = parseInt(process.env.VIBE_ADMIRAL_PORT ?? "9720", 10);
+const PORT = parseInt(process.env.VIBE_ADMIRAL_PORT ?? "9721", 10);
 
 const engine = new EngineServer(PORT);
 
