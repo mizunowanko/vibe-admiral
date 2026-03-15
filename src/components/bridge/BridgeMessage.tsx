@@ -4,6 +4,16 @@ import remarkGfm from "remark-gfm";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 
+const REMARK_PLUGINS = [remarkGfm];
+
+const MARKDOWN_COMPONENTS = {
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+};
+
 interface BridgeMessageProps {
   message: StreamMessage;
   repeatCount?: number;
@@ -194,7 +204,12 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : (
           <div className="bridge-markdown break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={REMARK_PLUGINS}
+              components={MARKDOWN_COMPONENTS}
+              disallowedElements={["img"]}
+              unwrapDisallowed
+            >
               {content}
             </ReactMarkdown>
           </div>
