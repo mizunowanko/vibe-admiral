@@ -5,6 +5,7 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import type { ShipProcess, ShipStatus, FleetSkillSources } from "./types.js";
@@ -18,6 +19,7 @@ export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private statusManager: StatusManager;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
@@ -26,9 +28,11 @@ export class ShipManager {
   constructor(
     processManager: ProcessManager,
     acceptanceWatcher: AcceptanceWatcher,
+    statusManager: StatusManager,
   ) {
     this.processManager = processManager;
     this.acceptanceWatcher = acceptanceWatcher;
+    this.statusManager = statusManager;
     this.startCleanup();
   }
 
@@ -51,15 +55,9 @@ export class ShipManager {
 
     // 1. Get issue info
     const issue = await github.getIssue(repo, issueNumber);
-    if (issue.labels.includes("doing")) {
-      throw new Error(`Issue #${issueNumber} is already in progress (doing)`);
-    }
 
-    // 2. Update labels: todo → doing
-    await github.updateLabels(repo, issueNumber, {
-      remove: "todo",
-      add: "doing",
-    });
+    // 2. Update issue status: todo → doing (via StatusManager)
+    await this.statusManager.markDoing(repo, issueNumber);
 
     // 3. Create worktree
     const repoRoot = await worktree.getRepoRoot(localPath);

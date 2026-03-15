@@ -1,4 +1,5 @@
 import type { ShipManager } from "./ship-manager.js";
+import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
@@ -8,9 +9,11 @@ function sleep(ms: number): Promise<void> {
 
 export class StateSync {
   private shipManager: ShipManager;
+  private statusManager: StatusManager;
 
-  constructor(shipManager: ShipManager) {
+  constructor(shipManager: ShipManager, statusManager: StatusManager) {
     this.shipManager = shipManager;
+    this.statusManager = statusManager;
   }
 
   /**
@@ -30,10 +33,9 @@ export class StateSync {
       };
     }
 
-    // 2. Check if issue already has "doing" label
+    // 2. Check if issue already has "doing" status
     try {
-      const issue = await github.getIssue(repo, issueNumber);
-      if (issue.labels.includes("doing")) {
+      if (await this.statusManager.isDoing(repo, issueNumber)) {
         return {
           ok: false,
           reason: `Issue #${issueNumber} already has the "doing" label`,
@@ -50,35 +52,14 @@ export class StateSync {
   }
 
   /**
-   * Rollback "doing" label to "todo" with exponential backoff retry.
+   * Rollback issue status from "doing" to "todo" via StatusManager.
    */
   async rollbackLabel(
     repo: string,
     issueNumber: number,
     maxRetries = 3,
   ): Promise<void> {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        await github.updateLabels(repo, issueNumber, {
-          remove: "doing",
-          add: "todo",
-        });
-        return;
-      } catch (err) {
-        if (attempt === maxRetries) {
-          console.error(
-            `[state-sync] Failed to rollback labels for #${issueNumber} after ${maxRetries + 1} attempts:`,
-            err,
-          );
-          return;
-        }
-        const delay = 500 * Math.pow(2, attempt);
-        console.warn(
-          `[state-sync] Label rollback attempt ${attempt + 1} failed for #${issueNumber}, retrying in ${delay}ms`,
-        );
-        await sleep(delay);
-      }
-    }
+    await this.statusManager.rollback(repo, issueNumber, maxRetries);
   }
 
   /**
@@ -125,16 +106,14 @@ export class StateSync {
     if (!ship) return;
 
     if (succeeded) {
-      // Successful completion: remove worktree, remove "doing" label, mark done
+      // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
       try {
-        await github.updateLabels(ship.repo, ship.issueNumber, {
-          remove: "doing",
-        });
+        await this.statusManager.markDone(ship.repo, ship.issueNumber);
       } catch (err) {
         console.warn(
-          `[state-sync] Failed to remove "doing" label for #${ship.issueNumber}:`,
+          `[state-sync] Failed to mark #${ship.issueNumber} as done:`,
           err,
         );
       }
