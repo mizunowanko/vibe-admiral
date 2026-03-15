@@ -1,23 +1,26 @@
 import { useRef, useEffect } from "react";
 import { useBridge } from "@/hooks/useBridge";
+import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
 import { BridgeInput } from "./BridgeInput";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface BridgeProps {
   fleetId: string | null;
 }
 
 export function Bridge({ fleetId }: BridgeProps) {
-  const { messages, sendMessage } = useBridge(fleetId);
+  const { messages, sendMessage, isLoading } = useBridge(fleetId);
+  const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   if (!fleetId) {
     return (
@@ -36,7 +39,25 @@ export function Bridge({ fleetId }: BridgeProps) {
         <span className="text-xs text-muted-foreground">
           Central command for issue management and ship coordination
         </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <div
+            className={cn(
+              "h-2 w-2 rounded-full",
+              engineConnected ? "bg-green-500" : "bg-red-500",
+            )}
+          />
+          <span className="text-xs text-muted-foreground">
+            {engineConnected ? "Connected" : "Disconnected"}
+          </span>
+        </div>
       </div>
+
+      {/* Disconnected Banner */}
+      {!engineConnected && (
+        <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-center text-xs text-destructive">
+          Engine disconnected — messages will not be delivered
+        </div>
+      )}
 
       {/* Messages */}
       <ScrollArea ref={scrollRef} className="flex-1 p-4">
@@ -49,11 +70,25 @@ export function Bridge({ fleetId }: BridgeProps) {
           {messages.map((msg, i) => (
             <BridgeMessage key={i} message={msg} />
           ))}
+          {isLoading && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span className="text-xs">Bridge is thinking...</span>
+            </div>
+          )}
         </div>
       </ScrollArea>
 
       {/* Input */}
-      <BridgeInput onSend={sendMessage} />
+      <BridgeInput
+        onSend={sendMessage}
+        disabled={!engineConnected}
+        placeholder={
+          engineConnected
+            ? "Send a command to the Bridge..."
+            : "Engine disconnected"
+        }
+      />
     </div>
   );
 }

@@ -6,9 +6,14 @@ import { Send } from "lucide-react";
 interface BridgeInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
-export function BridgeInput({ onSend, disabled }: BridgeInputProps) {
+export function BridgeInput({
+  onSend,
+  disabled,
+  placeholder = "Send a command to the Bridge...",
+}: BridgeInputProps) {
   const [value, setValue] = useState("");
 
   const handleSend = useCallback(() => {
@@ -34,7 +39,7 @@ export function BridgeInput({ onSend, disabled }: BridgeInputProps) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Send a command to the Bridge..."
+        placeholder={placeholder}
         disabled={disabled}
         className="flex-1"
       />

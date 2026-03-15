@@ -88,7 +88,21 @@ export class EngineServer {
 
     this.processManager.on("exit", (id: string, code: number | null) => {
       if (id.startsWith("bridge-")) {
+        const fleetId = id.replace("bridge-", "");
         console.log(`Bridge ${id} exited with code ${code}`);
+        this.broadcast({
+          type: "bridge:stream",
+          data: {
+            fleetId,
+            message: {
+              type: code === 0 ? "system" : "error",
+              content:
+                code === 0
+                  ? "Bridge session ended."
+                  : `Bridge process exited with code ${code}.`,
+            },
+          },
+        });
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
         if (code === 0) {
