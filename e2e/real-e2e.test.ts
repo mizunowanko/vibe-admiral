@@ -169,7 +169,25 @@ function waitForMessage(
 
 // ── Step 4-6: Main test flow ────────────────────────────────────────
 
-async function runTest(ws: WebSocket): Promise<string> {
+async function createFleet(ws: WebSocket): Promise<string> {
+  log("Creating fleet...");
+  send(ws, {
+    type: "fleet:create",
+    data: { name: "E2E Test Fleet", repos: [REPO] },
+  });
+
+  const fleetMsg = await waitForMessage(
+    ws,
+    (m) => m.type === "fleet:created",
+    10_000,
+    "fleet:created",
+  );
+  const fleetId = fleetMsg.data!.id as string;
+  log(`Fleet created: ${fleetId}`);
+  return fleetId;
+}
+
+async function runTest(ws: WebSocket, fleetId: string): Promise<void> {
   // Track ships and their statuses
   const ships = new Map<string, ShipInfo>();
   const doneShips = new Set<string>();
@@ -267,22 +285,6 @@ async function runTest(ws: WebSocket): Promise<string> {
     }
   });
 
-  // 4a. Create Fleet
-  log("Creating fleet...");
-  send(ws, {
-    type: "fleet:create",
-    data: { name: "E2E Test Fleet", repos: [REPO] },
-  });
-
-  const fleetMsg = await waitForMessage(
-    ws,
-    (m) => m.type === "fleet:created",
-    10_000,
-    "fleet:created",
-  );
-  const fleetId = fleetMsg.data!.id as string;
-  log(`Fleet created: ${fleetId}`);
-
   // 4b. Send Bridge message to sortie all todo issues
   log("Sending Bridge command...");
   send(ws, {
@@ -354,8 +356,6 @@ async function runTest(ws: WebSocket): Promise<string> {
   } else {
     throw new Error(`FAIL: Only ${passCount} ships completed (need >= 2).`);
   }
-
-  return fleetId;
 }
 
 // ── Step 6: Verify GitHub state ─────────────────────────────────────
@@ -438,8 +438,11 @@ async function main(): Promise<void> {
     // Step 3: Connect
     ws = await connectWithRetry();
 
-    // Steps 4-6: Run test
-    fleetId = await runTest(ws);
+    // Step 4a: Create fleet (captured early for cleanup)
+    fleetId = await createFleet(ws);
+
+    // Steps 4b-6: Run test
+    await runTest(ws, fleetId);
   } catch (err) {
     console.error(
       "\nTest failed:",
