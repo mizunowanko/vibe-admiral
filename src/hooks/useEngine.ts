@@ -7,6 +7,8 @@ import type { ServerMessage, Fleet, ShipStatus, StreamMessage } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
+  const selectFleet = useFleetStore((s) => s.selectFleet);
+  const setMainView = useUIStore((s) => s.setMainView);
   const setShipStatus = useShipStore((s) => s.setShipStatus);
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
@@ -26,6 +28,14 @@ export function useEngine() {
         case "fleet:data":
           setFleets(msg.data as unknown as Fleet[]);
           break;
+
+        case "fleet:created": {
+          const created = msg.data as unknown as { id: string; fleets: Fleet[] };
+          setFleets(created.fleets);
+          selectFleet(created.id);
+          setMainView("bridge");
+          break;
+        }
 
         case "ship:status": {
           const statusData = msg.data as {
@@ -99,6 +109,8 @@ export function useEngine() {
     };
   }, [
     setFleets,
+    selectFleet,
+    setMainView,
     setShipStatus,
     addShipLog,
     setAcceptanceTest,
