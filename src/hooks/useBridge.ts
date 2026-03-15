@@ -4,10 +4,12 @@ import type { ServerMessage, StreamMessage } from "@/types";
 
 export function useBridge(fleetId: string | null) {
   const [messages, setMessages] = useState<StreamMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (!fleetId) {
       setMessages([]);
+      setIsLoading(false);
       return;
     }
 
@@ -25,8 +27,20 @@ export function useBridge(fleetId: string | null) {
               // ignore parse errors
             }
           } else {
+            setIsLoading(false);
             setMessages((prev) => [...prev, data.message]);
           }
+        }
+      }
+
+      if (msg.type === "error") {
+        const errorData = msg.data as { source: string; message: string };
+        if (errorData.source === `bridge-${fleetId}`) {
+          setIsLoading(false);
+          setMessages((prev) => [
+            ...prev,
+            { type: "error", content: errorData.message },
+          ]);
         }
       }
     });
@@ -44,10 +58,11 @@ export function useBridge(fleetId: string | null) {
         ...prev,
         { type: "user", content: message },
       ]);
+      setIsLoading(true);
       wsClient.send({ type: "bridge:send", data: { fleetId, message } });
     },
     [fleetId],
   );
 
-  return { messages, sendMessage };
+  return { messages, sendMessage, isLoading };
 }
