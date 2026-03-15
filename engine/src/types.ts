@@ -108,7 +108,6 @@ export type BridgeAction =
       parentIssue?: number;
       dependsOn?: number[];
     }
-  | { action: "list-issues"; repo: string; label?: string }
   | {
       action: "edit-issue";
       repo: string;
@@ -118,7 +117,9 @@ export type BridgeAction =
       comment?: string;
       addLabels?: string[];
       removeLabels?: string[];
+      parentIssue?: number;
     }
+  | { action: "list-issues"; repo: string; label?: string }
   | { action: "ship-status" };
 
 // === Ship Process Info ===

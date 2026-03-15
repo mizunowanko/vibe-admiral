@@ -169,6 +169,16 @@ export class ActionExecutor {
         results.push(`Issue #${action.issueNumber} updated (${fields.join(", ")})`);
       }
 
+      // Set up parent sub-issue relationship
+      if (action.parentIssue) {
+        await github.addSubIssue(
+          action.repo,
+          action.parentIssue,
+          action.issueNumber,
+        );
+        results.push(`Sub-issue of #${action.parentIssue}`);
+      }
+
       return `[Issue Edit] ${results.join("; ")} (${action.repo})`;
     } catch (err) {
       return `[Issue Edit Failed] ${err instanceof Error ? err.message : String(err)}`;

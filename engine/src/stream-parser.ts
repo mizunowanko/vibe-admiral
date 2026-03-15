@@ -169,8 +169,9 @@ function validateAction(obj: unknown): BridgeAction | null {
       const hasComment = record.comment !== undefined;
       const hasAddLabels = record.addLabels !== undefined;
       const hasRemoveLabels = record.removeLabels !== undefined;
+      const hasParentIssue = record.parentIssue !== undefined;
 
-      if (!hasTitle && !hasBody && !hasComment && !hasAddLabels && !hasRemoveLabels) {
+      if (!hasTitle && !hasBody && !hasComment && !hasAddLabels && !hasRemoveLabels && !hasParentIssue) {
         console.warn("[stream-parser] edit-issue requires at least one field to change");
         return null;
       }
@@ -184,6 +185,7 @@ function validateAction(obj: unknown): BridgeAction | null {
         comment?: string;
         addLabels?: string[];
         removeLabels?: string[];
+        parentIssue?: number;
       } = {
         action: "edit-issue",
         repo: record.repo as string,
@@ -252,13 +254,26 @@ function validateAction(obj: unknown): BridgeAction | null {
         }
       }
 
+      if (hasParentIssue) {
+        if (
+          typeof record.parentIssue !== "number" ||
+          !Number.isInteger(record.parentIssue) ||
+          record.parentIssue <= 0
+        ) {
+          console.warn("[stream-parser] edit-issue parentIssue must be a positive integer");
+          return null;
+        }
+        editResult.parentIssue = record.parentIssue;
+      }
+
       // Reject if no effective fields remain after filtering
       if (
         editResult.title === undefined &&
         editResult.body === undefined &&
         editResult.comment === undefined &&
         editResult.addLabels === undefined &&
-        editResult.removeLabels === undefined
+        editResult.removeLabels === undefined &&
+        editResult.parentIssue === undefined
       ) {
         console.warn("[stream-parser] edit-issue requires at least one effective field");
         return null;
