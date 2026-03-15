@@ -458,18 +458,29 @@ export class EngineServer {
           break;
         }
         case "ship:accept": {
-          this.shipManager.respondToAcceptanceTest(
-            data.id as string,
-            true,
-          );
+          const acceptId = data.id as string;
+          this.shipManager.respondToAcceptanceTest(acceptId, true);
+          // Clear acceptance test state and advance status so frontend sees immediate feedback
+          const acceptShip = this.shipManager.getShip(acceptId);
+          if (acceptShip) {
+            acceptShip.acceptanceTest = null;
+            this.shipManager.updateStatus(acceptId, "merging");
+          }
           break;
         }
         case "ship:reject": {
+          const rejectId = data.id as string;
           this.shipManager.respondToAcceptanceTest(
-            data.id as string,
+            rejectId,
             false,
             data.feedback as string,
           );
+          // Clear acceptance test state; Ship CLI will re-request after fixing
+          const rejectShip = this.shipManager.getShip(rejectId);
+          if (rejectShip) {
+            rejectShip.acceptanceTest = null;
+            this.shipManager.updateStatus(rejectId, "implementing");
+          }
           break;
         }
         case "ship:stop": {
