@@ -48,22 +48,17 @@ export class BridgeManager {
     // Store user message in history
     session.history.push({ type: "user", content: message });
 
-    // If process is still running, send to stdin
-    if (this.processManager.isRunning(bridgeId)) {
-      this.processManager.sendMessage(bridgeId, message);
-      return true;
+    // If process died, re-launch it
+    if (!this.processManager.isRunning(bridgeId)) {
+      this.processManager.launchBridge(
+        bridgeId,
+        session.fleetPath,
+        session.additionalDirs,
+      );
     }
 
-    // Otherwise, launch a new bridge process with the message
-    this.processManager.launchBridge(
-      bridgeId,
-      session.fleetPath,
-      session.additionalDirs,
-    );
-    // Send message after brief delay for process to start
-    setTimeout(() => {
-      this.processManager.sendMessage(bridgeId, message);
-    }, 500);
+    // Send message to stdin (stream-json process accepts input immediately)
+    this.processManager.sendMessage(bridgeId, message);
     return true;
   }
 
