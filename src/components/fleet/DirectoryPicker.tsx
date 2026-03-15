@@ -38,6 +38,9 @@ export function DirectoryPicker({
 
   useEffect(() => {
     if (!open) return;
+    setEntries([]);
+    setError(null);
+    setLoading(true);
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
       if (msg.type === "fs:dir-listing") {
@@ -69,7 +72,8 @@ export function DirectoryPicker({
   };
 
   const navigateUp = () => {
-    const parent = currentPath.replace(/\/[^/]+$/, "") || "/";
+    const lastSlash = currentPath.lastIndexOf("/");
+    const parent = lastSlash > 0 ? currentPath.slice(0, lastSlash) : "/";
     requestDir(parent);
   };
 
@@ -143,7 +147,6 @@ export function DirectoryPicker({
               <button
                 key={entry.name}
                 className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm hover:bg-muted/50 transition-colors"
-                onDoubleClick={() => navigateTo(entry.name)}
                 onClick={() => navigateTo(entry.name)}
               >
                 <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />

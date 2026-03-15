@@ -72,7 +72,7 @@ export function FleetSettings() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={() => {
-                if (!isNew && name.trim()) {
+                if (!isNew && name.trim() && name.trim() !== selectedFleet.name) {
                   updateFleet(selectedFleet.id, name.trim(), repos);
                 }
               }}

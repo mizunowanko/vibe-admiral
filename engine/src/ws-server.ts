@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { readFile, writeFile, mkdir, stat, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
 import { join, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -479,10 +479,10 @@ export class EngineServer {
           break;
         }
 
-        // Filesystem operations
+        // Filesystem operations (localhost-only; returns dir names, no file content)
         case "fs:list-dir": {
           const dirPath = (data.path as string) || homedir();
-          const resolved = resolve(dirPath);
+          const resolved = await realpath(resolve(dirPath));
           const s = await stat(resolved);
           if (!s.isDirectory()) {
             throw new Error(`Not a directory: "${resolved}"`);
