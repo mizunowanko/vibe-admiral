@@ -54,27 +54,29 @@ export class ActionExecutor {
     action: Extract<BridgeAction, { action: "create-issue" }>,
   ): Promise<string> {
     try {
+      // Append dependencies section to body if dependsOn is provided
+      let body = action.body;
+      if (action.dependsOn && action.dependsOn.length > 0) {
+        const depLines = action.dependsOn
+          .map((n) => `- Depends on #${n}`)
+          .join("\n");
+        body = `${body}\n\n## Dependencies\n${depLines}`;
+      }
+
       const issue = await github.createIssue(
         action.repo,
         action.title,
-        action.body,
+        body,
         action.labels,
       );
 
-      // Set up parent sub-issue relationship
+      // Set up parent sub-issue relationship (decomposition)
       if (action.parentIssue) {
         await github.addSubIssue(
           action.repo,
           action.parentIssue,
           issue.number,
         );
-      }
-
-      // Set up dependency sub-issue relationships
-      if (action.dependsOn) {
-        for (const depNumber of action.dependsOn) {
-          await github.addSubIssue(action.repo, depNumber, issue.number);
-        }
       }
 
       return `[Issue Created] #${issue.number}: ${issue.title} (${action.repo})`;

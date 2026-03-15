@@ -53,8 +53,8 @@ Create a new issue. IMPORTANT: Before creating an issue, you MUST first run \`li
 \`\`\`
 
 - \`labels\`: defaults to ["todo"] if omitted
-- \`parentIssue\`: parent issue number (this issue becomes a Sub-issue of the parent)
-- \`dependsOn\`: issue numbers this issue depends on (set as Sub-issue relationships)
+- \`parentIssue\`: parent issue number for decomposition (this issue becomes a Sub-issue of the parent via GitHub Sub-issues API)
+- \`dependsOn\`: issue numbers this issue is blocked by (recorded as a "Dependencies" section in the issue body — NOT a Sub-issue relationship)
 
 ### 3. sortie
 Launch Ships (Claude Code implementation sessions) for issues. Supports multiple simultaneous launches.
