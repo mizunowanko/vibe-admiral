@@ -1,6 +1,18 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
+
+const REMARK_PLUGINS = [remarkGfm];
+
+const MARKDOWN_COMPONENTS = {
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+};
 
 interface BridgeMessageProps {
   message: StreamMessage;
@@ -19,11 +31,6 @@ const STATUS_COLORS: Record<string, string> = {
   done: "text-green-400",
   error: "text-red-400",
 };
-
-/** Strip code fence markers (```lang / ```) while keeping inner content. */
-function stripCodeFences(text: string): string {
-  return text.replace(/```\w*\n?/g, "").trim();
-}
 
 function formatTime(ts?: number): string | null {
   if (!ts) return null;
@@ -169,6 +176,8 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     );
   }
 
+  const content = message.content ?? "";
+
   return (
     <div
       className={cn(
@@ -191,9 +200,20 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
             [{message.tool}]
           </span>
         )}
-        <p className="whitespace-pre-wrap break-words">
-          {stripCodeFences(message.content ?? "")}
-        </p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap break-words">{content}</p>
+        ) : (
+          <div className="bridge-markdown break-words">
+            <ReactMarkdown
+              remarkPlugins={REMARK_PLUGINS}
+              components={MARKDOWN_COMPONENTS}
+              disallowedElements={["img"]}
+              unwrapDisallowed
+            >
+              {content}
+            </ReactMarkdown>
+          </div>
+        )}
         {message.timestamp && (
           <span className="block text-[10px] text-slate-400 mt-1 text-right">
             {formatTime(message.timestamp)}
