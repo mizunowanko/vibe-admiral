@@ -21,6 +21,8 @@ interface ShipState {
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
   selectShip: (id: string | null) => void;
 
+  syncShips: (ships: Ship[]) => void;
+  fetchShips: () => void;
   sortie: (fleetId: string, repo: string, issueNumber: number) => void;
   chatWithShip: (id: string, message: string) => void;
   acceptTest: (id: string) => void;
@@ -122,6 +124,20 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
   selectShip: (id) => set({ selectedShipId: id }),
+
+  syncShips: (shipList) => {
+    set(() => {
+      const ships = new Map<string, Ship>();
+      for (const s of shipList) {
+        ships.set(s.id, s);
+      }
+      return { ships };
+    });
+  },
+
+  fetchShips: () => {
+    wsClient.send({ type: "ship:list" });
+  },
 
   sortie: (fleetId, repo, issueNumber) => {
     wsClient.send({

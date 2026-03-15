@@ -457,6 +457,11 @@ export class EngineServer {
           // Ship logs are streamed in real-time, no separate endpoint needed
           break;
         }
+        case "ship:list": {
+          const ships = this.shipManager.getAllShips();
+          this.sendTo(ws, { type: "ship:data", data: ships });
+          break;
+        }
 
         // Issue operations (deterministic - no LLM)
         case "issue:list": {
