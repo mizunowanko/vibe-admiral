@@ -126,10 +126,18 @@ export const useShipStore = create<ShipState>((set) => ({
   selectShip: (id) => set({ selectedShipId: id }),
 
   syncShips: (shipList) => {
-    set(() => {
-      const ships = new Map<string, Ship>();
+    set((state) => {
+      const ships = new Map(state.ships);
+      // Add/update ships from server, but keep locally-known ships
+      // that may have received more recent status updates
       for (const s of shipList) {
-        ships.set(s.id, s);
+        const existing = ships.get(s.id);
+        if (!existing) {
+          ships.set(s.id, s);
+        } else {
+          // Keep the existing entry if it has a more advanced status
+          ships.set(s.id, { ...s, ...existing });
+        }
       }
       return { ships };
     });

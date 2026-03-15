@@ -5,9 +5,12 @@ type MessageHandler = (msg: ServerMessage) => void;
 const ENGINE_PORT = import.meta.env.VITE_ENGINE_PORT ?? "9721";
 const ENGINE_URL = `ws://localhost:${ENGINE_PORT}`;
 
+type ConnectHandler = () => void;
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private handlers = new Set<MessageHandler>();
+  private connectHandlers = new Set<ConnectHandler>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _connected = false;
 
@@ -27,6 +30,9 @@ export class WSClient {
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
+        }
+        for (const handler of this.connectHandlers) {
+          handler();
         }
       };
 
@@ -76,6 +82,11 @@ export class WSClient {
   onMessage(handler: MessageHandler): () => void {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);
+  }
+
+  onConnect(handler: ConnectHandler): () => void {
+    this.connectHandlers.add(handler);
+    return () => this.connectHandlers.delete(handler);
   }
 
   private scheduleReconnect(): void {

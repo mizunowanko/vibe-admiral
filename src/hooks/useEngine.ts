@@ -128,16 +128,15 @@ export function useEngine() {
       }
     });
 
-    // Fetch initial data
-    setTimeout(() => {
-      if (wsClient.connected) {
-        fetchFleets();
-        fetchShips();
-      }
-    }, 500);
+    // Fetch data on every connect/reconnect
+    const unsubConnect = wsClient.onConnect(() => {
+      fetchFleets();
+      fetchShips();
+    });
 
     return () => {
       unsub();
+      unsubConnect();
       clearInterval(checkConnection);
       wsClient.disconnect();
     };
