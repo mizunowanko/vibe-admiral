@@ -48,9 +48,11 @@ export class ProcessManager extends EventEmitter {
   ): ChildProcess {
     const args = [
       "-p",
-      "Bridge ready. Issue管理とShip統制を行います。",
+      "--input-format",
+      "stream-json",
       "--output-format",
       "stream-json",
+      "--verbose",
       "--permission-mode",
       "plan",
       ...additionalDirs.flatMap((d) => ["--add-dir", d]),
@@ -68,7 +70,11 @@ export class ProcessManager extends EventEmitter {
   sendMessage(id: string, message: string): ChildProcess | null {
     const proc = this.processes.get(id);
     if (!proc?.stdin?.writable) return null;
-    proc.stdin.write(message + "\n");
+    const payload = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: message },
+    });
+    proc.stdin.write(payload + "\n");
     return proc;
   }
 
@@ -87,6 +93,7 @@ export class ProcessManager extends EventEmitter {
         message,
         "--output-format",
         "stream-json",
+        "--verbose",
         "--dangerously-skip-permissions",
       ],
       {
