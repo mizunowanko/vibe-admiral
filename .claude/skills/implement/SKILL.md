@@ -74,53 +74,6 @@ echo "${VIBE_ADMIRAL:-not_set}"
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
 
-## ステータス遷移（admiral-request プロトコル）
-
-**`VIBE_ADMIRAL` 設定時のみ有効。**
-Ship はステータス遷移を admiral-request ブロックで Engine に表明する。
-Engine は GitHub ラベル更新に成功した場合のみ遷移を確定し、結果を `.claude/admiral-request-response.json` に書き込む。
-
-### 遷移の表明手順
-
-**各ステップの冒頭で**、以下のコードブロックを assistant テキストとして出力する:
-
-````
-```admiral-request
-{ "request": "status-transition", "status": "<phase-name>" }
-```
-````
-
-出力後、Engine からのレスポンスを確認する:
-
-```bash
-# Wait for Engine response
-while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
-RESPONSE=$(cat .claude/admiral-request-response.json)
-rm -f .claude/admiral-request-response.json
-echo "$RESPONSE"
-```
-
-- `ok: true` → 遷移確定、次の作業に進む
-- `ok: false` → `error` フィールドを確認して対処
-
-### ステップ対応表
-
-| Step | ステータス (`status`) |
-|------|---------------------|
-| 3 (調査) | `investigating` |
-| 4 (計画) | `planning` |
-| 5 (実装) | `implementing` |
-| 6 (ビルド検証) | `testing` |
-| 8 (テスト再実行) | `testing` |
-| 9 (コミット & PR) | `reviewing` |
-| 11 (受け入れテスト) | `acceptance-test` |
-| 15 (マージ) | `merging` |
-| 15.5 (完了) | `done` |
-
-### `VIBE_ADMIRAL` 未設定時
-
-admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。
-
 ## ワークフロー
 
 ### Step 1: GH Issue の特定
@@ -257,23 +210,6 @@ PR URL をユーザーに報告して Step 10 へ進む。
 
 push した時点で CI が走り始める。CI の完了を待たずにコードレビューを実施する。
 
-#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
-
-Bridge が PR を検出して自動的にレビューする。Ship 側は `.claude/pr-review-response.json` の出現を待機する:
-
-```bash
-echo "Waiting for Bridge PR review..."
-while [ ! -f .claude/pr-review-response.json ]; do
-  sleep 3
-done
-cat .claude/pr-review-response.json
-```
-
-- `verdict: "approve"` → Step 11 へ進む
-- `verdict: "request-changes"` → `comments` を読んで修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機ループ
-
-#### VIBE_ADMIRAL 未設定時
-
 1. `/review-pr` スキルをバックグラウンドで起動する（Task ツール `run_in_background: true`）
 2. Step 11 へ進む
 
@@ -353,26 +289,6 @@ gh pr checks "$PR_NUM" --watch
 **このステップを完了するまで絶対に Step 15 に進んではならない。**
 レビュー結果の確認はマージの前提条件である。レビューが未完了の場合は完了を待つこと。
 
-#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
-
-Step 10 で Bridge レビューの approve/request-changes の対応が完了している場合は、そのまま Step 15 へ進む。
-Step 10 で Bridge レビューをスキップした場合（レスポンスファイルが存在しない場合）は、待機する:
-
-```bash
-if [ ! -f .claude/pr-review-response.json ]; then
-  echo "Waiting for Bridge PR review..."
-  while [ ! -f .claude/pr-review-response.json ]; do
-    sleep 3
-  done
-fi
-cat .claude/pr-review-response.json
-```
-
-- `verdict: "approve"` → Step 15 へ
-- `verdict: "request-changes"` → 修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機
-
-#### VIBE_ADMIRAL 未設定時
-
 バックグラウンドのレビュー結果を確認する（Read ツールで output_file を確認）。
 レビューエージェントがまだ実行中の場合は、完了するまで待機する（output_file を定期的に確認）。
 
@@ -393,21 +309,7 @@ gh pr merge "$PR_NUM" --squash
 
 - マージ後に `already used by worktree` エラーが出ても、`gh pr view --json state --jq '.state'` が `MERGED` なら無視してよい
 
-### Step 15.5: 完了表明と掃除
-
-**`VIBE_ADMIRAL` 設定時**: まず `done` ステータスを表明する:
-
-````
-```admiral-request
-{ "request": "status-transition", "status": "done" }
-```
-````
-
-```bash
-while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
-cat .claude/admiral-request-response.json
-rm -f .claude/admiral-request-response.json
-```
+### Step 15.5: 掃除
 
 1. workflow-state.json の削除:
    ```bash
