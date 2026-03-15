@@ -115,8 +115,26 @@ export class EngineServer {
 
         const parsed = parseStreamMessage(msg);
         if (parsed) {
+          // AskUserQuestion tool_use — forward as bridge:question
+          if (
+            parsed.type === "tool_use" &&
+            parsed.tool === "AskUserQuestion"
+          ) {
+            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
+            const question = toolInput?.question as string | undefined;
+            const toolUseId = parsed.toolUseId as string | undefined;
+            const questionMessage: StreamMessage = {
+              type: "question",
+              content: question ?? "Bridge is asking a question",
+              ...(toolUseId ? { toolUseId } : {}),
+            };
+            this.bridgeManager.addToHistory(fleetId, questionMessage);
+            this.broadcast({
+              type: "bridge:question",
+              data: { fleetId, message: questionMessage },
+            });
           // Check for admiral-request blocks in assistant text
-          if (parsed.type === "assistant" && parsed.content) {
+          } else if (parsed.type === "assistant" && parsed.content) {
             const requests = extractRequests(parsed.content);
             const cleanContent = stripRequestBlocks(parsed.content);
 
@@ -389,6 +407,31 @@ export class EngineServer {
             }
           }
           this.bridgeManager.send(fleetId, message);
+          break;
+        }
+        case "bridge:answer": {
+          const ansFleetId = data.fleetId as string;
+          const answer = data.answer as string;
+          const toolUseId = data.toolUseId as string | undefined;
+          const bridgeId = `bridge-${ansFleetId}`;
+
+          // Record answer in history as a user message
+          const answerMessage: StreamMessage = {
+            type: "user",
+            content: answer,
+          };
+          this.bridgeManager.addToHistory(ansFleetId, answerMessage);
+          this.broadcast({
+            type: "bridge:stream",
+            data: { fleetId: ansFleetId, message: answerMessage },
+          });
+
+          // Send answer to Bridge stdin as tool_result if toolUseId is available
+          if (toolUseId) {
+            this.processManager.sendToolResult(bridgeId, toolUseId, answer);
+          } else {
+            this.processManager.sendMessage(bridgeId, answer);
+          }
           break;
         }
         case "bridge:history": {

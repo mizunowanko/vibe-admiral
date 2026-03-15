@@ -96,6 +96,31 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
+  sendToolResult(
+    id: string,
+    toolUseId: string,
+    result: string,
+  ): ChildProcess | null {
+    const proc = this.processes.get(id);
+    if (!proc?.stdin?.writable) return null;
+    const payload = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content: result,
+            is_error: false,
+          },
+        ],
+      },
+    });
+    proc.stdin.write(payload + "\n");
+    return proc;
+  }
+
   resumeSession(
     id: string,
     sessionId: string,

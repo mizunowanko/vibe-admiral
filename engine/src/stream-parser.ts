@@ -2,6 +2,7 @@ import type { StreamMessage, BridgeRequest } from "./types.js";
 
 interface ContentBlock {
   type: string;
+  id?: string;
   text?: string;
   name?: string;
   input?: Record<string, unknown>;
@@ -43,6 +44,7 @@ export function parseStreamMessage(
       if (toolUses.length > 0) {
         const toolName = toolUses[0]?.name ?? "tool";
         const toolInput = toolUses[0]?.input;
+        const toolUseId = toolUses[0]?.id;
         return {
           type: "tool_use",
           tool: toolName,
@@ -50,6 +52,7 @@ export function parseStreamMessage(
             ? JSON.stringify(toolInput, null, 2)
             : toolName,
           ...(toolInput ? { toolInput } : {}),
+          ...(toolUseId ? { toolUseId } : {}),
         };
       }
 

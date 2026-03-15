@@ -169,6 +169,22 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     );
   }
 
+  // AskUserQuestion — highlighted question banner
+  if (message.type === "question") {
+    return (
+      <div className="flex w-full justify-start">
+        <div className="max-w-[90%] rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm">
+          <span className="text-xs font-semibold text-blue-400 block mb-1">
+            Bridge Question
+          </span>
+          <p className="whitespace-pre-wrap break-words text-blue-200/80">
+            {message.content}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Acceptance test banner
   if (isSystem && message.subtype === "acceptance-test") {
     return (

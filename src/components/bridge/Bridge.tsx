@@ -35,7 +35,7 @@ function collapseShipStatus(msgs: StreamMessage[]): DisplayMessage[] {
 }
 
 export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
-  const { messages, sendMessage, isLoading } = useBridge(fleetId);
+  const { messages, sendMessage, answerQuestion, pendingQuestion, isLoading } = useBridge(fleetId);
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
   const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
@@ -105,12 +105,14 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
 
       {/* Input */}
       <BridgeInput
-        onSend={sendMessage}
+        onSend={pendingQuestion ? answerQuestion : sendMessage}
         disabled={!engineConnected}
         placeholder={
-          engineConnected
-            ? "Send a command to the Bridge..."
-            : "Engine disconnected"
+          !engineConnected
+            ? "Engine disconnected"
+            : pendingQuestion
+              ? "Type your answer..."
+              : "Send a command to the Bridge..."
         }
       />
     </div>
