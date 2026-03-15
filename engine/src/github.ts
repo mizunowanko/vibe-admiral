@@ -124,6 +124,52 @@ export async function updateLabels(
   await gh(args);
 }
 
+export async function editIssue(
+  repo: string,
+  number: number,
+  opts: {
+    title?: string;
+    body?: string;
+    addLabels?: string[];
+    removeLabels?: string[];
+  },
+): Promise<void> {
+  const args = ["issue", "edit", String(number), "--repo", repo];
+  if (opts.title) {
+    args.push("--title", opts.title);
+  }
+  if (opts.body) {
+    args.push("--body", opts.body);
+  }
+  if (opts.addLabels) {
+    for (const label of opts.addLabels) {
+      args.push("--add-label", label);
+    }
+  }
+  if (opts.removeLabels) {
+    for (const label of opts.removeLabels) {
+      args.push("--remove-label", label);
+    }
+  }
+  await gh(args);
+}
+
+export async function commentOnIssue(
+  repo: string,
+  number: number,
+  comment: string,
+): Promise<void> {
+  await gh([
+    "issue",
+    "comment",
+    String(number),
+    "--repo",
+    repo,
+    "--body",
+    comment,
+  ]);
+}
+
 export async function closeIssue(
   repo: string,
   number: number,

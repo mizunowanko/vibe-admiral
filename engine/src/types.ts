@@ -109,6 +109,16 @@ export type BridgeAction =
       dependsOn?: number[];
     }
   | { action: "list-issues"; repo: string; label?: string }
+  | {
+      action: "edit-issue";
+      repo: string;
+      issueNumber: number;
+      title?: string;
+      body?: string;
+      comment?: string;
+      addLabels?: string[];
+      removeLabels?: string[];
+    }
   | { action: "ship-status" };
 
 // === Ship Process Info ===
