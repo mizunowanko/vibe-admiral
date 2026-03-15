@@ -9,6 +9,7 @@ function getActionRepos(action: BridgeAction): string[] {
   switch (action.action) {
     case "list-issues":
     case "create-issue":
+    case "edit-issue":
       return [action.repo];
     case "sortie":
       return action.requests.map((r) => r.repo);
@@ -49,6 +50,8 @@ export class ActionExecutor {
         return this.executeSortie(fleetId, action, fleetRepos);
       case "create-issue":
         return this.executeCreateIssue(action);
+      case "edit-issue":
+        return this.executeEditIssue(action);
       case "list-issues":
         return this.executeListIssues(action);
       case "ship-status":
@@ -125,6 +128,50 @@ export class ActionExecutor {
       return `[Issue Created] #${issue.number}: ${issue.title} (${action.repo})`;
     } catch (err) {
       return `[Issue Creation Failed] ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  private async executeEditIssue(
+    action: Extract<BridgeAction, { action: "edit-issue" }>,
+  ): Promise<string> {
+    try {
+      const results: string[] = [];
+
+      // If comment is provided, use `gh issue comment`
+      if (action.comment) {
+        await github.commentOnIssue(
+          action.repo,
+          action.issueNumber,
+          action.comment,
+        );
+        results.push(`Comment added to #${action.issueNumber}`);
+      }
+
+      // If title, body, or label changes are provided, use `gh issue edit`
+      const hasEditFields =
+        action.title !== undefined ||
+        action.body !== undefined ||
+        (action.addLabels && action.addLabels.length > 0) ||
+        (action.removeLabels && action.removeLabels.length > 0);
+
+      if (hasEditFields) {
+        await github.editIssue(action.repo, action.issueNumber, {
+          title: action.title,
+          body: action.body,
+          addLabels: action.addLabels,
+          removeLabels: action.removeLabels,
+        });
+        const fields: string[] = [];
+        if (action.title !== undefined) fields.push("title");
+        if (action.body !== undefined) fields.push("body");
+        if (action.addLabels?.length) fields.push(`+labels: ${action.addLabels.join(", ")}`);
+        if (action.removeLabels?.length) fields.push(`-labels: ${action.removeLabels.join(", ")}`);
+        results.push(`Issue #${action.issueNumber} updated (${fields.join(", ")})`);
+      }
+
+      return `[Issue Edit] ${results.join("; ")} (${action.repo})`;
+    } catch (err) {
+      return `[Issue Edit Failed] ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 

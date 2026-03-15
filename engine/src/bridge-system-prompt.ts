@@ -56,7 +56,27 @@ Create a new issue. IMPORTANT: Before creating an issue, you MUST first run \`li
 - \`parentIssue\`: parent issue number for decomposition (this issue becomes a Sub-issue of the parent via GitHub Sub-issues API)
 - \`dependsOn\`: issue numbers this issue is blocked by (recorded as a "Dependencies" section in the issue body — NOT a Sub-issue relationship)
 
-### 3. sortie
+### 3. edit-issue
+Edit an existing issue's title, body, labels, or add a comment. You can combine multiple operations in a single action.
+
+\`\`\`admiral-action
+{
+  "action": "edit-issue",
+  "repo": "${repos[0] ?? "owner/repo"}",
+  "issueNumber": 42,
+  "comment": "Progress update: API layer complete"
+}
+\`\`\`
+
+- \`comment\`: Add a comment to the issue (uses \`gh issue comment\`)
+- \`title\`: Update the issue title (uses \`gh issue edit\`)
+- \`body\`: Update the issue body (uses \`gh issue edit\`)
+- \`addLabels\`: Labels to add (uses \`gh issue edit\`)
+- \`removeLabels\`: Labels to remove (uses \`gh issue edit\`)
+- When only \`comment\` is provided, the Engine uses \`gh issue comment\` (not \`gh issue edit\`)
+- At least one field must be specified
+
+### 4. sortie
 Launch Ships (Claude Code implementation sessions) for issues. Supports multiple simultaneous launches.
 
 \`\`\`admiral-action
@@ -67,7 +87,7 @@ Launch Ships (Claude Code implementation sessions) for issues. Supports multiple
 - Prefer launching dependency-free issues first
 - Multiple issues can be launched simultaneously via the \`requests\` array
 
-### 4. ship-status
+### 5. ship-status
 Get the current status of all Ships in this fleet.
 
 \`\`\`admiral-action
