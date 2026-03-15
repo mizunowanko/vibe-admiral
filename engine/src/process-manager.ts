@@ -17,8 +17,16 @@ export class ProcessManager extends EventEmitter {
     extraPrompt?: string,
     skill?: string,
   ): ChildProcess {
-    // stdin must be 'ignore' — Bun-based Claude CLI replaces pipe FDs
-    // with unix sockets when stdin is a pipe, breaking stdout capture.
+    // See .claude/rules/cli-subprocess.md for full rationale.
+    //
+    // stdio: stdin MUST be 'ignore' — Bun replaces pipe FDs with Unix
+    // sockets when stdin is a pipe, breaking stdout capture.
+    //
+    // disallowedTools:
+    //   EnterPlanMode/ExitPlanMode — in -p mode, plan mode causes CLI
+    //     to exit after ExitPlanMode without performing implementation.
+    //   AskUserQuestion — Ship runs non-interactively (stdin ignored);
+    //     user interaction uses file message board instead.
     const skillCmd = skill ?? "/implement";
     const args = [
       "-p",
@@ -60,6 +68,14 @@ export class ProcessManager extends EventEmitter {
     additionalDirs: string[],
     systemPrompt?: string,
   ): ChildProcess {
+    // See .claude/rules/cli-subprocess.md for full rationale.
+    //
+    // stdio: stdin IS a pipe (interactive messaging via stream-json).
+    // MUST write to stdin immediately after spawn — Bun blocks stdout
+    // when stdin pipe is idle, creating a deadlock if you wait for init.
+    //
+    // allowedTools: Bridge is read-only (no Write/Edit). AskUserQuestion
+    // is allowed — Engine intercepts it and forwards to frontend.
     const args = [
       "-p",
       "",
@@ -127,7 +143,8 @@ export class ProcessManager extends EventEmitter {
     message: string,
     cwd: string,
   ): ChildProcess {
-    // stdin must be 'ignore' — same Bun pipe issue as sortie()
+    // Same stdio/disallowedTools constraints as sortie().
+    // See .claude/rules/cli-subprocess.md for full rationale.
     const proc = spawn(
       "claude",
       [
