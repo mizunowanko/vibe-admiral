@@ -105,6 +105,18 @@ export type ServerMessage =
       data: { id: string; url: string; checks: string[] };
     }
   | {
+      type: "ship:created";
+      data: {
+        id: string;
+        fleetId: string;
+        repo: string;
+        issueNumber: number;
+        issueTitle: string;
+        status: ShipStatus;
+        branchName: string;
+      };
+    }
+  | {
       type: "ship:done";
       data: { id: string; prUrl?: string; merged: boolean };
     }
