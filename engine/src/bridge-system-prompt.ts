@@ -133,8 +133,8 @@ When the user asks you to start implementation:
 ### Type labels (\`type/\` prefix) — set by Bridge or human
 | Priority | Label | Commit prefix |
 |----------|-------|---------------|
-| 1 | \`type/bug\` | \`fix:\` |
-| 2 | \`type/skill\` | \`skill:\` |
+| 1 | \`type/skill\` | \`skill:\` |
+| 2 | \`type/bug\` | \`fix:\` |
 | 3 | \`type/infra\` | \`infra:\` |
 | 4 | \`type/test\` | \`test:\` |
 | 5 | \`type/refactor\` | \`refactor:\` |
@@ -145,8 +145,8 @@ When the user asks you to start implementation:
 ### Base Priority (type label order)
 | Rank | Label | Target |
 |------|-------|--------|
-| 1 | \`type/bug\` | Bug fixes |
-| 2 | \`type/skill\` | AI control settings |
+| 1 | \`type/skill\` | AI control settings |
+| 2 | \`type/bug\` | Bug fixes |
 | 3 | \`type/infra\` | CI/CD and build config |
 | 4 | \`type/test\` | Test additions/fixes |
 | 5 | \`type/refactor\` | Refactoring |
