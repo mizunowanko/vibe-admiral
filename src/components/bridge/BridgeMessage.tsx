@@ -1,9 +1,31 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { StreamMessage } from "@/types";
+import type { ImageAttachment, StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 import { getStatusColor } from "@/lib/ship-status";
+
+/** Convert base64 ImageAttachments to object URLs, revoking on cleanup. */
+function useImageObjectUrls(images: ImageAttachment[] | undefined): string[] {
+  const urls = useMemo(() => {
+    if (!images || images.length === 0) return [];
+    return images.map((img) => {
+      const binary = atob(img.base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: img.mediaType });
+      return URL.createObjectURL(blob);
+    });
+  }, [images]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, [urls]);
+
+  return urls;
+}
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -29,6 +51,7 @@ function formatTime(ts?: number): string | null {
 export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
   const [toolExpanded, setToolExpanded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
+  const imageUrls = useImageObjectUrls(message.images);
 
   const isUser = message.type === "user";
   const isError = message.type === "error";
@@ -245,12 +268,12 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
             [{message.tool}]
           </span>
         )}
-        {isUser && message.images && message.images.length > 0 && (
+        {isUser && imageUrls.length > 0 && (
           <div className="flex gap-1.5 flex-wrap mb-1.5">
-            {message.images.map((img, i) => (
+            {imageUrls.map((url, i) => (
               <img
                 key={i}
-                src={`data:${img.mediaType};base64,${img.base64}`}
+                src={url}
                 alt={`Attachment ${i + 1}`}
                 className="h-24 max-w-48 rounded border border-primary-foreground/20 object-cover"
               />
