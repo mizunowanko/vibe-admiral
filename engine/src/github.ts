@@ -150,6 +150,10 @@ export async function editIssue(
 
   const result = { edited: false, dependsOnAppended: false };
 
+  // Resolve the final body without mutating opts.
+  // dependsOn processing may produce a new body even when opts.body is undefined.
+  let resolvedBody: string | undefined = opts.body;
+
   // Handle dependsOn: append Dependencies section to the issue body
   if (hasDependsOn) {
     const depLines = opts.dependsOn!
@@ -168,9 +172,9 @@ export async function editIssue(
       // If body was also explicitly provided, the explicit body takes precedence;
       // dependsOn section will be appended to the explicit body instead
       if (!hasBody) {
-        opts = { ...opts, body: newBody };
+        resolvedBody = newBody;
       } else {
-        opts = { ...opts, body: opts.body! + depSection };
+        resolvedBody = opts.body! + depSection;
       }
       result.dependsOnAppended = true;
     } catch (err) {
@@ -188,26 +192,23 @@ export async function editIssue(
   }
 
   const hasEditFields =
-    opts.title !== undefined ||
-    opts.body !== undefined ||
-    (opts.addLabels !== undefined && opts.addLabels.length > 0) ||
-    (opts.removeLabels !== undefined && opts.removeLabels.length > 0);
+    hasTitle || resolvedBody !== undefined || hasAddLabels || hasRemoveLabels;
 
   if (hasEditFields) {
     const args = ["issue", "edit", String(number), "--repo", repo];
-    if (opts.title !== undefined) {
-      args.push("--title", opts.title);
+    if (hasTitle) {
+      args.push("--title", opts.title!);
     }
-    if (opts.body !== undefined) {
-      args.push("--body", opts.body);
+    if (resolvedBody !== undefined) {
+      args.push("--body", resolvedBody);
     }
-    if (opts.addLabels !== undefined && opts.addLabels.length > 0) {
-      for (const label of opts.addLabels) {
+    if (hasAddLabels) {
+      for (const label of opts.addLabels!) {
         args.push("--add-label", label);
       }
     }
-    if (opts.removeLabels !== undefined && opts.removeLabels.length > 0) {
-      for (const label of opts.removeLabels) {
+    if (hasRemoveLabels) {
+      for (const label of opts.removeLabels!) {
         args.push("--remove-label", label);
       }
     }
