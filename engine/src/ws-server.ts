@@ -84,11 +84,6 @@ export class EngineServer {
       if (id.startsWith("bridge-")) {
         const fleetId = id.replace("bridge-", "");
 
-        // Detect init message on raw msg (before parseStreamMessage filters it out)
-        if (msg.type === "system" && (msg as Record<string, unknown>).subtype === "init") {
-          this.bridgeManager.onBridgeReady(fleetId);
-        }
-
         // Emit "connected" status on first data from bridge CLI
         if (!this.bridgeFirstData.has(id)) {
           this.bridgeFirstData.add(id);
@@ -171,8 +166,21 @@ export class EngineServer {
         });
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
-        if (code === 0) {
+        const ship = this.shipManager.getShip(id);
+        const completedPhases = new Set([
+          "merging", "reviewing", "acceptance-test", "testing",
+        ]);
+        if (code === 0 && ship && completedPhases.has(ship.status)) {
+          // Ship reached a late phase — treat as successful completion
           this.shipManager.onShipComplete(id).catch(console.error);
+        } else if (code === 0) {
+          // Ship exited code 0 but never got past early phases — likely a
+          // startup error (e.g. unknown skill). Don't close the issue.
+          this.shipManager.updateStatus(
+            id,
+            "error",
+            "Process exited before completing implementation",
+          );
         } else {
           this.shipManager.updateStatus(
             id,

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { copyFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import * as github from "./github.js";
@@ -68,7 +70,10 @@ export class ShipManager {
     // 4. Symlink settings
     await worktree.symlinkSettings(repoRoot, worktreePath);
 
-    // 5. npm install if web project
+    // 5. Copy /implement skill to worktree
+    await this.deploySkills(repoRoot, worktreePath);
+
+    // 6. npm install if web project
     if (await worktree.isWebProject(worktreePath)) {
       await execFileAsync("npm", ["install"], { cwd: worktreePath });
     }
@@ -89,10 +94,10 @@ export class ShipManager {
     };
     this.ships.set(shipId, ship);
 
-    // 6. Launch Claude CLI process
+    // 7. Launch Claude CLI process
     this.processManager.sortie(shipId, worktreePath, issueNumber);
 
-    // 7. Start acceptance test watcher
+    // 8. Start acceptance test watcher
     this.acceptanceWatcher.watch(worktreePath, shipId);
 
     this.updateStatus(shipId, "investigating");
@@ -107,8 +112,7 @@ export class ShipManager {
       // 1. Remove worktree
       await worktree.remove(ship.worktreePath);
 
-      // 2. Close issue + remove label
-      await github.closeIssue(ship.repo, ship.issueNumber);
+      // 2. Remove "doing" label (issue close is left to Bridge/human)
       await github.updateLabels(ship.repo, ship.issueNumber, {
         remove: "doing",
       });
@@ -154,6 +158,17 @@ export class ShipManager {
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
       }
+      // Rollback labels when ship fails: doing → todo
+      if (status === "error") {
+        github
+          .updateLabels(ship.repo, ship.issueNumber, {
+            remove: "doing",
+            add: "todo",
+          })
+          .catch((err) =>
+            console.warn(`[ship-manager] Failed to rollback labels: ${err}`),
+          );
+      }
       this.onStatusChange?.(id, status, detail);
     }
   }
@@ -162,6 +177,22 @@ export class ShipManager {
     id: string,
     msg: { type: string; content?: string; tool?: string; toolInput?: Record<string, unknown> },
   ): void {
+    // Phase progression order — never go backwards
+    const phaseOrder: ShipStatus[] = [
+      "sortie", "investigating", "planning", "implementing",
+      "testing", "reviewing", "acceptance-test", "merging",
+    ];
+    const ship = this.ships.get(id);
+    if (!ship) return;
+    const currentIdx = phaseOrder.indexOf(ship.status);
+
+    const tryAdvance = (target: ShipStatus): void => {
+      const targetIdx = phaseOrder.indexOf(target);
+      if (targetIdx > currentIdx) {
+        this.updateStatus(id, target);
+      }
+    };
+
     // Detect phase from parsed stream message
     const type = msg.type;
     const content = msg.content ?? "";
@@ -169,37 +200,37 @@ export class ShipManager {
 
     if (type === "assistant") {
       if (content.includes("EnterPlanMode")) {
-        this.updateStatus(id, "planning");
+        tryAdvance("planning");
       } else if (content.includes("ExitPlanMode")) {
-        this.updateStatus(id, "implementing");
+        tryAdvance("implementing");
       }
     }
 
     if (type === "tool_use") {
       if (tool === "EnterPlanMode") {
-        this.updateStatus(id, "planning");
+        tryAdvance("planning");
       } else if (tool === "ExitPlanMode") {
-        this.updateStatus(id, "implementing");
+        tryAdvance("implementing");
       } else if (tool === "Edit" || tool === "Write") {
-        this.updateStatus(id, "implementing");
+        tryAdvance("implementing");
       } else if (tool === "Bash") {
         const inputStr = msg.toolInput
           ? JSON.stringify(msg.toolInput)
           : "";
         if (inputStr.includes("npm test") || inputStr.includes("vitest")) {
-          this.updateStatus(id, "testing");
+          tryAdvance("testing");
         } else if (
           inputStr.includes("gh pr create") ||
           inputStr.includes("gh pr merge")
         ) {
-          this.updateStatus(id, "merging");
+          tryAdvance("merging");
         }
       } else if (tool === "Skill" || tool === "Task") {
         const inputStr = msg.toolInput
           ? JSON.stringify(msg.toolInput)
           : content;
         if (inputStr.includes("review-pr")) {
-          this.updateStatus(id, "reviewing");
+          tryAdvance("reviewing");
         }
       }
     }
@@ -221,6 +252,23 @@ export class ShipManager {
           err,
         );
       });
+  }
+
+  private async deploySkills(
+    repoRoot: string,
+    worktreePath: string,
+  ): Promise<void> {
+    // Copy /implement skill from the main repo's skills/ to the worktree's
+    // .claude/skills/ so that Claude CLI recognizes the /implement command.
+    const skillSrc = join(repoRoot, "skills", "implement", "SKILL.md");
+    const skillDestDir = join(worktreePath, ".claude", "skills", "implement");
+    try {
+      await mkdir(skillDestDir, { recursive: true });
+      await copyFile(skillSrc, join(skillDestDir, "SKILL.md"));
+    } catch (err) {
+      // Non-fatal: ship can still function without the skill
+      console.warn(`[ship-manager] Failed to deploy /implement skill: ${err}`);
+    }
   }
 
   private startCleanup(): void {
