@@ -47,7 +47,6 @@ engine/               Node.js sidecar
     github.ts         gh CLI ラッパー（確定的制御）
     worktree.ts       git worktree CRUD（確定的制御）
     issue-tracker.ts  issue 状態トラッキング
-    port-manager.ts   ポート割り当て
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
 src-tauri/            Tauri shell
