@@ -93,7 +93,8 @@ export type ClientMessage =
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
   | { type: "issue:list"; data: { repo: string } }
-  | { type: "issue:get"; data: { repo: string; number: number } };
+  | { type: "issue:get"; data: { repo: string; number: number } }
+  | { type: "fs:list-dir"; data: { path?: string } };
 
 // === WebSocket Messages: Engine → Frontend ===
 export type ServerMessage =
@@ -129,4 +130,11 @@ export type ServerMessage =
   | { type: "fleet:data"; data: Fleet[] }
   | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
   | { type: "issue:data"; data: { repo: string; issues: Issue[] } }
+  | {
+      type: "fs:dir-listing";
+      data: {
+        path: string;
+        entries: Array<{ name: string; isDirectory: boolean }>;
+      };
+    }
   | { type: "error"; data: { source: string; message: string } };
