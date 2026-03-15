@@ -38,14 +38,14 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   if (fleetShips.length === 0) return null;
 
   return (
-    <div className="border-t border-border bg-background/50">
-      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border/50">
+    <div className="w-72 shrink-0 border-l border-border bg-background/50 flex flex-col">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Ships ({fleetShips.length})
         </span>
       </div>
-      <ScrollArea className="max-h-48">
-        <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ScrollArea className="flex-1">
+        <div className="grid grid-cols-1 gap-2 p-3">
           {fleetShips.map((ship) => {
             const config = STATUS_CONFIG[ship.status];
             const isActive = ship.status !== "done" && ship.status !== "error";
