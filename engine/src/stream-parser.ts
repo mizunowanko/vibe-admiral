@@ -229,23 +229,39 @@ function validateAction(obj: unknown): BridgeAction | null {
       if (hasAddLabels) {
         if (
           !Array.isArray(record.addLabels) ||
-          !record.addLabels.every((l: unknown) => typeof l === "string")
+          !record.addLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
         ) {
-          console.warn("[stream-parser] edit-issue addLabels must be string[]");
+          console.warn("[stream-parser] edit-issue addLabels must be non-empty string[]");
           return null;
         }
-        editResult.addLabels = record.addLabels as string[];
+        if ((record.addLabels as string[]).length > 0) {
+          editResult.addLabels = record.addLabels as string[];
+        }
       }
 
       if (hasRemoveLabels) {
         if (
           !Array.isArray(record.removeLabels) ||
-          !record.removeLabels.every((l: unknown) => typeof l === "string")
+          !record.removeLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
         ) {
-          console.warn("[stream-parser] edit-issue removeLabels must be string[]");
+          console.warn("[stream-parser] edit-issue removeLabels must be non-empty string[]");
           return null;
         }
-        editResult.removeLabels = record.removeLabels as string[];
+        if ((record.removeLabels as string[]).length > 0) {
+          editResult.removeLabels = record.removeLabels as string[];
+        }
+      }
+
+      // Reject if no effective fields remain after filtering
+      if (
+        editResult.title === undefined &&
+        editResult.body === undefined &&
+        editResult.comment === undefined &&
+        editResult.addLabels === undefined &&
+        editResult.removeLabels === undefined
+      ) {
+        console.warn("[stream-parser] edit-issue requires at least one effective field");
+        return null;
       }
 
       return editResult;

@@ -162,8 +162,8 @@ export class ActionExecutor {
           removeLabels: action.removeLabels,
         });
         const fields: string[] = [];
-        if (action.title) fields.push("title");
-        if (action.body) fields.push("body");
+        if (action.title !== undefined) fields.push("title");
+        if (action.body !== undefined) fields.push("body");
         if (action.addLabels?.length) fields.push(`+labels: ${action.addLabels.join(", ")}`);
         if (action.removeLabels?.length) fields.push(`-labels: ${action.removeLabels.join(", ")}`);
         results.push(`Issue #${action.issueNumber} updated (${fields.join(", ")})`);

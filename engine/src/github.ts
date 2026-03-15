@@ -135,10 +135,10 @@ export async function editIssue(
   },
 ): Promise<void> {
   const args = ["issue", "edit", String(number), "--repo", repo];
-  if (opts.title) {
+  if (opts.title !== undefined) {
     args.push("--title", opts.title);
   }
-  if (opts.body) {
+  if (opts.body !== undefined) {
     args.push("--body", opts.body);
   }
   if (opts.addLabels) {
