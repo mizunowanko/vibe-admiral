@@ -57,6 +57,12 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
           <Badge variant="outline" className="text-[10px] shrink-0">
             {ship.status}
           </Badge>
+          {ship.isCompacting && (
+            <Badge className="text-[10px] bg-purple-500/20 text-purple-400 shrink-0">
+              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+              Compacting
+            </Badge>
+          )}
         </div>
         <Button
           variant="ghost"
@@ -83,7 +89,8 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
                 log.type === "error" && "text-red-400",
                 log.type === "user" && "text-blue-400",
                 log.type === "assistant" && "text-foreground/90",
-                log.type === "system" && "text-yellow-400/80",
+                log.type === "system" && log.subtype === "compact-status" && "text-purple-400",
+                log.type === "system" && log.subtype !== "compact-status" && "text-yellow-400/80",
                 log.type === "tool_use" && "text-cyan-400/80",
                 log.type === "tool_result" && "text-muted-foreground",
                 log.type === "result" && "text-green-400",

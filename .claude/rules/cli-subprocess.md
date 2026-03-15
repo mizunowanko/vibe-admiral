@@ -44,6 +44,15 @@ stdout is newline-delimited JSON (`--output-format stream-json`). Parse with a l
 3. Parse each complete line as JSON
 4. Filter out `system` init/hook messages to reduce frontend memory consumption
 
+### Context Compaction Messages
+
+When the CLI compacts its context, two system messages are emitted:
+- `{ type: "system", subtype: "status", status: "compacting" }` — compact started
+- `{ type: "system", subtype: "status", status: null }` — compact ended (status cleared)
+- `{ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto"|"manual", pre_tokens: number } }` — compact boundary marker
+
+The Engine detects these to update Ship `isCompacting` state and notify the frontend.
+
 ## Stdin Message Format (Bridge Only)
 
 Messages to Bridge stdin use `--input-format stream-json`:

@@ -47,6 +47,7 @@ export interface Ship {
   issueNumber: number;
   issueTitle: string;
   status: ShipStatus;
+  isCompacting: boolean;
   branchName: string;
   worktreePath: string;
   sessionId: string | null;
@@ -160,6 +161,7 @@ export interface ShipProcess {
   branchName: string;
   sessionId: string | null;
   status: ShipStatus;
+  isCompacting: boolean;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
   acceptanceTest: AcceptanceTestRequest | null;

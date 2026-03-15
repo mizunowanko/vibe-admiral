@@ -65,6 +65,12 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                       )}
                       {config.label}
                     </Badge>
+                    {ship.isCompacting && (
+                      <Badge className="text-[10px] px-1 py-0 bg-purple-500/20 text-purple-400">
+                        <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+                        Compact
+                      </Badge>
+                    )}
                   </div>
                   {isActive && (
                     <Button

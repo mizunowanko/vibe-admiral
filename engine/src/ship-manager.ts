@@ -89,6 +89,7 @@ export class ShipManager {
       issueNumber,
       issueTitle: issue.title,
       status: "sortie",
+      isCompacting: false,
       branchName,
       worktreePath,
       sessionId: null,

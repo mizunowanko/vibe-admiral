@@ -35,6 +35,12 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
             )}
             {config.label}
           </Badge>
+          {ship.isCompacting && (
+            <Badge className="text-[10px] bg-purple-500/20 text-purple-400">
+              <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+              Compacting
+            </Badge>
+          )}
         </div>
         {isActive && (
           <Button

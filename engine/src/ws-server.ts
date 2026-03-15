@@ -169,6 +169,9 @@ export class EngineServer {
           }
         }
       } else {
+        // Detect compact status changes from raw message (before parsing)
+        this.detectCompactStatus(id, msg);
+
         // Ship stream — parse raw CLI JSON before broadcast
         const parsed = parseStreamMessage(msg);
         if (parsed) {
@@ -937,6 +940,39 @@ export class EngineServer {
       bridgeId,
       `[PR Review Request] Ship #${ship.issueNumber} created PR #${prNumber}: ${prUrl} (repo: ${repo}, shipId: ${ship.id}). Please review the diff and submit your verdict.`,
     );
+  }
+
+  private detectCompactStatus(
+    id: string,
+    raw: Record<string, unknown>,
+  ): void {
+    // Detect SDKStatusMessage: { type: "system", subtype: "status", status: "compacting" | null }
+    if (raw.type !== "system" || raw.subtype !== "status") return;
+
+    const status = raw.status as string | null | undefined;
+    const isCompacting = status === "compacting";
+    const ship = this.shipManager.getShip(id);
+    if (!ship) return;
+
+    ship.isCompacting = isCompacting;
+    this.broadcast({
+      type: "ship:compacting",
+      data: { id, isCompacting },
+    });
+
+    // Also inject into Bridge chat
+    if (isCompacting) {
+      const compactMsg = {
+        type: "system" as const,
+        subtype: "ship-status",
+        content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
+      };
+      this.bridgeManager.addToHistory(ship.fleetId, compactMsg);
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId: ship.fleetId, message: compactMsg },
+      });
+    }
   }
 
   private detectPushForReReview(

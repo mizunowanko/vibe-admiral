@@ -45,6 +45,12 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
           <Badge variant="outline" className="text-[10px] shrink-0">
             {ship.status}
           </Badge>
+          {ship.isCompacting && (
+            <Badge className="text-[10px] bg-purple-500/20 text-purple-400 shrink-0">
+              <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+              Compacting
+            </Badge>
+          )}
         </div>
         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose}>
           <X className="h-4 w-4" />

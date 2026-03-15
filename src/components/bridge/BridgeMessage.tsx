@@ -114,6 +114,26 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     );
   }
 
+  // Compact status — centered purple badge
+  if (isSystem && message.subtype === "compact-status") {
+    const isCompacting = message.content?.includes("Compacting context");
+    return (
+      <div className="flex w-full justify-center">
+        <div
+          className={cn(
+            "flex items-center gap-1.5 rounded px-3 py-1 text-xs font-mono",
+            "bg-purple-500/10 border border-purple-500/30 text-purple-400",
+          )}
+        >
+          {isCompacting && (
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+          )}
+          <span>{message.content}</span>
+        </div>
+      </div>
+    );
+  }
+
   // Request result — collapsible when long
   if (isSystem && message.subtype === "request-result") {
     const content = message.content ?? "";

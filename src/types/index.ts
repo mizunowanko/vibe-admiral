@@ -44,6 +44,7 @@ export interface Ship {
   issueNumber: number;
   issueTitle: string;
   status: ShipStatus;
+  isCompacting: boolean;
   branchName: string;
   worktreePath: string;
   sessionId: string | null;
@@ -137,6 +138,10 @@ export type ServerMessage =
   | {
       type: "ship:status";
       data: { id: string; status: ShipStatus; detail?: string };
+    }
+  | {
+      type: "ship:compacting";
+      data: { id: string; isCompacting: boolean };
     }
   | {
       type: "ship:acceptance-test";
