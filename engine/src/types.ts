@@ -73,6 +73,9 @@ export interface StreamMessage {
   [key: string]: unknown;
 }
 
+// === Issue Status (GitHub label-based) ===
+export type IssueStatus = "todo" | "doing" | "done";
+
 // === Label Operations ===
 export interface LabelOps {
   add?: string;
