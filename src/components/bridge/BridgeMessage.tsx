@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 
 interface BridgeMessageProps {
   message: StreamMessage;
+  repeatCount?: number;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -31,7 +32,7 @@ function getStatusColor(content: string): string {
   return "text-muted-foreground";
 }
 
-export function BridgeMessage({ message }: BridgeMessageProps) {
+export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
   const [toolExpanded, setToolExpanded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
 
@@ -81,6 +82,11 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
           <span className={getStatusColor(message.content ?? "")}>
             {message.content}
           </span>
+          {repeatCount && repeatCount > 1 && (
+            <span className="text-muted-foreground/50 text-[10px]">
+              x{repeatCount}
+            </span>
+          )}
         </div>
       </div>
     );
