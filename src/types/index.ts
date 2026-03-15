@@ -78,12 +78,14 @@ export interface StreamMessage {
     | "error"
     | "tool_use"
     | "tool_result"
-    | "history";
+    | "history"
+    | "question";
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
   subtype?: string;
   timestamp?: number;
+  toolUseId?: string;
 }
 
 // === WebSocket Messages: Frontend → Engine ===
@@ -105,6 +107,7 @@ export type ClientMessage =
     }
   | { type: "fleet:delete"; data: { id: string } }
   | { type: "bridge:send"; data: { fleetId: string; message: string } }
+  | { type: "bridge:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "bridge:history"; data: { fleetId: string } }
   | {
       type: "ship:sortie";
@@ -124,6 +127,10 @@ export type ClientMessage =
 export type ServerMessage =
   | {
       type: "bridge:stream";
+      data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "bridge:question";
       data: { fleetId: string; message: StreamMessage };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }

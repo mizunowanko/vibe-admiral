@@ -144,9 +144,25 @@ proc.stdout?.on("data", (chunk: Buffer) => {
 |---|---|---|
 | `system` (subtype `init`) | Session initialized | `session_id`, `tools` |
 | `assistant` | Text response from Claude | `content` |
-| `tool_use` | Claude invokes a tool | `tool`, `toolInput` |
+| `tool_use` | Claude invokes a tool | `tool`, `toolInput`, `toolUseId` |
 | `tool_result` | Result of a tool invocation | `content` |
 | `result` | Final result (session complete) | `content`, `subtype` (`success`/`error`) |
+
+### AskUserQuestion handling (Bridge only)
+
+When Bridge CLI calls `AskUserQuestion`, the Engine intercepts the `tool_use` message and:
+
+1. Extracts the question text from `toolInput.question` and the `toolUseId`
+2. Broadcasts a `bridge:question` event (with `type: "question"`) to the frontend
+3. The frontend displays the question in a highlighted banner and switches the input to answer mode
+4. When the user submits an answer, the frontend sends `bridge:answer` with the answer text and `toolUseId`
+5. The Engine sends the answer back to Bridge CLI's stdin as a `tool_result` message
+
+```ts
+// Sending tool_result to Bridge stdin
+processManager.sendToolResult(bridgeId, toolUseId, answer);
+// Produces: {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"...","content":"answer","is_error":false}]}}
+```
 
 ### Phase detection from stream
 
