@@ -7,6 +7,7 @@ import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import * as github from "./github.js";
+import { parseStreamMessage } from "./stream-parser.js";
 import type { Fleet, ClientMessage } from "./types.js";
 
 const FLEETS_DIR =
@@ -69,14 +70,14 @@ export class EngineServer {
       // Route to bridge or ship
       if (id.startsWith("bridge-")) {
         const fleetId = id.replace("bridge-", "");
-        this.bridgeManager.addToHistory(fleetId, {
-          type: (msg.type as string) ?? "assistant",
-          content: msg.content as string | undefined,
-        });
-        this.broadcast({
-          type: "bridge:stream",
-          data: { fleetId, message: msg },
-        });
+        const parsed = parseStreamMessage(msg);
+        if (parsed) {
+          this.bridgeManager.addToHistory(fleetId, parsed);
+          this.broadcast({
+            type: "bridge:stream",
+            data: { fleetId, message: parsed },
+          });
+        }
       } else {
         // Ship stream
         this.shipManager.updatePhaseFromStream(id, msg);
