@@ -225,6 +225,23 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
             [{message.tool}]
           </span>
         )}
+        {isUser && message.images && message.images.length > 0 && (
+          <div className="flex gap-1.5 flex-wrap mb-1.5">
+            {message.images.map((img, i) => (
+              <img
+                key={i}
+                src={`data:${img.mediaType};base64,${img.base64}`}
+                alt={`Attachment ${i + 1}`}
+                className="h-24 max-w-48 rounded border border-primary-foreground/20 object-cover"
+              />
+            ))}
+          </div>
+        )}
+        {isUser && !message.images && message.imageCount && message.imageCount > 0 && (
+          <span className="text-xs text-primary-foreground/60 block mb-1">
+            {message.imageCount} image{message.imageCount > 1 ? "s" : ""} attached
+          </span>
+        )}
         {isUser ? (
           <p className="whitespace-pre-wrap break-words">{content}</p>
         ) : (

@@ -101,12 +101,32 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  sendMessage(id: string, message: string): ChildProcess | null {
+  sendMessage(
+    id: string,
+    message: string,
+    images?: Array<{ base64: string; mediaType: string }>,
+  ): ChildProcess | null {
     const proc = this.processes.get(id);
     if (!proc?.stdin?.writable) return null;
+
+    let content: string | Array<Record<string, unknown>> = message;
+    if (images && images.length > 0) {
+      content = [
+        { type: "text", text: message },
+        ...images.map((img) => ({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: img.mediaType,
+            data: img.base64,
+          },
+        })),
+      ];
+    }
+
     const payload = JSON.stringify({
       type: "user",
-      message: { role: "user", content: message },
+      message: { role: "user", content },
     });
     proc.stdin.write(payload + "\n");
     return proc;

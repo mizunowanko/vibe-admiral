@@ -49,14 +49,22 @@ export class BridgeManager {
     return this.sessions.has(fleetId);
   }
 
-  send(fleetId: string, message: string): boolean {
+  send(
+    fleetId: string,
+    message: string,
+    images?: Array<{ base64: string; mediaType: string }>,
+  ): boolean {
     const session = this.sessions.get(fleetId);
     if (!session) return false;
 
     const bridgeId = `bridge-${fleetId}`;
 
-    // Store user message in history
-    session.history.push({ type: "user", content: message });
+    // Store user message in history (include image count, not full data, to limit memory)
+    const historyEntry: StreamMessage = { type: "user", content: message };
+    if (images && images.length > 0) {
+      historyEntry.imageCount = images.length;
+    }
+    session.history.push(historyEntry);
 
     // If process died, re-launch it
     if (!this.processManager.isRunning(bridgeId)) {
@@ -71,7 +79,7 @@ export class BridgeManager {
     // Send immediately — writing to stdin also unblocks Bun's pipe handling.
     // Do NOT queue/defer: Bun blocks stdout when stdin pipe is idle,
     // so waiting for init creates a deadlock (init never arrives).
-    this.processManager.sendMessage(bridgeId, message);
+    this.processManager.sendMessage(bridgeId, message, images);
     return true;
   }
 
