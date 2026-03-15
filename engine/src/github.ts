@@ -139,6 +139,27 @@ export async function closeIssue(
   ]);
 }
 
+export async function editIssue(
+  repo: string,
+  number: number,
+  fields: { title?: string; body?: string; labels?: string[] },
+): Promise<void> {
+  const args = ["issue", "edit", String(number), "--repo", repo];
+  if (fields.title) {
+    args.push("--title", fields.title);
+  }
+  if (fields.body) {
+    args.push("--body", fields.body);
+  }
+  if (fields.labels) {
+    // Clear existing labels and set new ones
+    for (const label of fields.labels) {
+      args.push("--add-label", label);
+    }
+  }
+  await gh(args);
+}
+
 export async function getDefaultBranch(repo: string): Promise<string> {
   const raw = await gh([
     "repo",

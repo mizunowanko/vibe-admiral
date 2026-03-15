@@ -9,6 +9,7 @@ function getActionRepos(action: BridgeAction): string[] {
   switch (action.action) {
     case "list-issues":
     case "create-issue":
+    case "edit-issue":
       return [action.repo];
     case "sortie":
       return action.requests.map((r) => r.repo);
@@ -49,6 +50,8 @@ export class ActionExecutor {
         return this.executeSortie(fleetId, action, fleetRepos);
       case "create-issue":
         return this.executeCreateIssue(action);
+      case "edit-issue":
+        return this.executeEditIssue(action);
       case "list-issues":
         return this.executeListIssues(action);
       case "ship-status":
@@ -125,6 +128,35 @@ export class ActionExecutor {
       return `[Issue Created] #${issue.number}: ${issue.title} (${action.repo})`;
     } catch (err) {
       return `[Issue Creation Failed] ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  private async executeEditIssue(
+    action: Extract<BridgeAction, { action: "edit-issue" }>,
+  ): Promise<string> {
+    try {
+      const fields: { title?: string; body?: string; labels?: string[] } = {};
+      if (action.title) fields.title = action.title;
+      if (action.body) fields.body = action.body;
+      if (action.labels) fields.labels = action.labels;
+
+      // Edit basic fields if any were provided
+      if (Object.keys(fields).length > 0) {
+        await github.editIssue(action.repo, action.number, fields);
+      }
+
+      // Set up parent sub-issue relationship
+      if (action.parentIssue) {
+        await github.addSubIssue(
+          action.repo,
+          action.parentIssue,
+          action.number,
+        );
+      }
+
+      return `[Issue Updated] #${action.number} (${action.repo})`;
+    } catch (err) {
+      return `[Issue Edit Failed] ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 

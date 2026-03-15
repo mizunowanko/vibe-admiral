@@ -108,6 +108,15 @@ export type BridgeAction =
       parentIssue?: number;
       dependsOn?: number[];
     }
+  | {
+      action: "edit-issue";
+      repo: string;
+      number: number;
+      title?: string;
+      body?: string;
+      labels?: string[];
+      parentIssue?: number;
+    }
   | { action: "list-issues"; repo: string; label?: string }
   | { action: "ship-status" };
 
