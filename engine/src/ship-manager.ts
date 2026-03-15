@@ -136,23 +136,23 @@ export class ShipManager {
     return Array.from(this.ships.values());
   }
 
-  getShipByIssue(issueNumber: number): ShipProcess | undefined {
+  getShipByIssue(repo: string, issueNumber: number): ShipProcess | undefined {
     for (const ship of this.ships.values()) {
-      if (ship.issueNumber === issueNumber && ship.status !== "done" && ship.status !== "error") {
+      if (ship.repo === repo && ship.issueNumber === issueNumber && ship.status !== "done" && ship.status !== "error") {
         return ship;
       }
     }
     return undefined;
   }
 
-  getActiveShipIssueNumbers(): number[] {
-    const numbers: number[] = [];
+  getActiveShipIssueNumbers(): Array<{ repo: string; issueNumber: number }> {
+    const active: Array<{ repo: string; issueNumber: number }> = [];
     for (const ship of this.ships.values()) {
       if (ship.status !== "done" && ship.status !== "error") {
-        numbers.push(ship.issueNumber);
+        active.push({ repo: ship.repo, issueNumber: ship.issueNumber });
       }
     }
-    return numbers;
+    return active;
   }
 
   updateStatus(id: string, status: ShipStatus, detail?: string): void {

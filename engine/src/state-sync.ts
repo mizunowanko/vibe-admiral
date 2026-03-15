@@ -36,7 +36,7 @@ export class StateSync {
     issueNumber: number,
   ): Promise<{ ok: boolean; reason?: string }> {
     // 1. Check if a Ship is already running for this issue
-    const existing = this.shipManager.getShipByIssue(issueNumber);
+    const existing = this.shipManager.getShipByIssue(repo, issueNumber);
     if (existing) {
       return {
         ok: false,
@@ -156,10 +156,13 @@ export class StateSync {
   ): Promise<void> {
     console.log("[state-sync] Running startup reconciliation...");
 
-    const activeIssues = this.shipManager.getActiveShipIssueNumbers();
+    const activeShips = this.shipManager.getActiveShipIssueNumbers();
 
     for (const repo of repos) {
       if (!repo.remote) continue;
+
+      const isActive = (issueNumber: number) =>
+        activeShips.some((s) => s.repo === repo.remote && s.issueNumber === issueNumber);
 
       // 1. Audit active status/* labels: if no active Ship, roll back to "status/todo"
       // Note: "status/blocked" is excluded — it is set manually by Bridge/human
@@ -168,7 +171,7 @@ export class StateSync {
         for (const label of ACTIVE_STATUS_LABELS) {
           const labeledIssues = await github.listIssues(repo.remote, label);
           for (const issue of labeledIssues) {
-            if (!activeIssues.includes(issue.number)) {
+            if (!isActive(issue.number)) {
               console.warn(
                 `[state-sync] Orphan "${label}" label on #${issue.number} — rolling back to "status/todo"`,
               );
@@ -192,7 +195,7 @@ export class StateSync {
           const match = wt.branch?.match(/^feature\/(\d+)-/);
           if (!match) continue;
           const issueNum = Number(match[1]);
-          if (!activeIssues.includes(issueNum)) {
+          if (!isActive(issueNum)) {
             console.warn(
               `[state-sync] Orphan worktree for #${issueNum} at ${wt.path} — removing`,
             );
