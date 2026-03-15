@@ -118,7 +118,7 @@ export class EngineServer {
           ) {
             const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
             const question = toolInput?.question as string | undefined;
-            const toolUseId = (parsed as Record<string, unknown>).toolUseId as string | undefined;
+            const toolUseId = parsed.toolUseId as string | undefined;
             const questionMessage: StreamMessage = {
               type: "question",
               content: question ?? "Bridge is asking a question",
