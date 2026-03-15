@@ -76,7 +76,13 @@ export async function createIssue(
   title: string,
   body: string,
   labels?: string[],
+  dependsOn?: number[],
 ): Promise<Issue> {
+  let finalBody = body;
+  if (dependsOn !== undefined && dependsOn.length > 0) {
+    const depLines = dependsOn.map((n) => `- Depends on #${n}`).join("\n");
+    finalBody = `${body}\n\n## Dependencies\n${depLines}`;
+  }
   const labelList = labels && labels.length > 0 ? labels : ["todo"];
   const args = [
     "issue",
@@ -86,7 +92,7 @@ export async function createIssue(
     "--title",
     title,
     "--body",
-    body,
+    finalBody,
   ];
   for (const label of labelList) {
     args.push("--label", label);
@@ -124,26 +130,92 @@ export async function editIssue(
     body?: string;
     addLabels?: string[];
     removeLabels?: string[];
+    dependsOn?: number[];
   },
-): Promise<void> {
-  const args = ["issue", "edit", String(number), "--repo", repo];
-  if (opts.title !== undefined) {
-    args.push("--title", opts.title);
+): Promise<{ edited: boolean; dependsOnAppended: boolean }> {
+  const hasTitle = opts.title !== undefined;
+  const hasBody = opts.body !== undefined;
+  const hasAddLabels =
+    opts.addLabels !== undefined && opts.addLabels.length > 0;
+  const hasRemoveLabels =
+    opts.removeLabels !== undefined && opts.removeLabels.length > 0;
+  const hasDependsOn =
+    opts.dependsOn !== undefined && opts.dependsOn.length > 0;
+
+  if (!hasTitle && !hasBody && !hasAddLabels && !hasRemoveLabels && !hasDependsOn) {
+    throw new Error(
+      "editIssue requires at least one field to change (title, body, addLabels, removeLabels, or dependsOn)",
+    );
   }
-  if (opts.body !== undefined) {
-    args.push("--body", opts.body);
-  }
-  if (opts.addLabels) {
-    for (const label of opts.addLabels) {
-      args.push("--add-label", label);
+
+  const result = { edited: false, dependsOnAppended: false };
+
+  // Handle dependsOn: append Dependencies section to the issue body
+  if (hasDependsOn) {
+    const depLines = opts.dependsOn!
+      .map((n) => `- Depends on #${n}`)
+      .join("\n");
+    const depSection = `\n\n## Dependencies\n${depLines}`;
+    const hasOtherEdits = hasTitle || hasBody || hasAddLabels || hasRemoveLabels;
+    try {
+      const issue = await getIssue(repo, number);
+      const existingBody = issue.body ?? "";
+      // Replace existing Dependencies section or append.
+      // Uses the same regex as parseDependencies for round-trip consistency.
+      const newBody = DEPENDENCIES_SECTION_RE.test(existingBody)
+        ? existingBody.replace(DEPENDENCIES_SECTION_RE, `## Dependencies\n${depLines}`)
+        : existingBody + depSection;
+      // If body was also explicitly provided, the explicit body takes precedence;
+      // dependsOn section will be appended to the explicit body instead
+      if (!hasBody) {
+        opts = { ...opts, body: newBody };
+      } else {
+        opts = { ...opts, body: opts.body! + depSection };
+      }
+      result.dependsOnAppended = true;
+    } catch (err) {
+      if (!hasOtherEdits) {
+        // dependsOn was the only requested operation and it failed — throw
+        throw new Error(
+          `Failed to append dependsOn to #${number}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // Other edits were also requested — log warning and proceed with those
+      console.warn(
+        `[github] Failed to append dependsOn to #${number}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
-  if (opts.removeLabels) {
-    for (const label of opts.removeLabels) {
-      args.push("--remove-label", label);
+
+  const hasEditFields =
+    opts.title !== undefined ||
+    opts.body !== undefined ||
+    (opts.addLabels !== undefined && opts.addLabels.length > 0) ||
+    (opts.removeLabels !== undefined && opts.removeLabels.length > 0);
+
+  if (hasEditFields) {
+    const args = ["issue", "edit", String(number), "--repo", repo];
+    if (opts.title !== undefined) {
+      args.push("--title", opts.title);
     }
+    if (opts.body !== undefined) {
+      args.push("--body", opts.body);
+    }
+    if (opts.addLabels !== undefined && opts.addLabels.length > 0) {
+      for (const label of opts.addLabels) {
+        args.push("--add-label", label);
+      }
+    }
+    if (opts.removeLabels !== undefined && opts.removeLabels.length > 0) {
+      for (const label of opts.removeLabels) {
+        args.push("--remove-label", label);
+      }
+    }
+    await gh(args);
+    result.edited = true;
   }
-  await gh(args);
+
+  return result;
 }
 
 export async function commentOnIssue(
@@ -346,13 +418,18 @@ export async function addSubIssue(
   ]);
 }
 
+// Shared regex to match the "## Dependencies" section in issue bodies.
+// Captures the section content (group 1). Works whether the section is
+// followed by another heading or sits at the end of the body.
+const DEPENDENCIES_SECTION_RE = /## Dependencies\s*\n([\s\S]*?)(?=\n##|$)/;
+
 /**
  * Parse "## Dependencies" section from issue body and extract issue numbers.
  * Looks for lines like "- Depends on #42".
  */
 export function parseDependencies(body: string): number[] {
   if (!body) return [];
-  const sectionMatch = body.match(/## Dependencies\s*\n([\s\S]*?)(?:\n##|$)/);
+  const sectionMatch = body.match(DEPENDENCIES_SECTION_RE);
   if (!sectionMatch?.[1]) return [];
   const section = sectionMatch[1];
   const nums = new Set<number>();
