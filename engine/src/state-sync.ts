@@ -44,9 +44,16 @@ export class StateSync {
       };
     }
 
-    // 2. Check if issue already has an active status (not status/todo)
+    // 2. Check issue state: must be open and in "todo" status
     try {
-      if (await this.statusManager.isDoing(repo, issueNumber)) {
+      const status = await this.statusManager.getStatus(repo, issueNumber);
+      if (status === "done") {
+        return {
+          ok: false,
+          reason: `Issue #${issueNumber} is already closed`,
+        };
+      }
+      if (status === "doing") {
         return {
           ok: false,
           reason: `Issue #${issueNumber} already has an active status label`,
