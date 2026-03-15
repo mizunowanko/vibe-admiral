@@ -5,6 +5,47 @@ export interface UnblockedIssue extends Issue {
   repo: string;
 }
 
+/**
+ * Type label priority order (lower index = higher priority).
+ * Issues with priority/critical override this entirely and come first.
+ */
+const TYPE_PRIORITY_ORDER: string[] = [
+  "type/bug",
+  "type/skill",
+  "type/infra",
+  "type/test",
+  "type/refactor",
+  "type/feature",
+];
+
+/**
+ * Sort issues by sortie priority:
+ * 1. priority/critical issues first (regardless of type)
+ * 2. Remaining sorted by type label priority (bug > skill > infra > test > refactor > feature)
+ * 3. Issues without a recognized type label come last
+ * 4. Stable sort within same tier (preserves original order, typically issue number ascending)
+ */
+export function sortIssuesByPriority<T extends Issue>(issues: T[]): T[] {
+  return [...issues].sort((a, b) => {
+    const aCritical = a.labels.includes("priority/critical");
+    const bCritical = b.labels.includes("priority/critical");
+
+    // priority/critical always comes first
+    if (aCritical && !bCritical) return -1;
+    if (!aCritical && bCritical) return 1;
+
+    // Within same critical tier, sort by type label priority
+    const aTypeIdx = TYPE_PRIORITY_ORDER.findIndex((t) => a.labels.includes(t));
+    const bTypeIdx = TYPE_PRIORITY_ORDER.findIndex((t) => b.labels.includes(t));
+
+    // -1 means no recognized type label → sort to end
+    const aRank = aTypeIdx === -1 ? TYPE_PRIORITY_ORDER.length : aTypeIdx;
+    const bRank = bTypeIdx === -1 ? TYPE_PRIORITY_ORDER.length : bTypeIdx;
+
+    return aRank - bRank;
+  });
+}
+
 export async function getUnblockedTodoIssues(
   repo: string,
 ): Promise<UnblockedIssue[]> {
@@ -18,7 +59,7 @@ export async function getUnblockedTodoIssues(
     }
   }
 
-  return unblocked;
+  return sortIssuesByPriority(unblocked);
 }
 
 export async function isBlocked(

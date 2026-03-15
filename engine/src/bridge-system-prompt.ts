@@ -152,7 +152,7 @@ Within the same priority tier, sortie unblocked issues first (those with no pend
 4. Within each tier, filter to unblocked issues only
 5. Propose the ordered list to the human → sortie after approval
 
-> **NOTE**: This priority logic is temporarily embedded in the prompt. After #145 (depends-on/ label automation) is implemented, replace this with a reference to the Engine's deterministic sortie ordering script.
+> **NOTE**: The Engine's \`getUnblockedTodoIssues()\` returns issues pre-sorted by this priority order (priority/critical first, then by type label). Bridge should respect this order when proposing sorties.
 
 ## Issue Creation Flow
 
