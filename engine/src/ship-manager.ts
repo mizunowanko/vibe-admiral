@@ -40,6 +40,7 @@ export class ShipManager {
     fleetId: string,
     repo: string,
     issueNumber: number,
+    localPath: string,
   ): Promise<ShipProcess> {
     const shipId = randomUUID();
 
@@ -56,8 +57,7 @@ export class ShipManager {
     });
 
     // 3. Create worktree
-    const localRepoPath = await this.findLocalRepo(repo);
-    const repoRoot = await worktree.getRepoRoot(localRepoPath);
+    const repoRoot = await worktree.getRepoRoot(localPath);
     const defaultBranch = await github.getDefaultBranch(repo);
     const slug = worktree.toKebabCase(issue.title);
     const branchName = `feature/${issueNumber}-${slug}`;
@@ -221,30 +221,6 @@ export class ShipManager {
           err,
         );
       });
-  }
-
-  private async findLocalRepo(repo: string): Promise<string> {
-    // Try common development directory patterns
-    const repoName = repo.split("/").pop() ?? repo;
-    const candidates = [
-      `${process.env.HOME}/Projects/Development/${repoName}`,
-      `${process.env.HOME}/projects/${repoName}`,
-      `${process.env.HOME}/dev/${repoName}`,
-      `${process.env.HOME}/${repoName}`,
-    ];
-
-    for (const candidate of candidates) {
-      try {
-        await worktree.getRepoRoot(candidate);
-        return candidate;
-      } catch {
-        continue;
-      }
-    }
-
-    throw new Error(
-      `Could not find local clone of ${repo}. Searched: ${candidates.join(", ")}`,
-    );
   }
 
   private startCleanup(): void {

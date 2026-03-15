@@ -3,6 +3,7 @@ import { useFleetStore } from "@/stores/fleetStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Settings, Plus, Trash2, X } from "lucide-react";
+import type { FleetRepo } from "@/types";
 
 export function FleetSettings() {
   const selectedFleet = useFleetStore((s) => s.selectedFleet);
@@ -11,15 +12,15 @@ export function FleetSettings() {
   const deleteFleet = useFleetStore((s) => s.deleteFleet);
 
   const [name, setName] = useState(selectedFleet?.name ?? "");
-  const [repos, setRepos] = useState<string[]>(selectedFleet?.repos ?? []);
-  const [newRepo, setNewRepo] = useState("");
+  const [repos, setRepos] = useState<FleetRepo[]>(selectedFleet?.repos ?? []);
+  const [newRepoPath, setNewRepoPath] = useState("");
 
   const isNew = !selectedFleet;
 
   useEffect(() => {
     setName(selectedFleet?.name ?? "");
     setRepos(selectedFleet?.repos ?? []);
-    setNewRepo("");
+    setNewRepoPath("");
   }, [selectedFleet]);
 
   const handleSave = () => {
@@ -32,14 +33,14 @@ export function FleetSettings() {
   };
 
   const handleAddRepo = () => {
-    const trimmed = newRepo.trim();
-    if (!trimmed || repos.includes(trimmed)) return;
-    setRepos([...repos, trimmed]);
-    setNewRepo("");
+    const trimmed = newRepoPath.trim();
+    if (!trimmed || repos.some((r) => r.localPath === trimmed)) return;
+    setRepos([...repos, { localPath: trimmed }]);
+    setNewRepoPath("");
   };
 
-  const handleRemoveRepo = (repo: string) => {
-    setRepos(repos.filter((r) => r !== repo));
+  const handleRemoveRepo = (localPath: string) => {
+    setRepos(repos.filter((r) => r.localPath !== localPath));
   };
 
   return (
@@ -74,15 +75,24 @@ export function FleetSettings() {
             <div className="space-y-2">
               {repos.map((repo) => (
                 <div
-                  key={repo}
+                  key={repo.localPath}
                   className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
                 >
-                  <span className="text-sm flex-1 font-mono">{repo}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-mono block truncate">
+                      {repo.localPath}
+                    </span>
+                    {repo.remote && (
+                      <span className="text-xs text-muted-foreground block truncate">
+                        {repo.remote}
+                      </span>
+                    )}
+                  </div>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6"
-                    onClick={() => handleRemoveRepo(repo)}
+                    className="h-6 w-6 shrink-0"
+                    onClick={() => handleRemoveRepo(repo.localPath)}
                   >
                     <X className="h-3 w-3" />
                   </Button>
@@ -90,9 +100,9 @@ export function FleetSettings() {
               ))}
               <div className="flex gap-2">
                 <Input
-                  value={newRepo}
-                  onChange={(e) => setNewRepo(e.target.value)}
-                  placeholder="owner/repo"
+                  value={newRepoPath}
+                  onChange={(e) => setNewRepoPath(e.target.value)}
+                  placeholder="/path/to/local/repo"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleAddRepo();
                   }}
@@ -101,7 +111,7 @@ export function FleetSettings() {
                   variant="outline"
                   size="sm"
                   onClick={handleAddRepo}
-                  disabled={!newRepo.trim()}
+                  disabled={!newRepoPath.trim()}
                 >
                   <Plus className="h-3 w-3 mr-1" />
                   Add

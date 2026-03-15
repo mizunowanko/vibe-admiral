@@ -12,10 +12,15 @@ export type ShipStatus =
   | "error";
 
 // === Fleet ===
+export interface FleetRepo {
+  localPath: string;
+  remote?: string;
+}
+
 export interface Fleet {
   id: string;
   name: string;
-  repos: string[];
+  repos: FleetRepo[];
   createdAt: string;
 }
 

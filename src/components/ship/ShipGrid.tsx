@@ -80,11 +80,13 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                   >
                     <option value="">Select repo...</option>
-                    {fleet.repos.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
+                    {fleet.repos
+                      .filter((r) => r.remote)
+                      .map((r) => (
+                        <option key={r.remote} value={r.remote}>
+                          {r.remote}
+                        </option>
+                      ))}
                   </select>
                 ) : (
                   <Input
