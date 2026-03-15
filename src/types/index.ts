@@ -86,6 +86,13 @@ export interface StreamMessage {
   subtype?: string;
   timestamp?: number;
   toolUseId?: string;
+  images?: ImageAttachment[];
+}
+
+// === Image Attachment ===
+export interface ImageAttachment {
+  base64: string;
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 }
 
 // === WebSocket Messages: Frontend → Engine ===
@@ -106,7 +113,7 @@ export type ClientMessage =
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
-  | { type: "bridge:send"; data: { fleetId: string; message: string } }
+  | { type: "bridge:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
   | { type: "bridge:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "bridge:history"; data: { fleetId: string } }
   | {

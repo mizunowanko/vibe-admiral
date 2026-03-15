@@ -357,6 +357,7 @@ export class EngineServer {
         case "bridge:send": {
           const fleetId = data.fleetId as string;
           const message = data.message as string;
+          const images = data.images as Array<{ base64: string; mediaType: string }> | undefined;
           if (
             !this.bridgeManager.hasSession(fleetId) &&
             !this.launchingBridges.has(fleetId)
@@ -406,7 +407,7 @@ export class EngineServer {
               this.launchingBridges.delete(fleetId);
             }
           }
-          this.bridgeManager.send(fleetId, message);
+          this.bridgeManager.send(fleetId, message, images);
           break;
         }
         case "bridge:answer": {

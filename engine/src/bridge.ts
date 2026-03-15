@@ -49,7 +49,11 @@ export class BridgeManager {
     return this.sessions.has(fleetId);
   }
 
-  send(fleetId: string, message: string): boolean {
+  send(
+    fleetId: string,
+    message: string,
+    images?: Array<{ base64: string; mediaType: string }>,
+  ): boolean {
     const session = this.sessions.get(fleetId);
     if (!session) return false;
 
@@ -71,7 +75,7 @@ export class BridgeManager {
     // Send immediately — writing to stdin also unblocks Bun's pipe handling.
     // Do NOT queue/defer: Bun blocks stdout when stdin pipe is idle,
     // so waiting for init creates a deadlock (init never arrives).
-    this.processManager.sendMessage(bridgeId, message);
+    this.processManager.sendMessage(bridgeId, message, images);
     return true;
   }
 

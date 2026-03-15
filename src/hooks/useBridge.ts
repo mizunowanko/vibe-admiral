@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { wsClient } from "@/lib/ws-client";
-import type { ServerMessage, StreamMessage } from "@/types";
+import type { ServerMessage, StreamMessage, ImageAttachment } from "@/types";
 
 export function useBridge(fleetId: string | null) {
   const [messages, setMessages] = useState<StreamMessage[]>([]);
@@ -76,14 +76,26 @@ export function useBridge(fleetId: string | null) {
   }, [fleetId]);
 
   const sendMessage = useCallback(
-    (message: string) => {
+    (message: string, images?: ImageAttachment[]) => {
       if (!fleetId) return;
       setMessages((prev) => [
         ...prev,
-        { type: "user", content: message, timestamp: Date.now() },
+        {
+          type: "user",
+          content: message,
+          timestamp: Date.now(),
+          ...(images && images.length > 0 ? { images } : {}),
+        },
       ]);
       setIsLoading(true);
-      wsClient.send({ type: "bridge:send", data: { fleetId, message } });
+      wsClient.send({
+        type: "bridge:send",
+        data: {
+          fleetId,
+          message,
+          ...(images && images.length > 0 ? { images } : {}),
+        },
+      });
     },
     [fleetId],
   );
