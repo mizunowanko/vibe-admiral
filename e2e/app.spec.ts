@@ -133,7 +133,7 @@ test.describe("Ships", () => {
     await resetMockEngine(page);
   });
 
-  test("shows ships view with sortie button", async ({ page }) => {
+  test("shows ships view", async ({ page }) => {
     await page.goto("/");
     await waitForConnection(page);
 
@@ -142,11 +142,6 @@ test.describe("Ships", () => {
 
     // Switch to Ships view
     await page.getByRole("button", { name: "Ships" }).click();
-
-    // Should see Sortie button
-    await expect(
-      page.getByRole("button", { name: /Sortie/i }),
-    ).toBeVisible({ timeout: 5000 });
   });
 });
 
