@@ -11,15 +11,16 @@ import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
-import { ActionExecutor } from "./action-executor.js";
+import { StateSync } from "./state-sync.js";
+import { BridgeRequestHandler } from "./bridge-request-handler.js";
 import * as github from "./github.js";
 import {
   parseStreamMessage,
-  extractActions,
-  stripActionBlocks,
+  extractRequests,
+  stripRequestBlocks,
 } from "./stream-parser.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
-import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeAction, StreamMessage } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeRequest, StreamMessage } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -31,7 +32,8 @@ export class EngineServer {
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
   private acceptanceWatcher: AcceptanceWatcher;
-  private actionExecutor: ActionExecutor;
+  private stateSync: StateSync;
+  private requestHandler: BridgeRequestHandler;
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
@@ -44,13 +46,15 @@ export class EngineServer {
       this.acceptanceWatcher,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
-    this.actionExecutor = new ActionExecutor(this.shipManager);
+    this.stateSync = new StateSync(this.shipManager);
+    this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
 
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
     this.setupProcessEvents();
     this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
+    this.runStartupReconciliation();
 
     console.log(`Engine WebSocket server running on port ${port}`);
   }
@@ -103,12 +107,12 @@ export class EngineServer {
 
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          // Check for admiral-action blocks in assistant text
+          // Check for admiral-request blocks in assistant text
           if (parsed.type === "assistant" && parsed.content) {
-            const actions = extractActions(parsed.content);
-            const cleanContent = stripActionBlocks(parsed.content);
+            const requests = extractRequests(parsed.content);
+            const cleanContent = stripRequestBlocks(parsed.content);
 
-            // Broadcast clean text (without action blocks) to frontend
+            // Broadcast clean text (without request blocks) to frontend
             if (cleanContent) {
               const cleanMessage = { ...parsed, content: cleanContent };
               this.bridgeManager.addToHistory(fleetId, cleanMessage);
@@ -118,10 +122,10 @@ export class EngineServer {
               });
             }
 
-            // Execute actions sequentially and batch results
-            if (actions.length > 0) {
+            // Execute requests sequentially and batch results
+            if (requests.length > 0) {
               const bridgeId = `bridge-${fleetId}`;
-              this.executeActionsSequentially(fleetId, bridgeId, actions);
+              this.executeRequestsSequentially(fleetId, bridgeId, requests);
             }
           } else if (parsed.type !== "result") {
             // Non-assistant or no content — pass through normally
@@ -171,7 +175,7 @@ export class EngineServer {
         const completedPhases = new Set(["merging"]);
         if (code === 0 && ship && completedPhases.has(ship.status)) {
           // Ship reached a late phase — treat as successful completion
-          this.shipManager.onShipComplete(id).catch(console.error);
+          this.stateSync.onProcessExit(id, true).catch(console.error);
         } else if (code === 0) {
           // Ship exited code 0 but never got past early phases — likely a
           // startup error (e.g. unknown skill). Don't close the issue.
@@ -180,12 +184,9 @@ export class EngineServer {
             "error",
             "Process exited before completing implementation",
           );
+          this.stateSync.rollbackLabel(ship?.repo ?? "", ship?.issueNumber ?? 0).catch(console.error);
         } else {
-          this.shipManager.updateStatus(
-            id,
-            "error",
-            `Process exited with code ${code}`,
-          );
+          this.stateSync.onProcessExit(id, false).catch(console.error);
         }
       }
     });
@@ -405,6 +406,14 @@ export class EngineServer {
               `Repo "${data.repo}" not found in fleet. Register the local path first.`,
             );
           }
+
+          // Sortie guard check
+          const remoteId = repoEntry.remote ?? repoStr;
+          const guard = await this.stateSync.sortieGuard(remoteId, data.issueNumber as number);
+          if (!guard.ok) {
+            throw new Error(guard.reason ?? "Sortie guard check failed");
+          }
+
           // Load shared + ship rules for extraPrompt
           const sharedRulesForShip = await this.loadRules(fleet?.sharedRulePaths ?? []);
           const shipRules = await this.loadRules(fleet?.shipRulePaths ?? []);
@@ -659,12 +668,11 @@ export class EngineServer {
     }
   }
 
-  private async executeActionsSequentially(
+  private async executeRequestsSequentially(
     fleetId: string,
     bridgeId: string,
-    actions: BridgeAction[],
+    requests: BridgeRequest[],
   ): Promise<void> {
-    // Load fleet repos for whitelist validation (use remote identifiers)
     const fleets = await this.loadFleets();
     const fleet = fleets.find((f) => f.id === fleetId);
     const fleetRepos = fleet?.repos ?? [];
@@ -672,29 +680,28 @@ export class EngineServer {
       .map((r) => r.remote)
       .filter((r): r is string => r !== undefined);
 
-    // Pre-load ship rules for sortie actions
-    const sharedRulesForAction = await this.loadRules(fleet?.sharedRulePaths ?? []);
-    const shipRulesForAction = await this.loadRules(fleet?.shipRulePaths ?? []);
-    const actionShipExtraPrompt = [sharedRulesForAction, shipRulesForAction].filter(Boolean).join("\n\n") || undefined;
+    // Pre-load ship rules for sortie requests
+    const sharedRules = await this.loadRules(fleet?.sharedRulePaths ?? []);
+    const shipRules = await this.loadRules(fleet?.shipRulePaths ?? []);
+    const shipExtraPrompt = [sharedRules, shipRules].filter(Boolean).join("\n\n") || undefined;
 
     const results: string[] = [];
 
-    for (const action of actions) {
+    for (const request of requests) {
       try {
-        const result = await this.actionExecutor.execute(
+        const result = await this.requestHandler.handle(
           fleetId,
-          action,
-          repoRemotes,
+          request,
           fleetRepos,
+          repoRemotes,
           fleet?.skillSources,
-          actionShipExtraPrompt,
+          shipExtraPrompt,
         );
         results.push(result);
 
-        // Broadcast each result to frontend as it completes
         const resultMessage = {
           type: "system" as const,
-          subtype: "action-result",
+          subtype: "request-result",
           content: result,
         };
         this.bridgeManager.addToHistory(fleetId, resultMessage);
@@ -703,12 +710,12 @@ export class EngineServer {
           data: { fleetId, message: resultMessage },
         });
       } catch (err) {
-        const errorResult = `[Action Error] ${err instanceof Error ? err.message : String(err)}`;
+        const errorResult = `[Request Error] ${err instanceof Error ? err.message : String(err)}`;
         results.push(errorResult);
 
         const errorMessage = {
           type: "system" as const,
-          subtype: "action-result",
+          subtype: "request-result",
           content: errorResult,
         };
         this.bridgeManager.addToHistory(fleetId, errorMessage);
@@ -719,8 +726,19 @@ export class EngineServer {
       }
     }
 
-    // Send batched results to Bridge stdin as a single message
+    // Send batched results to Bridge stdin
     this.processManager.sendMessage(bridgeId, results.join("\n\n"));
+  }
+
+  private runStartupReconciliation(): void {
+    this.loadFleets()
+      .then((fleets) => {
+        const allRepos = fleets.flatMap((f) => f.repos);
+        return this.stateSync.reconcileOnStartup(allRepos);
+      })
+      .catch((err) => {
+        console.warn("[engine] Startup reconciliation failed:", err);
+      });
   }
 
   private logShipMessage(

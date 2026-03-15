@@ -105,39 +105,11 @@ export interface ServerMessage {
   data: Record<string, unknown>;
 }
 
-// === Bridge Actions ===
-export type OrganizeOperation =
-  | { op: "create"; title: string; body: string; labels?: string[]; parentIssue?: number; dependsOn?: number[] }
-  | { op: "edit"; issueNumber: number; title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; comment?: string; parentIssue?: number }
-  | { op: "close"; issueNumber: number; comment?: string };
-
-export type BridgeAction =
-  | { action: "sortie"; requests: Array<{ repo: string; issueNumber: number; skill?: string }> }
-  | {
-      action: "create-issue";
-      repo: string;
-      title: string;
-      body: string;
-      labels?: string[];
-      parentIssue?: number;
-      dependsOn?: number[];
-    }
-  | {
-      action: "edit-issue";
-      repo: string;
-      issueNumber: number;
-      title?: string;
-      body?: string;
-      comment?: string;
-      addLabels?: string[];
-      removeLabels?: string[];
-      parentIssue?: number;
-    }
-  | { action: "list-issues"; repo: string; label?: string }
-  | { action: "ship-status" }
-  | { action: "close-issue"; repo: string; issueNumber: number; comment?: string }
-  | { action: "stop-ship"; shipId: string }
-  | { action: "organize-issues"; repo: string; operations: OrganizeOperation[] };
+// === Bridge Requests (Engine-only operations) ===
+export type BridgeRequest =
+  | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
+  | { request: "ship-status" }
+  | { request: "ship-stop"; shipId: string };
 
 // === Ship Process Info ===
 export interface ShipProcess {

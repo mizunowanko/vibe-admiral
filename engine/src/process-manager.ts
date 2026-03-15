@@ -69,7 +69,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
