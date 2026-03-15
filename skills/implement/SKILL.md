@@ -192,7 +192,7 @@ git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
    ## Changes
    <コミット内容の箇条書き>
 
-   Closes #<Issue 番号>
+   Resolves #<Issue 番号>
 
    ## Test plan
    <ビルド・テスト・リントコマンドの実行結果>
