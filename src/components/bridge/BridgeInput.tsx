@@ -69,6 +69,7 @@ export function BridgeInput({
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagesRef = useRef<PreviewAttachment[]>([]);
 
   const resetHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -82,12 +83,14 @@ export function BridgeInput({
     resetHeight();
   }, [value, resetHeight]);
 
+  // Keep ref in sync so the unmount cleanup sees the latest images
+  imagesRef.current = images;
+
   // Revoke all object URLs on unmount to prevent memory leaks
   useEffect(() => {
     return () => {
-      for (const img of images) URL.revokeObjectURL(img.objectUrl);
+      for (const img of imagesRef.current) URL.revokeObjectURL(img.objectUrl);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on unmount
   }, []);
 
   const addImages = useCallback(async (files: File[]) => {
