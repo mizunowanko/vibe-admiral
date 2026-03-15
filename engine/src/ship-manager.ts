@@ -9,10 +9,14 @@ import type { ShipProcess, ShipStatus } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
+const SHIP_RETENTION_MS = 30 * 60 * 1000; // 30 minutes
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
     | null = null;
@@ -23,6 +27,7 @@ export class ShipManager {
   ) {
     this.processManager = processManager;
     this.acceptanceWatcher = acceptanceWatcher;
+    this.startCleanup();
   }
 
   setStatusChangeHandler(
@@ -146,6 +151,9 @@ export class ShipManager {
     const ship = this.ships.get(id);
     if (ship) {
       ship.status = status;
+      if (status === "done" || status === "error") {
+        ship.completedAt = Date.now();
+      }
       this.onStatusChange?.(id, status, detail);
     }
   }
@@ -230,7 +238,29 @@ export class ShipManager {
     );
   }
 
+  private startCleanup(): void {
+    this.cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [id, ship] of this.ships) {
+        if (
+          ship.completedAt &&
+          now - ship.completedAt > SHIP_RETENTION_MS
+        ) {
+          this.ships.delete(id);
+        }
+      }
+    }, CLEANUP_INTERVAL_MS);
+  }
+
+  stopCleanup(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+
   stopAll(): void {
+    this.stopCleanup();
     for (const [id] of this.ships) {
       this.processManager.kill(id);
     }
