@@ -39,6 +39,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(0);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
 
@@ -61,12 +62,22 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
     setHasNewMessages(false);
   }, []);
 
+  // Reset scroll state when fleet changes
   useEffect(() => {
+    setHasNewMessages(false);
+    isAtBottomRef.current = true;
+    prevMessageCountRef.current = 0;
+  }, [fleetId]);
+
+  useEffect(() => {
+    const grew = messages.length > prevMessageCountRef.current;
+    prevMessageCountRef.current = messages.length;
+
     if (isAtBottomRef.current) {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
-    } else if (messages.length > 0) {
+    } else if (grew) {
       setHasNewMessages(true);
     }
   }, [messages, isLoading]);
