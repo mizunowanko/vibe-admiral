@@ -8,6 +8,7 @@ import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import type { ShipProcess, ShipStatus, FleetSkillSources } from "./types.js";
+import { getActiveStatusLabel } from "./state-sync.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -51,12 +52,7 @@ export class ShipManager {
 
     // 1. Get issue info
     const issue = await github.getIssue(repo, issueNumber);
-    const activeStatusLabel = issue.labels.find(
-      (l) =>
-        l.startsWith("status/") &&
-        l !== "status/todo" &&
-        l !== "status/blocked",
-    );
+    const activeStatusLabel = getActiveStatusLabel(issue.labels);
     if (activeStatusLabel) {
       throw new Error(
         `Issue #${issueNumber} is already in progress (${activeStatusLabel})`,

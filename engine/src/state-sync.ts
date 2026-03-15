@@ -3,7 +3,7 @@ import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
 /** status/* labels that indicate work-in-progress (not todo, not blocked). */
-const ACTIVE_STATUS_LABELS = new Set([
+export const ACTIVE_STATUS_LABELS = new Set([
   "status/investigating",
   "status/planning",
   "status/implementing",
@@ -13,7 +13,7 @@ const ACTIVE_STATUS_LABELS = new Set([
   "status/merging",
 ]);
 
-function getActiveStatusLabel(labels: string[]): string | undefined {
+export function getActiveStatusLabel(labels: string[]): string | undefined {
   return labels.find((l) => ACTIVE_STATUS_LABELS.has(l));
 }
 
@@ -30,7 +30,7 @@ export class StateSync {
 
   /**
    * Pre-sortie validation: check for duplicate ships, existing worktrees,
-   * and doing labels that indicate an issue is already in progress.
+   * and active status/* labels that indicate an issue is already in progress.
    */
   async sortieGuard(
     repo: string,

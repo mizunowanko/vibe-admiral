@@ -12,7 +12,7 @@ dev-shared の /feature + /cleanup を統合したもの。
 ## 引数
 
 - Issue 番号（例: `#42`, `42`）または Issue タイトルの一部（省略可）
-  - 省略時は GH Issue 一覧から unblocked かつ `todo` ラベルのものを自動選択する
+  - 省略時は GH Issue 一覧から unblocked かつ `status/todo` ラベルのものを自動選択する
 
 ## CRITICAL: Resume Check
 
@@ -89,18 +89,18 @@ DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBran
   ```bash
   gh issue view <番号> --repo "$REPO" --json number,title,labels
   ```
-  **重要: `doing` ラベルが付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
+  **重要: `status/investigating` や `status/implementing` 等のアクティブな `status/*` ラベルが付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
 
-- 指定がない場合: **必ず `--label todo` を指定して** `todo` ラベルの Issue のみを取得する:
+- 指定がない場合: **必ず `--label status/todo` を指定して** `status/todo` ラベルの Issue のみを取得する:
   ```bash
-  gh issue list --repo "$REPO" --label todo --state open --json number,title
+  gh issue list --repo "$REPO" --label status/todo --state open --json number,title
   ```
   取得した Issue の Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
-  **`doing` や他のラベルの Issue は絶対に選択しない。**
+  **`status/todo` 以外の `status/*` ラベルが付いた Issue は絶対に選択しない。**
 
 **`VIBE_ADMIRAL` 未設定の場合のみ**: 選択した Issue のラベルを変更:
 ```bash
-gh issue edit <番号> --repo "$REPO" --remove-label todo --add-label doing
+gh issue edit <番号> --repo "$REPO" --remove-label status/todo --add-label status/investigating
 ```
 
 ### Step 2: Worktree 作成
@@ -297,7 +297,7 @@ gh pr checks "$PR_NUM" --watch
 指摘を以下の 3 カテゴリに再分類する:
 
 - **BLOCKER**: 同意する。この PR で修正が必要 → ローカルで修正 → commit & push → Step 12 に戻る（レビューは再実行不要）
-- **NICE TO HAVE**: 同意するが別 Issue で対応 → `gh issue create --label todo` で別 Issue を作成し、PR コメントで Issue 番号を記録
+- **NICE TO HAVE**: 同意するが別 Issue で対応 → `gh issue create --label status/todo` で別 Issue を作成し、PR コメントで Issue 番号を記録
 - **NO NEED**: 同意しない → 対応不要
 - **LGTM**: 指摘なし → Step 15 へ
 
@@ -332,7 +332,6 @@ gh pr merge "$PR_NUM" --squash
    ```bash
    ISSUE_NUM=$(echo "<branch-name>" | sed -E 's#(feature|refactor)/([0-9]+)-.+#\2#')
    gh issue close "$ISSUE_NUM" --comment "Closed via PR merge"
-   gh issue edit "$ISSUE_NUM" --remove-label doing
    ```
 
 4. デプロイ確認: デフォルトブランチへのマージでデプロイ CI が走る場合、完了を待つ:
