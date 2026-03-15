@@ -1,6 +1,8 @@
 import { ProcessManager } from "./process-manager.js";
 import type { StreamMessage } from "./types.js";
 
+const MAX_HISTORY = 500;
+
 export interface BridgeSession {
   id: string;
   fleetId: string;
@@ -8,6 +10,8 @@ export interface BridgeSession {
   additionalDirs: string[];
   systemPrompt?: string;
   history: StreamMessage[];
+  ready: boolean;
+  pendingMessages: string[];
 }
 
 export class BridgeManager {
@@ -32,6 +36,8 @@ export class BridgeManager {
       additionalDirs,
       systemPrompt,
       history: [],
+      ready: false,
+      pendingMessages: [],
     };
     this.sessions.set(fleetId, session);
     this.processManager.launchBridge(
@@ -58,6 +64,7 @@ export class BridgeManager {
 
     // If process died, re-launch it
     if (!this.processManager.isRunning(bridgeId)) {
+      session.ready = false;
       this.processManager.launchBridge(
         bridgeId,
         session.fleetPath,
@@ -66,15 +73,36 @@ export class BridgeManager {
       );
     }
 
-    // Send message to stdin (stream-json process accepts input immediately)
-    this.processManager.sendMessage(bridgeId, message);
+    // Queue message if process is not ready yet, otherwise send immediately
+    if (!session.ready) {
+      session.pendingMessages.push(message);
+    } else {
+      this.processManager.sendMessage(bridgeId, message);
+    }
     return true;
+  }
+
+  onBridgeReady(fleetId: string): void {
+    const session = this.sessions.get(fleetId);
+    if (!session) return;
+
+    session.ready = true;
+
+    // Flush pending messages
+    const bridgeId = `bridge-${fleetId}`;
+    for (const msg of session.pendingMessages) {
+      this.processManager.sendMessage(bridgeId, msg);
+    }
+    session.pendingMessages = [];
   }
 
   addToHistory(fleetId: string, message: StreamMessage): void {
     const session = this.sessions.get(fleetId);
     if (session) {
       session.history.push(message);
+      if (session.history.length > MAX_HISTORY) {
+        session.history = session.history.slice(-MAX_HISTORY);
+      }
     }
   }
 

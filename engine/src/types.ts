@@ -119,4 +119,5 @@ export interface ShipProcess {
   prUrl: string | null;
   acceptanceTest: AcceptanceTestRequest | null;
   createdAt: string;
+  completedAt?: number;
 }

@@ -2,6 +2,21 @@ import type { ShipManager } from "./ship-manager.js";
 import type { BridgeAction } from "./types.js";
 import * as github from "./github.js";
 
+/**
+ * Extract all repo strings referenced by a BridgeAction.
+ */
+function getActionRepos(action: BridgeAction): string[] {
+  switch (action.action) {
+    case "list-issues":
+    case "create-issue":
+      return [action.repo];
+    case "sortie":
+      return action.requests.map((r) => r.repo);
+    case "ship-status":
+      return [];
+  }
+}
+
 export class ActionExecutor {
   private shipManager: ShipManager;
 
@@ -11,7 +26,23 @@ export class ActionExecutor {
     this.shipManager = shipManager;
   }
 
-  async execute(fleetId: string, action: BridgeAction): Promise<string> {
+  async execute(
+    fleetId: string,
+    action: BridgeAction,
+    fleetRepos: string[],
+  ): Promise<string> {
+    // Validate that all repos in the action are in the fleet's whitelist
+    const actionRepos = getActionRepos(action);
+    const repoSet = new Set(fleetRepos);
+    for (const repo of actionRepos) {
+      if (!repoSet.has(repo)) {
+        console.warn(
+          `[action-executor] Repo "${repo}" is not in fleet's registered repos: [${fleetRepos.join(", ")}]`,
+        );
+        return `[Action Rejected] Repo "${repo}" is not registered in this fleet. Registered repos: ${fleetRepos.join(", ")}`;
+      }
+    }
+
     switch (action.action) {
       case "sortie":
         return this.executeSortie(fleetId, action);
@@ -54,27 +85,29 @@ export class ActionExecutor {
     action: Extract<BridgeAction, { action: "create-issue" }>,
   ): Promise<string> {
     try {
+      // Append dependencies section to body if dependsOn is provided
+      let body = action.body;
+      if (action.dependsOn && action.dependsOn.length > 0) {
+        const depLines = action.dependsOn
+          .map((n) => `- Depends on #${n}`)
+          .join("\n");
+        body = `${body}\n\n## Dependencies\n${depLines}`;
+      }
+
       const issue = await github.createIssue(
         action.repo,
         action.title,
-        action.body,
+        body,
         action.labels,
       );
 
-      // Set up parent sub-issue relationship
+      // Set up parent sub-issue relationship (decomposition)
       if (action.parentIssue) {
         await github.addSubIssue(
           action.repo,
           action.parentIssue,
           issue.number,
         );
-      }
-
-      // Set up dependency sub-issue relationships
-      if (action.dependsOn) {
-        for (const depNumber of action.dependsOn) {
-          await github.addSubIssue(action.repo, depNumber, issue.number);
-        }
       }
 
       return `[Issue Created] #${issue.number}: ${issue.title} (${action.repo})`;
