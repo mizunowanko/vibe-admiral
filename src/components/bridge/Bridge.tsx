@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect } from "react";
+import { memo, useRef, useEffect, useMemo } from "react";
 import { useBridge } from "@/hooks/useBridge";
 import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
@@ -7,15 +7,39 @@ import { BridgeShipBar } from "./BridgeShipBar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { StreamMessage } from "@/types";
 
 interface BridgeProps {
   fleetId: string | null;
+}
+
+type DisplayMessage = StreamMessage & { repeatCount?: number };
+
+/** Collapse consecutive identical ship-status messages into one with a count. */
+function collapseShipStatus(msgs: StreamMessage[]): DisplayMessage[] {
+  const result: DisplayMessage[] = [];
+  for (const msg of msgs) {
+    const prev = result[result.length - 1];
+    if (
+      msg.type === "system" &&
+      msg.subtype === "ship-status" &&
+      prev?.type === "system" &&
+      prev?.subtype === "ship-status" &&
+      msg.content === prev.content
+    ) {
+      prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+    } else {
+      result.push({ ...msg });
+    }
+  }
+  return result;
 }
 
 export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const { messages, sendMessage, isLoading } = useBridge(fleetId);
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -68,8 +92,8 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
               Bridge is ready. Send a command to manage issues and coordinate ships.
             </p>
           )}
-          {messages.map((msg, i) => (
-            <BridgeMessage key={i} message={msg} />
+          {displayMessages.map((msg, i) => (
+            <BridgeMessage key={i} message={msg} repeatCount={msg.repeatCount} />
           ))}
           {isLoading && (
             <div className="flex items-center gap-2 text-muted-foreground">
