@@ -25,7 +25,7 @@ import {
 import { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
-import type { Fleet, FleetRepo, FleetSkillSources, ClientMessage, BridgeRequest, StreamMessage, GateTransition, GateType, GateFileRequest } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -778,7 +778,7 @@ export class EngineServer {
     if (updates.sharedRulePaths !== undefined) fleet.sharedRulePaths = updates.sharedRulePaths as string[];
     if (updates.bridgeRulePaths !== undefined) fleet.bridgeRulePaths = updates.bridgeRulePaths as string[];
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
-    if (updates.gates !== undefined) fleet.gates = updates.gates as import("./types.js").FleetGateSettings;
+    if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
     await this.saveFleets(fleets);
   }
 
@@ -869,7 +869,7 @@ export class EngineServer {
 
   private async executeShipRequests(
     shipId: string,
-    requests: import("./types.js").ShipRequest[],
+    requests: ShipRequest[],
   ): Promise<void> {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
@@ -877,10 +877,9 @@ export class EngineServer {
     // Load fleet gate settings for this ship
     const fleets = await this.loadFleets();
     const fleet = fleets.find((f) => f.id === ship.fleetId);
-    this.shipRequestHandler.setGateSettings(fleet?.gates);
 
     for (const request of requests) {
-      const response: StatusTransitionResult = await this.shipRequestHandler.handle(shipId, request);
+      const response: StatusTransitionResult = await this.shipRequestHandler.handle(shipId, request, fleet?.gates);
 
       if (response.gate) {
         // Gate check required — initiate gate flow instead of writing response
@@ -913,8 +912,8 @@ export class EngineServer {
   private initiateGateCheck(
     shipId: string,
     gateType: GateType,
-    from: import("./types.js").ShipStatus,
-    to: import("./types.js").ShipStatus,
+    from: ShipStatus,
+    to: ShipStatus,
   ): void {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
@@ -969,7 +968,7 @@ export class EngineServer {
   }
 
   private buildGateCheckMessage(
-    ship: import("./types.js").ShipProcess,
+    ship: ShipProcess,
     transition: GateTransition,
     gateType: GateType,
   ): string {
@@ -992,12 +991,16 @@ export class EngineServer {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
+    // Resolve gate type for the notification
+    const gateType = ship.gateCheck?.gateType ?? "code-review";
+
     // Notify frontend that gate was approved
     this.broadcast({
       type: "ship:gate-resolved",
       data: {
         id: shipId,
         transition,
+        gateType,
         approved: true,
       },
     });
@@ -1012,12 +1015,16 @@ export class EngineServer {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
+    // Resolve gate type for the notification
+    const gateType = ship.gateCheck?.gateType ?? "code-review";
+
     // Notify frontend that gate was rejected
     this.broadcast({
       type: "ship:gate-resolved",
       data: {
         id: shipId,
         transition,
+        gateType,
         approved: false,
         feedback,
       },

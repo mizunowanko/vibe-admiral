@@ -142,6 +142,7 @@ export function useEngine() {
           const resolvedData = msg.data as {
             id: string;
             transition: GateTransition;
+            gateType: GateType;
             approved: boolean;
             feedback?: string;
           };
@@ -150,7 +151,7 @@ export function useEngine() {
           } else {
             setGateCheck(resolvedData.id, {
               transition: resolvedData.transition,
-              gateType: "code-review", // Will be overwritten by sync
+              gateType: resolvedData.gateType,
               status: "rejected",
               feedback: resolvedData.feedback,
             });

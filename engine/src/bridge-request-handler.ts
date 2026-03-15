@@ -172,6 +172,10 @@ export class BridgeRequestHandler {
       return `[Gate Result Failed] Ship #${ship.issueNumber} has no pending gate for ${request.transition}`;
     }
 
+    if (ship.gateCheck.status !== "pending") {
+      return `[Gate Result Failed] Ship #${ship.issueNumber} gate for ${request.transition} is already ${ship.gateCheck.status}`;
+    }
+
     const approved = request.verdict === "approve";
     await this.shipManager.respondToGate(
       request.shipId,

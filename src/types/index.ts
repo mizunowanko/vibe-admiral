@@ -205,6 +205,7 @@ export type ServerMessage =
       data: {
         id: string;
         transition: GateTransition;
+        gateType: GateType;
         approved: boolean;
         feedback?: string;
       };

@@ -29,34 +29,32 @@ export interface StatusTransitionResult extends AdmiralRequestResponse {
 export class ShipRequestHandler {
   private shipManager: ShipManager;
   private statusManager: StatusManager;
-  private gateSettings?: FleetGateSettings;
 
   constructor(shipManager: ShipManager, statusManager: StatusManager) {
     this.shipManager = shipManager;
     this.statusManager = statusManager;
   }
 
-  setGateSettings(settings: FleetGateSettings | undefined): void {
-    this.gateSettings = settings;
-  }
-
   /**
    * Handle a Ship request and return a response.
    * For status-transition, returns StatusTransitionResult which may include gate info.
+   * Gate settings are passed per-call to avoid concurrency issues across fleets.
    */
   async handle(
     shipId: string,
     request: ShipRequest,
+    gateSettings?: FleetGateSettings,
   ): Promise<StatusTransitionResult> {
     switch (request.request) {
       case "status-transition":
-        return this.handleStatusTransition(shipId, request.status);
+        return this.handleStatusTransition(shipId, request.status, gateSettings);
     }
   }
 
   private async handleStatusTransition(
     shipId: string,
     targetStatus: ShipStatus,
+    gateSettings?: FleetGateSettings,
   ): Promise<StatusTransitionResult> {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) {
@@ -88,7 +86,7 @@ export class ShipRequestHandler {
     }
 
     // Check for gate on direct transition (from current → target)
-    const gateType = resolveGate(ship.status, targetStatus, this.gateSettings);
+    const gateType = resolveGate(ship.status, targetStatus, gateSettings);
     if (gateType) {
       // If there's already a pending/approved gate for this exact transition, check it
       if (ship.gateCheck?.transition === `${ship.status}→${targetStatus}`) {
@@ -128,7 +126,7 @@ export class ShipRequestHandler {
     const mergingIdx = phaseOrder.indexOf("merging");
     if (targetIdx >= mergingIdx && ship.prReviewStatus !== "approved") {
       // Only enforce if the code-review gate is disabled
-      const codeReviewGate = resolveGate("testing", "reviewing", this.gateSettings);
+      const codeReviewGate = resolveGate("testing", "reviewing", gateSettings);
       if (!codeReviewGate) {
         return {
           ok: false,
@@ -142,7 +140,7 @@ export class ShipRequestHandler {
     //  this as a safety check)
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
-      const humanGate = resolveGate("acceptance-test", "merging", this.gateSettings);
+      const humanGate = resolveGate("acceptance-test", "merging", gateSettings);
       if (!humanGate) {
         return {
           ok: false,
