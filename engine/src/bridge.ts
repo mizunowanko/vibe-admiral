@@ -6,6 +6,7 @@ export interface BridgeSession {
   fleetId: string;
   fleetPath: string;
   additionalDirs: string[];
+  systemPrompt?: string;
   history: StreamMessage[];
 }
 
@@ -21,6 +22,7 @@ export class BridgeManager {
     fleetId: string,
     fleetPath: string,
     additionalDirs: string[],
+    systemPrompt?: string,
   ): string {
     const bridgeId = `bridge-${fleetId}`;
     const session: BridgeSession = {
@@ -28,10 +30,16 @@ export class BridgeManager {
       fleetId,
       fleetPath,
       additionalDirs,
+      systemPrompt,
       history: [],
     };
     this.sessions.set(fleetId, session);
-    this.processManager.launchBridge(bridgeId, fleetPath, additionalDirs);
+    this.processManager.launchBridge(
+      bridgeId,
+      fleetPath,
+      additionalDirs,
+      systemPrompt,
+    );
     return bridgeId;
   }
 
@@ -54,6 +62,7 @@ export class BridgeManager {
         bridgeId,
         session.fleetPath,
         session.additionalDirs,
+        session.systemPrompt,
       );
     }
 

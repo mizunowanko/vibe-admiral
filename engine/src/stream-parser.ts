@@ -1,4 +1,4 @@
-import type { StreamMessage } from "./types.js";
+import type { StreamMessage, BridgeAction } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -78,4 +78,32 @@ export function parseStreamMessage(
     default:
       return null;
   }
+}
+
+const ACTION_BLOCK_RE = /```admiral-action\n([\s\S]*?)```/g;
+
+/**
+ * Extract BridgeAction objects from assistant text containing
+ * ```admiral-action ... ``` fenced blocks.
+ */
+export function extractActions(text: string): BridgeAction[] {
+  const actions: BridgeAction[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = ACTION_BLOCK_RE.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]!) as BridgeAction;
+      actions.push(parsed);
+    } catch {
+      // Malformed JSON — skip
+    }
+  }
+  ACTION_BLOCK_RE.lastIndex = 0;
+  return actions;
+}
+
+/**
+ * Remove ```admiral-action ... ``` blocks from text for display purposes.
+ */
+export function stripActionBlocks(text: string): string {
+  return text.replace(ACTION_BLOCK_RE, "").trim();
 }

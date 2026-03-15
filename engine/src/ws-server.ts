@@ -6,8 +6,14 @@ import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import { ActionExecutor } from "./action-executor.js";
 import * as github from "./github.js";
-import { parseStreamMessage } from "./stream-parser.js";
+import {
+  parseStreamMessage,
+  extractActions,
+  stripActionBlocks,
+} from "./stream-parser.js";
+import { BRIDGE_SYSTEM_PROMPT } from "./bridge-system-prompt.js";
 import type { Fleet, ClientMessage } from "./types.js";
 
 const FLEETS_DIR =
@@ -20,6 +26,7 @@ export class EngineServer {
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
   private acceptanceWatcher: AcceptanceWatcher;
+  private actionExecutor: ActionExecutor;
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
 
@@ -31,6 +38,7 @@ export class EngineServer {
       this.acceptanceWatcher,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
+    this.actionExecutor = new ActionExecutor(this.shipManager);
 
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
@@ -72,11 +80,68 @@ export class EngineServer {
         const fleetId = id.replace("bridge-", "");
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          this.bridgeManager.addToHistory(fleetId, parsed);
-          this.broadcast({
-            type: "bridge:stream",
-            data: { fleetId, message: parsed },
-          });
+          // Check for admiral-action blocks in assistant text
+          if (parsed.type === "assistant" && parsed.content) {
+            const actions = extractActions(parsed.content);
+            const cleanContent = stripActionBlocks(parsed.content);
+
+            // Broadcast clean text (without action blocks) to frontend
+            if (cleanContent) {
+              const cleanMessage = { ...parsed, content: cleanContent };
+              this.bridgeManager.addToHistory(fleetId, cleanMessage);
+              this.broadcast({
+                type: "bridge:stream",
+                data: { fleetId, message: cleanMessage },
+              });
+            }
+
+            // Execute each action and return results to Bridge
+            if (actions.length > 0) {
+              const bridgeId = `bridge-${fleetId}`;
+              for (const action of actions) {
+                this.actionExecutor
+                  .execute(fleetId, action)
+                  .then((result) => {
+                    // Send result back to Bridge stdin
+                    this.processManager.sendMessage(bridgeId, result);
+
+                    // Also broadcast to frontend as action-result
+                    const resultMessage = {
+                      type: "system" as const,
+                      subtype: "action-result",
+                      content: result,
+                    };
+                    this.bridgeManager.addToHistory(fleetId, resultMessage);
+                    this.broadcast({
+                      type: "bridge:stream",
+                      data: { fleetId, message: resultMessage },
+                    });
+                  })
+                  .catch((err) => {
+                    const errorResult = `[Action Error] ${err instanceof Error ? err.message : String(err)}`;
+                    this.processManager.sendMessage(bridgeId, errorResult);
+
+                    const errorMessage = {
+                      type: "system" as const,
+                      subtype: "action-result",
+                      content: errorResult,
+                    };
+                    this.bridgeManager.addToHistory(fleetId, errorMessage);
+                    this.broadcast({
+                      type: "bridge:stream",
+                      data: { fleetId, message: errorMessage },
+                    });
+                  });
+              }
+            }
+          } else {
+            // Non-assistant or no content — pass through normally
+            this.bridgeManager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: "bridge:stream",
+              data: { fleetId, message: parsed },
+            });
+          }
         }
       } else {
         // Ship stream
@@ -140,6 +205,18 @@ export class EngineServer {
             type: "ship:acceptance-test",
             data: { id: shipId, url: request.url, checks: request.checks },
           });
+
+          // Also inject into Bridge chat
+          const acceptanceMessage = {
+            type: "system" as const,
+            subtype: "acceptance-test",
+            content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
+          };
+          this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
+          this.broadcast({
+            type: "bridge:stream",
+            data: { fleetId: ship.fleetId, message: acceptanceMessage },
+          });
         }
       },
     );
@@ -151,6 +228,21 @@ export class EngineServer {
         type: "ship:status",
         data: { id, status, detail },
       });
+
+      // Also inject into Bridge chat for the ship's fleet
+      const ship = this.shipManager.getShip(id);
+      if (ship) {
+        const statusMessage = {
+          type: "system" as const,
+          subtype: "ship-status",
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${detail ? ` — ${detail}` : ""}`,
+        };
+        this.bridgeManager.addToHistory(ship.fleetId, statusMessage);
+        this.broadcast({
+          type: "bridge:stream",
+          data: { fleetId: ship.fleetId, message: statusMessage },
+        });
+      }
     });
   }
 
@@ -218,7 +310,12 @@ export class EngineServer {
                 throw new Error(`Fleet not found: ${fleetId}`);
               }
               // TODO: Use fleet-specific path once Fleet model has a basePath field
-              this.bridgeManager.launch(fleetId, process.cwd(), []);
+              this.bridgeManager.launch(
+                fleetId,
+                process.cwd(),
+                [],
+                BRIDGE_SYSTEM_PROMPT,
+              );
             } finally {
               this.launchingBridges.delete(fleetId);
             }

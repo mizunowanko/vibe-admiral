@@ -45,10 +45,11 @@ export class ProcessManager extends EventEmitter {
     id: string,
     fleetPath: string,
     additionalDirs: string[],
+    systemPrompt?: string,
   ): ChildProcess {
     const args = [
       "-p",
-      "",
+      systemPrompt ?? "",
       "--input-format",
       "stream-json",
       "--output-format",
