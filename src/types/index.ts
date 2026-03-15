@@ -92,6 +92,7 @@ export type ClientMessage =
   | { type: "ship:reject"; data: { id: string; feedback: string } }
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
+  | { type: "ship:list" }
   | { type: "issue:list"; data: { repo: string } }
   | { type: "issue:get"; data: { repo: string; number: number } }
   | { type: "fs:list-dir"; data: { path?: string } };
@@ -127,6 +128,7 @@ export type ServerMessage =
       type: "ship:done";
       data: { id: string; prUrl?: string; merged: boolean };
     }
+  | { type: "ship:data"; data: Ship[] }
   | { type: "fleet:data"; data: Fleet[] }
   | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
   | { type: "issue:data"; data: { repo: string; issues: Issue[] } }

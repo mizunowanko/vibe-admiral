@@ -3,7 +3,7 @@ import { wsClient } from "@/lib/ws-client";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
-import type { ServerMessage, Fleet, ShipStatus, StreamMessage } from "@/types";
+import type { ServerMessage, Fleet, Ship, ShipStatus, StreamMessage } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -14,6 +14,8 @@ export function useEngine() {
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
   const setShipDone = useShipStore((s) => s.setShipDone);
+  const syncShips = useShipStore((s) => s.syncShips);
+  const fetchShips = useShipStore((s) => s.fetchShips);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
 
@@ -31,6 +33,10 @@ export function useEngine() {
       switch (msg.type) {
         case "fleet:data":
           setFleets(msg.data as unknown as Fleet[]);
+          break;
+
+        case "ship:data":
+          syncShips(msg.data as unknown as Ship[]);
           break;
 
         case "fleet:created": {
@@ -122,15 +128,15 @@ export function useEngine() {
       }
     });
 
-    // Fetch initial data
-    setTimeout(() => {
-      if (wsClient.connected) {
-        fetchFleets();
-      }
-    }, 500);
+    // Fetch data on every connect/reconnect
+    const unsubConnect = wsClient.onConnect(() => {
+      fetchFleets();
+      fetchShips();
+    });
 
     return () => {
       unsub();
+      unsubConnect();
       clearInterval(checkConnection);
       wsClient.disconnect();
     };
@@ -143,6 +149,8 @@ export function useEngine() {
     addShipLog,
     setAcceptanceTest,
     setShipDone,
+    syncShips,
+    fetchShips,
     setEngineConnected,
     fetchFleets,
   ]);
