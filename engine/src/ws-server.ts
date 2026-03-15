@@ -123,8 +123,9 @@ export class EngineServer {
               const bridgeId = `bridge-${fleetId}`;
               this.executeActionsSequentially(fleetId, bridgeId, actions);
             }
-          } else {
+          } else if (parsed.type !== "result") {
             // Non-assistant or no content — pass through normally
+            // Skip "result" messages: they duplicate the preceding "assistant" text
             this.bridgeManager.addToHistory(fleetId, parsed);
             this.broadcast({
               type: "bridge:stream",
