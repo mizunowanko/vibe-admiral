@@ -148,12 +148,15 @@ export class EngineServer {
       switch (msg.type) {
         // Fleet operations
         case "fleet:create": {
-          await this.createFleet(
+          const newFleet = await this.createFleet(
             data.name as string,
             data.repos as string[],
           );
           const fleets = await this.loadFleets();
-          this.sendTo(ws, { type: "fleet:data", data: fleets });
+          this.sendTo(ws, {
+            type: "fleet:created",
+            data: { id: newFleet.id, fleets },
+          });
           break;
         }
         case "fleet:list": {

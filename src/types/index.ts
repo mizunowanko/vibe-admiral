@@ -109,5 +109,6 @@ export type ServerMessage =
       data: { id: string; prUrl?: string; merged: boolean };
     }
   | { type: "fleet:data"; data: Fleet[] }
+  | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
   | { type: "issue:data"; data: { repo: string; issues: Issue[] } }
   | { type: "error"; data: { source: string; message: string } };

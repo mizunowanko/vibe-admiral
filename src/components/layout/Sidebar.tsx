@@ -43,7 +43,10 @@ export function Sidebar() {
           variant="ghost"
           size="icon"
           className="h-6 w-6"
-          onClick={() => setMainView("fleet-settings")}
+          onClick={() => {
+            selectFleet(null);
+            setMainView("fleet-settings");
+          }}
         >
           <Plus className="h-3.5 w-3.5" />
         </Button>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,12 @@ export function FleetSettings() {
   const [newRepo, setNewRepo] = useState("");
 
   const isNew = !selectedFleet;
+
+  useEffect(() => {
+    setName(selectedFleet?.name ?? "");
+    setRepos(selectedFleet?.repos ?? []);
+    setNewRepo("");
+  }, [selectedFleet]);
 
   const handleSave = () => {
     if (!name.trim()) return;
