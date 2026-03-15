@@ -77,7 +77,7 @@ export async function createIssue(
   body: string,
   labels?: string[],
 ): Promise<Issue> {
-  const labelList = labels && labels.length > 0 ? labels : ["todo"];
+  const labelList = labels && labels.length > 0 ? labels : ["status/todo"];
   const args = [
     "issue",
     "create",

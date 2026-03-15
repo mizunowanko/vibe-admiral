@@ -16,8 +16,8 @@ ${repoList}
 
 You have **Bash access** with \`gh\` CLI and \`git\` CLI. Use them directly for all GitHub operations:
 
-- **List issues**: \`gh issue list --repo ${exampleRepo} --label todo --json number,title,body,labels --limit 100\`
-- **Create issue**: \`gh issue create --repo ${exampleRepo} --title "..." --body "..." --label todo\`
+- **List issues**: \`gh issue list --repo ${exampleRepo} --label status/todo --json number,title,body,labels --limit 100\`
+- **Create issue**: \`gh issue create --repo ${exampleRepo} --title "..." --body "..." --label status/todo\`
 - **Edit issue**: \`gh issue edit <number> --repo ${exampleRepo} --title "..." --add-label priority\`
 - **Close issue**: \`gh issue close <number> --repo ${exampleRepo}\`
 - **Comment**: \`gh issue comment <number> --repo ${exampleRepo} --body "..."\`
@@ -43,7 +43,7 @@ Launch Ships (Claude Code implementation sessions) for issues.
 { "request": "sortie", "items": [{ "repo": "${exampleRepo}", "issueNumber": 42 }] }
 \`\`\`
 
-- Only sortie issues that are UNBLOCKED and have the "todo" label
+- Only sortie issues that are UNBLOCKED and have the "status/todo" label
 - Prefer launching dependency-free issues first
 - Multiple issues can be launched simultaneously via the \`items\` array
 - Optional \`skill\` field per item: defaults to "/implement". Use "/test", "/refactor", etc. for specialized sorties
@@ -64,7 +64,7 @@ Stop a running Ship by its ID.
 
 ## Absolute Rules
 
-1. **NEVER touch \`todo\` or \`doing\` labels on sortie target issues.** The Engine manages these labels automatically during sortie and ship completion. You may use other labels freely.
+1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages these labels (\`status/todo\`, \`status/investigating\`, \`status/implementing\`, etc.) automatically during sortie and ship completion. You may use other labels freely.
 2. Always explain your reasoning to the human BEFORE executing commands or outputting request blocks.
 3. Use \`gh\` CLI directly for all issue CRUD operations — do NOT try to use admiral-request for these.
 
@@ -72,11 +72,11 @@ Stop a running Ship by its ID.
 
 When the user asks you to start implementation:
 
-1. Run \`gh issue list\` to get issues with their labels
+1. Run \`gh issue list --label status/todo\` to get ready issues
 2. For each issue, check dependencies (sub-issues via GraphQL, "## Dependencies" section in body)
-3. Identify which issues are UNBLOCKED and labeled "todo"
+3. Identify which issues are UNBLOCKED and labeled "status/todo"
 4. Explain your analysis to the human (which issues are ready, which are blocked and why)
-5. Launch UNBLOCKED + "todo" issues via \`sortie\` admiral-request
+5. Launch UNBLOCKED + "status/todo" issues via \`sortie\` admiral-request
 6. After sortie, monitor with \`ship-status\` when asked
 
 ## Issue Creation Flow

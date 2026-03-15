@@ -2,6 +2,21 @@ import type { ShipManager } from "./ship-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
+/** status/* labels that indicate work-in-progress (not todo, not blocked). */
+const ACTIVE_STATUS_LABELS = new Set([
+  "status/investigating",
+  "status/planning",
+  "status/implementing",
+  "status/testing",
+  "status/reviewing",
+  "status/acceptance-test",
+  "status/merging",
+]);
+
+function getActiveStatusLabel(labels: string[]): string | undefined {
+  return labels.find((l) => ACTIVE_STATUS_LABELS.has(l));
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -30,13 +45,14 @@ export class StateSync {
       };
     }
 
-    // 2. Check if issue already has "doing" label
+    // 2. Check if issue already has an active status/* label (in progress)
     try {
       const issue = await github.getIssue(repo, issueNumber);
-      if (issue.labels.includes("doing")) {
+      const activeLabel = getActiveStatusLabel(issue.labels);
+      if (activeLabel) {
         return {
           ok: false,
-          reason: `Issue #${issueNumber} already has the "doing" label`,
+          reason: `Issue #${issueNumber} already has an active status label (${activeLabel})`,
         };
       }
     } catch (err) {
@@ -50,7 +66,8 @@ export class StateSync {
   }
 
   /**
-   * Rollback "doing" label to "todo" with exponential backoff retry.
+   * Rollback active status/* label to status/todo with exponential backoff retry.
+   * Fetches the issue to find the current active label, then swaps it.
    */
   async rollbackLabel(
     repo: string,
@@ -59,9 +76,20 @@ export class StateSync {
   ): Promise<void> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        const issue = await github.getIssue(repo, issueNumber);
+        const activeLabel = getActiveStatusLabel(issue.labels);
+        if (!activeLabel) {
+          // No active label to rollback — might already be status/todo
+          if (!issue.labels.includes("status/todo")) {
+            await github.updateLabels(repo, issueNumber, {
+              add: "status/todo",
+            });
+          }
+          return;
+        }
         await github.updateLabels(repo, issueNumber, {
-          remove: "doing",
-          add: "todo",
+          remove: activeLabel,
+          add: "status/todo",
         });
         return;
       } catch (err) {
@@ -125,16 +153,20 @@ export class StateSync {
     if (!ship) return;
 
     if (succeeded) {
-      // Successful completion: remove worktree, remove "doing" label, mark done
+      // Successful completion: remove worktree, remove active status/* label, mark done
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
       try {
-        await github.updateLabels(ship.repo, ship.issueNumber, {
-          remove: "doing",
-        });
+        const issue = await github.getIssue(ship.repo, ship.issueNumber);
+        const activeLabel = getActiveStatusLabel(issue.labels);
+        if (activeLabel) {
+          await github.updateLabels(ship.repo, ship.issueNumber, {
+            remove: activeLabel,
+          });
+        }
       } catch (err) {
         console.warn(
-          `[state-sync] Failed to remove "doing" label for #${ship.issueNumber}:`,
+          `[state-sync] Failed to remove active status label for #${ship.issueNumber}:`,
           err,
         );
       }
@@ -148,7 +180,7 @@ export class StateSync {
   }
 
   /**
-   * Startup reconciliation: audit "doing" labels and orphan worktrees.
+   * Startup reconciliation: audit active status/* labels and orphan worktrees.
    * Called once when Engine starts.
    */
   async reconcileOnStartup(
@@ -161,20 +193,24 @@ export class StateSync {
     for (const repo of repos) {
       if (!repo.remote) continue;
 
-      // 1. Audit "doing" labels: if no active Ship, roll back to "todo"
+      // 1. Audit active status/* labels: if no active Ship, roll back to status/todo
       try {
-        const doingIssues = await github.listIssues(repo.remote, "doing");
-        for (const issue of doingIssues) {
+        const allIssues = await github.listIssues(repo.remote);
+        const inProgressIssues = allIssues.filter((i) =>
+          i.labels.some((l) => ACTIVE_STATUS_LABELS.has(l)),
+        );
+        for (const issue of inProgressIssues) {
           if (!activeIssues.includes(issue.number)) {
+            const activeLabel = getActiveStatusLabel(issue.labels);
             console.warn(
-              `[state-sync] Orphan "doing" label on #${issue.number} — rolling back to "todo"`,
+              `[state-sync] Orphan "${activeLabel}" label on #${issue.number} — rolling back to "status/todo"`,
             );
             await this.rollbackLabel(repo.remote, issue.number);
           }
         }
       } catch (err) {
         console.warn(
-          `[state-sync] Failed to audit "doing" labels for ${repo.remote}:`,
+          `[state-sync] Failed to audit status labels for ${repo.remote}:`,
           err,
         );
       }

@@ -51,14 +51,22 @@ export class ShipManager {
 
     // 1. Get issue info
     const issue = await github.getIssue(repo, issueNumber);
-    if (issue.labels.includes("doing")) {
-      throw new Error(`Issue #${issueNumber} is already in progress (doing)`);
+    const activeStatusLabel = issue.labels.find(
+      (l) =>
+        l.startsWith("status/") &&
+        l !== "status/todo" &&
+        l !== "status/blocked",
+    );
+    if (activeStatusLabel) {
+      throw new Error(
+        `Issue #${issueNumber} is already in progress (${activeStatusLabel})`,
+      );
     }
 
-    // 2. Update labels: todo → doing
+    // 2. Update labels: status/todo → status/investigating
     await github.updateLabels(repo, issueNumber, {
-      remove: "todo",
-      add: "doing",
+      remove: "status/todo",
+      add: "status/investigating",
     });
 
     // 3. Create worktree
