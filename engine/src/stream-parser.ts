@@ -1,393 +1,4 @@
-import type { StreamMessage, BridgeAction } from "./types.js";
-
-const VALID_ACTIONS = new Set([
-  "list-issues",
-  "create-issue",
-  "edit-issue",
-  "sortie",
-  "ship-status",
-  "close-issue",
-  "edit-issue",
-  "stop-ship",
-  "organize-issues",
-]);
-
-const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
-
-const TITLE_MAX_LENGTH = 256;
-const BODY_MAX_LENGTH = 65536;
-
-/**
- * Validate a parsed object as a BridgeAction.
- * Returns the validated action or null if invalid.
- */
-function validateAction(obj: unknown): BridgeAction | null {
-  if (typeof obj !== "object" || obj === null) {
-    console.warn("[stream-parser] Action is not an object:", obj);
-    return null;
-  }
-
-  const record = obj as Record<string, unknown>;
-
-  // Validate action field
-  if (typeof record.action !== "string" || !VALID_ACTIONS.has(record.action)) {
-    console.warn(
-      "[stream-parser] Invalid action type:",
-      record.action,
-    );
-    return null;
-  }
-
-  const action = record.action as BridgeAction["action"];
-
-  // Actions with no repo validation needed
-  if (action === "ship-status") {
-    return { action: "ship-status" };
-  }
-  if (action === "stop-ship") {
-    if (typeof record.shipId !== "string" || !record.shipId) {
-      console.warn("[stream-parser] stop-ship missing shipId");
-      return null;
-    }
-    return { action: "stop-ship", shipId: record.shipId };
-  }
-
-  // Validate repo for actions that require it
-  if (action === "list-issues" || action === "create-issue" || action === "close-issue" || action === "edit-issue" || action === "organize-issues") {
-    if (typeof record.repo !== "string" || !REPO_PATTERN.test(record.repo)) {
-      console.warn(
-        "[stream-parser] Invalid repo format:",
-        record.repo,
-      );
-      return null;
-    }
-  }
-
-  switch (action) {
-    case "list-issues": {
-      const result: { action: "list-issues"; repo: string; label?: string } = {
-        action: "list-issues",
-        repo: record.repo as string,
-      };
-      if (record.label !== undefined) {
-        if (typeof record.label !== "string") {
-          console.warn(
-            "[stream-parser] list-issues label must be a string:",
-            record.label,
-          );
-          return null;
-        }
-        result.label = record.label;
-      }
-      return result;
-    }
-
-    case "create-issue": {
-      if (typeof record.title !== "string" || record.title.length === 0) {
-        console.warn("[stream-parser] create-issue missing title");
-        return null;
-      }
-      if (record.title.length > TITLE_MAX_LENGTH) {
-        console.warn(
-          `[stream-parser] create-issue title exceeds ${TITLE_MAX_LENGTH} chars:`,
-          record.title.length,
-        );
-        return null;
-      }
-      if (typeof record.body !== "string") {
-        console.warn("[stream-parser] create-issue missing body");
-        return null;
-      }
-      if (record.body.length > BODY_MAX_LENGTH) {
-        console.warn(
-          `[stream-parser] create-issue body exceeds ${BODY_MAX_LENGTH} chars:`,
-          record.body.length,
-        );
-        return null;
-      }
-
-      const result: {
-        action: "create-issue";
-        repo: string;
-        title: string;
-        body: string;
-        labels?: string[];
-        parentIssue?: number;
-        dependsOn?: number[];
-      } = {
-        action: "create-issue",
-        repo: record.repo as string,
-        title: record.title,
-        body: record.body,
-      };
-
-      if (record.labels !== undefined) {
-        if (
-          !Array.isArray(record.labels) ||
-          !record.labels.every((l: unknown) => typeof l === "string")
-        ) {
-          console.warn("[stream-parser] create-issue labels must be string[]");
-          return null;
-        }
-        result.labels = record.labels as string[];
-      }
-
-      if (record.parentIssue !== undefined) {
-        if (
-          typeof record.parentIssue !== "number" ||
-          !Number.isInteger(record.parentIssue) ||
-          record.parentIssue <= 0
-        ) {
-          console.warn(
-            "[stream-parser] create-issue parentIssue must be a positive integer",
-          );
-          return null;
-        }
-        result.parentIssue = record.parentIssue;
-      }
-
-      if (record.dependsOn !== undefined) {
-        if (
-          !Array.isArray(record.dependsOn) ||
-          !record.dependsOn.every(
-            (n: unknown) =>
-              typeof n === "number" && Number.isInteger(n) && n > 0,
-          )
-        ) {
-          console.warn(
-            "[stream-parser] create-issue dependsOn must be positive integer[]",
-          );
-          return null;
-        }
-        result.dependsOn = record.dependsOn as number[];
-      }
-
-      return result;
-    }
-
-    case "edit-issue": {
-      if (
-        typeof record.issueNumber !== "number" ||
-        !Number.isInteger(record.issueNumber) ||
-        record.issueNumber <= 0
-      ) {
-        console.warn("[stream-parser] edit-issue requires a positive integer issueNumber");
-        return null;
-      }
-
-      const hasTitle = record.title !== undefined;
-      const hasBody = record.body !== undefined;
-      const hasComment = record.comment !== undefined;
-      const hasAddLabels = record.addLabels !== undefined;
-      const hasRemoveLabels = record.removeLabels !== undefined;
-      const hasParentIssue = record.parentIssue !== undefined;
-
-      if (!hasTitle && !hasBody && !hasComment && !hasAddLabels && !hasRemoveLabels && !hasParentIssue) {
-        console.warn("[stream-parser] edit-issue requires at least one field to change");
-        return null;
-      }
-
-      const editResult: {
-        action: "edit-issue";
-        repo: string;
-        issueNumber: number;
-        title?: string;
-        body?: string;
-        comment?: string;
-        addLabels?: string[];
-        removeLabels?: string[];
-        parentIssue?: number;
-      } = {
-        action: "edit-issue",
-        repo: record.repo as string,
-        issueNumber: record.issueNumber,
-      };
-
-      if (hasTitle) {
-        if (typeof record.title !== "string" || record.title.length === 0) {
-          console.warn("[stream-parser] edit-issue title must be a non-empty string");
-          return null;
-        }
-        if (record.title.length > TITLE_MAX_LENGTH) {
-          console.warn(`[stream-parser] edit-issue title exceeds ${TITLE_MAX_LENGTH} chars`);
-          return null;
-        }
-        editResult.title = record.title;
-      }
-
-      if (hasBody) {
-        if (typeof record.body !== "string") {
-          console.warn("[stream-parser] edit-issue body must be a string");
-          return null;
-        }
-        if (record.body.length > BODY_MAX_LENGTH) {
-          console.warn(`[stream-parser] edit-issue body exceeds ${BODY_MAX_LENGTH} chars`);
-          return null;
-        }
-        editResult.body = record.body;
-      }
-
-      if (hasComment) {
-        if (typeof record.comment !== "string" || record.comment.length === 0) {
-          console.warn("[stream-parser] edit-issue comment must be a non-empty string");
-          return null;
-        }
-        if (record.comment.length > BODY_MAX_LENGTH) {
-          console.warn(`[stream-parser] edit-issue comment exceeds ${BODY_MAX_LENGTH} chars`);
-          return null;
-        }
-        editResult.comment = record.comment;
-      }
-
-      if (hasAddLabels) {
-        if (
-          !Array.isArray(record.addLabels) ||
-          !record.addLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
-        ) {
-          console.warn("[stream-parser] edit-issue addLabels must be non-empty string[]");
-          return null;
-        }
-        if ((record.addLabels as string[]).length > 0) {
-          editResult.addLabels = record.addLabels as string[];
-        }
-      }
-
-      if (hasRemoveLabels) {
-        if (
-          !Array.isArray(record.removeLabels) ||
-          !record.removeLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
-        ) {
-          console.warn("[stream-parser] edit-issue removeLabels must be non-empty string[]");
-          return null;
-        }
-        if ((record.removeLabels as string[]).length > 0) {
-          editResult.removeLabels = record.removeLabels as string[];
-        }
-      }
-
-      if (hasParentIssue) {
-        if (
-          typeof record.parentIssue !== "number" ||
-          !Number.isInteger(record.parentIssue) ||
-          record.parentIssue <= 0
-        ) {
-          console.warn("[stream-parser] edit-issue parentIssue must be a positive integer");
-          return null;
-        }
-        editResult.parentIssue = record.parentIssue;
-      }
-
-      // Reject if no effective fields remain after filtering
-      if (
-        editResult.title === undefined &&
-        editResult.body === undefined &&
-        editResult.comment === undefined &&
-        editResult.addLabels === undefined &&
-        editResult.removeLabels === undefined &&
-        editResult.parentIssue === undefined
-      ) {
-        console.warn("[stream-parser] edit-issue requires at least one effective field");
-        return null;
-      }
-
-      return editResult;
-    }
-
-    case "sortie": {
-      if (!Array.isArray(record.requests)) {
-        console.warn("[stream-parser] sortie missing requests array");
-        return null;
-      }
-
-      const validatedRequests: Array<{ repo: string; issueNumber: number; skill?: string }> =
-        [];
-      for (const req of record.requests) {
-        if (typeof req !== "object" || req === null) {
-          console.warn(
-            "[stream-parser] sortie request is not an object:",
-            req,
-          );
-          return null;
-        }
-        const r = req as Record<string, unknown>;
-        if (typeof r.repo !== "string" || !REPO_PATTERN.test(r.repo)) {
-          console.warn(
-            "[stream-parser] sortie request invalid repo:",
-            r.repo,
-          );
-          return null;
-        }
-        if (
-          typeof r.issueNumber !== "number" ||
-          !Number.isInteger(r.issueNumber) ||
-          r.issueNumber <= 0
-        ) {
-          console.warn(
-            "[stream-parser] sortie request invalid issueNumber:",
-            r.issueNumber,
-          );
-          return null;
-        }
-        const entry: { repo: string; issueNumber: number; skill?: string } = {
-          repo: r.repo,
-          issueNumber: r.issueNumber,
-        };
-        if (typeof r.skill === "string") {
-          entry.skill = r.skill;
-        }
-        validatedRequests.push(entry);
-      }
-
-      return { action: "sortie", requests: validatedRequests };
-    }
-
-    case "close-issue": {
-      if (
-        typeof record.issueNumber !== "number" ||
-        !Number.isInteger(record.issueNumber) ||
-        record.issueNumber <= 0
-      ) {
-        console.warn("[stream-parser] close-issue missing valid issueNumber");
-        return null;
-      }
-      const closeResult: {
-        action: "close-issue";
-        repo: string;
-        issueNumber: number;
-        comment?: string;
-      } = {
-        action: "close-issue",
-        repo: record.repo as string,
-        issueNumber: record.issueNumber,
-      };
-      if (typeof record.comment === "string") {
-        closeResult.comment = record.comment;
-      }
-      return closeResult;
-    }
-
-    case "organize-issues": {
-      if (!Array.isArray(record.operations) || record.operations.length === 0) {
-        console.warn("[stream-parser] organize-issues missing operations array");
-        return null;
-      }
-      for (const op of record.operations) {
-        if (typeof op !== "object" || op === null || !("op" in op)) {
-          console.warn("[stream-parser] organize-issues invalid operation:", op);
-          return null;
-        }
-      }
-      return {
-        action: "organize-issues",
-        repo: record.repo as string,
-        operations: record.operations,
-      } as Extract<BridgeAction, { action: "organize-issues" }>;
-    }
-
-    default:
-      return null;
-  }
-}
+import type { StreamMessage, BridgeRequest } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -471,37 +82,70 @@ export function parseStreamMessage(
   }
 }
 
-const ACTION_BLOCK_RE = /```admiral-action\n([\s\S]*?)```/g;
+// === admiral-request protocol ===
 
-/**
- * Extract BridgeAction objects from assistant text containing
- * ```admiral-action ... ``` fenced blocks.
- *
- * Each parsed object is runtime-validated; invalid actions are
- * skipped with a console.warn.
- */
-export function extractActions(text: string): BridgeAction[] {
-  const actions: BridgeAction[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = ACTION_BLOCK_RE.exec(text)) !== null) {
-    try {
-      const parsed: unknown = JSON.parse(match[1]!);
-      const validated = validateAction(parsed);
-      if (validated) {
-        actions.push(validated);
+const REQUEST_BLOCK_RE = /```admiral-request\n([\s\S]*?)```/g;
+const REPO_PATTERN_REQ = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+
+function validateRequest(obj: unknown): BridgeRequest | null {
+  if (typeof obj !== "object" || obj === null) return null;
+  const r = obj as Record<string, unknown>;
+  const req = r.request;
+  if (typeof req !== "string") return null;
+
+  switch (req) {
+    case "ship-status":
+      return { request: "ship-status" };
+
+    case "ship-stop":
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      return { request: "ship-stop", shipId: r.shipId };
+
+    case "sortie": {
+      if (!Array.isArray(r.items) || r.items.length === 0) return null;
+      const items: Array<{ repo: string; issueNumber: number; skill?: string }> = [];
+      for (const item of r.items) {
+        if (typeof item !== "object" || item === null) return null;
+        const it = item as Record<string, unknown>;
+        if (typeof it.repo !== "string" || !REPO_PATTERN_REQ.test(it.repo)) return null;
+        if (typeof it.issueNumber !== "number" || !Number.isInteger(it.issueNumber) || it.issueNumber <= 0) return null;
+        const entry: { repo: string; issueNumber: number; skill?: string } = {
+          repo: it.repo,
+          issueNumber: it.issueNumber,
+        };
+        if (typeof it.skill === "string") entry.skill = it.skill;
+        items.push(entry);
       }
-    } catch {
-      // Malformed JSON — skip
-      console.warn("[stream-parser] Failed to parse admiral-action JSON");
+      return { request: "sortie", items };
     }
+
+    default:
+      return null;
   }
-  ACTION_BLOCK_RE.lastIndex = 0;
-  return actions;
 }
 
 /**
- * Remove ```admiral-action ... ``` blocks from text for display purposes.
+ * Extract BridgeRequest objects from ```admiral-request ... ``` fenced blocks.
  */
-export function stripActionBlocks(text: string): string {
-  return text.replace(ACTION_BLOCK_RE, "").trim();
+export function extractRequests(text: string): BridgeRequest[] {
+  const requests: BridgeRequest[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = REQUEST_BLOCK_RE.exec(text)) !== null) {
+    try {
+      const parsed: unknown = JSON.parse(match[1]!);
+      const validated = validateRequest(parsed);
+      if (validated) requests.push(validated);
+    } catch {
+      console.warn("[stream-parser] Failed to parse admiral-request JSON");
+    }
+  }
+  REQUEST_BLOCK_RE.lastIndex = 0;
+  return requests;
+}
+
+/**
+ * Remove ```admiral-request ... ``` blocks from text for display purposes.
+ */
+export function stripRequestBlocks(text: string): string {
+  return text.replace(REQUEST_BLOCK_RE, "").trim();
 }

@@ -92,6 +92,28 @@ export async function list(repoRoot: string): Promise<Worktree[]> {
   return worktrees;
 }
 
+export async function listFeatureWorktrees(repoRoot: string): Promise<Worktree[]> {
+  const all = await list(repoRoot);
+  return all.filter((w) => w.branch?.startsWith("feature/"));
+}
+
+export async function forceRemove(worktreePath: string): Promise<void> {
+  const repoRoot = await getRepoRoot(worktreePath).catch(() => null);
+  if (!repoRoot) return;
+
+  const mainRoot = await git(["worktree", "list", "--porcelain"], repoRoot)
+    .then((output) => {
+      const firstLine = output.split("\n")[0];
+      return firstLine?.replace("worktree ", "") ?? repoRoot;
+    })
+    .catch(() => repoRoot);
+
+  // Remove worktree entry from git
+  await git(["worktree", "remove", worktreePath, "--force"], mainRoot).catch(() => {});
+  // Prune stale worktree entries
+  await git(["worktree", "prune"], mainRoot).catch(() => {});
+}
+
 export async function symlinkSettings(
   repoRoot: string,
   worktreePath: string,

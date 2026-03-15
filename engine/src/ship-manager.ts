@@ -107,30 +107,6 @@ export class ShipManager {
     return ship;
   }
 
-  async onShipComplete(shipId: string): Promise<void> {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-
-    try {
-      // 1. Remove worktree
-      await worktree.remove(ship.worktreePath);
-
-      // 2. Remove "doing" label (issue close is left to Bridge/human)
-      await github.updateLabels(ship.repo, ship.issueNumber, {
-        remove: "doing",
-      });
-
-      // 3. Stop watcher
-      this.acceptanceWatcher.unwatch(shipId);
-
-      // 4. Update status
-      this.updateStatus(shipId, "done");
-    } catch (err) {
-      console.error(`Error in ship completion cleanup for ${shipId}:`, err);
-      this.updateStatus(shipId, "error", String(err));
-    }
-  }
-
   stopShip(shipId: string): boolean {
     const killed = this.processManager.kill(shipId);
     if (killed) {
@@ -154,6 +130,25 @@ export class ShipManager {
     return Array.from(this.ships.values());
   }
 
+  getShipByIssue(issueNumber: number): ShipProcess | undefined {
+    for (const ship of this.ships.values()) {
+      if (ship.issueNumber === issueNumber && ship.status !== "done" && ship.status !== "error") {
+        return ship;
+      }
+    }
+    return undefined;
+  }
+
+  getActiveShipIssueNumbers(): number[] {
+    const numbers: number[] = [];
+    for (const ship of this.ships.values()) {
+      if (ship.status !== "done" && ship.status !== "error") {
+        numbers.push(ship.issueNumber);
+      }
+    }
+    return numbers;
+  }
+
   updateStatus(id: string, status: ShipStatus, detail?: string): void {
     const ship = this.ships.get(id);
     if (ship) {
@@ -161,17 +156,7 @@ export class ShipManager {
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
       }
-      // Rollback labels when ship fails: doing → todo
-      if (status === "error") {
-        github
-          .updateLabels(ship.repo, ship.issueNumber, {
-            remove: "doing",
-            add: "todo",
-          })
-          .catch((err) =>
-            console.warn(`[ship-manager] Failed to rollback labels: ${err}`),
-          );
-      }
+      // Label rollback is now handled by StateSync — no fire-and-forget here
       this.onStatusChange?.(id, status, detail);
     }
   }

@@ -1,0 +1,208 @@
+import type { ShipManager } from "./ship-manager.js";
+import * as github from "./github.js";
+import * as worktree from "./worktree.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export class StateSync {
+  private shipManager: ShipManager;
+
+  constructor(shipManager: ShipManager) {
+    this.shipManager = shipManager;
+  }
+
+  /**
+   * Pre-sortie validation: check for duplicate ships, existing worktrees,
+   * and doing labels that indicate an issue is already in progress.
+   */
+  async sortieGuard(
+    repo: string,
+    issueNumber: number,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    // 1. Check if a Ship is already running for this issue
+    const existing = this.shipManager.getShipByIssue(issueNumber);
+    if (existing) {
+      return {
+        ok: false,
+        reason: `Issue #${issueNumber} already has an active Ship (${existing.id.slice(0, 8)}..., status: ${existing.status})`,
+      };
+    }
+
+    // 2. Check if issue already has "doing" label
+    try {
+      const issue = await github.getIssue(repo, issueNumber);
+      if (issue.labels.includes("doing")) {
+        return {
+          ok: false,
+          reason: `Issue #${issueNumber} already has the "doing" label`,
+        };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `Failed to fetch issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * Rollback "doing" label to "todo" with exponential backoff retry.
+   */
+  async rollbackLabel(
+    repo: string,
+    issueNumber: number,
+    maxRetries = 3,
+  ): Promise<void> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await github.updateLabels(repo, issueNumber, {
+          remove: "doing",
+          add: "todo",
+        });
+        return;
+      } catch (err) {
+        if (attempt === maxRetries) {
+          console.error(
+            `[state-sync] Failed to rollback labels for #${issueNumber} after ${maxRetries + 1} attempts:`,
+            err,
+          );
+          return;
+        }
+        const delay = 500 * Math.pow(2, attempt);
+        console.warn(
+          `[state-sync] Label rollback attempt ${attempt + 1} failed for #${issueNumber}, retrying in ${delay}ms`,
+        );
+        await sleep(delay);
+      }
+    }
+  }
+
+  /**
+   * Remove worktree with retry, falling back to forceRemove on failure.
+   */
+  async removeWorktreeWithRetry(
+    worktreePath: string,
+    maxRetries = 3,
+  ): Promise<void> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await worktree.remove(worktreePath);
+        return;
+      } catch (err) {
+        if (attempt === maxRetries) {
+          console.warn(
+            `[state-sync] Normal worktree remove failed after ${maxRetries + 1} attempts, trying force remove`,
+          );
+          try {
+            await worktree.forceRemove(worktreePath);
+          } catch (forceErr) {
+            console.error(
+              `[state-sync] Force worktree remove also failed for ${worktreePath}:`,
+              forceErr,
+            );
+          }
+          return;
+        }
+        const delay = 500 * Math.pow(2, attempt);
+        console.warn(
+          `[state-sync] Worktree remove attempt ${attempt + 1} failed, retrying in ${delay}ms:`,
+          err,
+        );
+        await sleep(delay);
+      }
+    }
+  }
+
+  /**
+   * Handle process exit: clean up worktree & labels based on success/failure.
+   */
+  async onProcessExit(shipId: string, succeeded: boolean): Promise<void> {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) return;
+
+    if (succeeded) {
+      // Successful completion: remove worktree, remove "doing" label, mark done
+      await this.removeWorktreeWithRetry(ship.worktreePath);
+
+      try {
+        await github.updateLabels(ship.repo, ship.issueNumber, {
+          remove: "doing",
+        });
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to remove "doing" label for #${ship.issueNumber}:`,
+          err,
+        );
+      }
+
+      this.shipManager.updateStatus(shipId, "done");
+    } else {
+      // Failed: rollback doing→todo, mark error
+      await this.rollbackLabel(ship.repo, ship.issueNumber);
+      this.shipManager.updateStatus(shipId, "error", "Process failed");
+    }
+  }
+
+  /**
+   * Startup reconciliation: audit "doing" labels and orphan worktrees.
+   * Called once when Engine starts.
+   */
+  async reconcileOnStartup(
+    repos: Array<{ remote?: string; localPath: string }>,
+  ): Promise<void> {
+    console.log("[state-sync] Running startup reconciliation...");
+
+    const activeIssues = this.shipManager.getActiveShipIssueNumbers();
+
+    for (const repo of repos) {
+      if (!repo.remote) continue;
+
+      // 1. Audit "doing" labels: if no active Ship, roll back to "todo"
+      try {
+        const doingIssues = await github.listIssues(repo.remote, "doing");
+        for (const issue of doingIssues) {
+          if (!activeIssues.includes(issue.number)) {
+            console.warn(
+              `[state-sync] Orphan "doing" label on #${issue.number} — rolling back to "todo"`,
+            );
+            await this.rollbackLabel(repo.remote, issue.number);
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to audit "doing" labels for ${repo.remote}:`,
+          err,
+        );
+      }
+
+      // 2. Clean up orphan feature worktrees
+      try {
+        const repoRoot = await worktree.getRepoRoot(repo.localPath);
+        const featureWorktrees = await worktree.listFeatureWorktrees(repoRoot);
+        for (const wt of featureWorktrees) {
+          // Extract issue number from branch name: feature/<num>-<slug>
+          const match = wt.branch?.match(/^feature\/(\d+)-/);
+          if (!match) continue;
+          const issueNum = Number(match[1]);
+          if (!activeIssues.includes(issueNum)) {
+            console.warn(
+              `[state-sync] Orphan worktree for #${issueNum} at ${wt.path} — removing`,
+            );
+            await this.removeWorktreeWithRetry(wt.path);
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to audit worktrees for ${repo.localPath}:`,
+          err,
+        );
+      }
+    }
+
+    console.log("[state-sync] Startup reconciliation complete.");
+  }
+}
