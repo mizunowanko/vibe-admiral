@@ -35,7 +35,10 @@ export function useBridge(fleetId: string | null) {
 
       if (msg.type === "error") {
         const errorData = msg.data as { source: string; message: string };
-        if (errorData.source === `bridge-${fleetId}`) {
+        if (
+          errorData.source === `bridge-${fleetId}` ||
+          errorData.source === "bridge:send"
+        ) {
           setIsLoading(false);
           setMessages((prev) => [
             ...prev,
