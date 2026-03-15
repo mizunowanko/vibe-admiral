@@ -48,6 +48,7 @@ export class ProcessManager extends EventEmitter {
   ): ChildProcess {
     const args = [
       "-p",
+      "",
       "--input-format",
       "stream-json",
       "--output-format",
