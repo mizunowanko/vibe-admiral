@@ -48,6 +48,7 @@ export const useShipStore = create<ShipState>((set) => ({
         sessionId: null,
         prUrl: null,
         acceptanceTest: null,
+        acceptanceTestApproved: false,
         createdAt: new Date().toISOString(),
         ...shipData,
       } as Ship);
@@ -81,6 +82,7 @@ export const useShipStore = create<ShipState>((set) => ({
           sessionId: null,
           prUrl: null,
           acceptanceTest: null,
+          acceptanceTestApproved: false,
           createdAt: new Date().toISOString(),
         });
       }
