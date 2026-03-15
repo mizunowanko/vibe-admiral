@@ -78,6 +78,12 @@ export class EngineServer {
       // Route to bridge or ship
       if (id.startsWith("bridge-")) {
         const fleetId = id.replace("bridge-", "");
+
+        // Detect init message on raw msg (before parseStreamMessage filters it out)
+        if (msg.type === "system" && (msg as Record<string, unknown>).subtype === "init") {
+          this.bridgeManager.onBridgeReady(fleetId);
+        }
+
         const parsed = parseStreamMessage(msg);
         if (parsed) {
           // Check for admiral-action blocks in assistant text
