@@ -2,9 +2,6 @@ node_modules/
 dist/
 .worktrees/
 
-# Tauri
-src-tauri/target/
-
 # Engine build
 engine/dist/
 

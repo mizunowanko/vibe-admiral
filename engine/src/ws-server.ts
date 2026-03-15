@@ -511,7 +511,21 @@ export class EngineServer {
   private async loadFleets(): Promise<Fleet[]> {
     try {
       const content = await readFile(FLEETS_FILE, "utf-8");
-      return JSON.parse(content) as Fleet[];
+      const parsed = JSON.parse(content) as Fleet[];
+      let migrated = false;
+      for (const fleet of parsed) {
+        if (fleet.repos?.length > 0 && typeof fleet.repos[0] === "string") {
+          fleet.repos = (fleet.repos as unknown as string[]).map((remote) => ({
+            localPath: "",
+            remote,
+          }));
+          migrated = true;
+        }
+      }
+      if (migrated) {
+        await this.saveFleets(parsed);
+      }
+      return parsed;
     } catch {
       return [];
     }
@@ -530,9 +544,12 @@ export class EngineServer {
         "origin",
       ], { cwd: localPath });
       const url = stdout.trim();
-      // Extract owner/repo from GitHub URL
-      const match = url.match(/github\.com[:/](.+?)(?:\.git)?$/);
-      return match?.[1];
+      if (!url) return undefined;
+      // Extract owner/repo from GitHub URL (handle trailing slashes)
+      const match = url.match(/github\.com[:/](.+?)(?:\.git)?\/*$/);
+      if (match) return match[1];
+      // For non-GitHub remotes (GitLab, Bitbucket, etc.), return the full URL
+      return url;
     } catch {
       return undefined;
     }
