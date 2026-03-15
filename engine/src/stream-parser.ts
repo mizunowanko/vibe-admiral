@@ -83,7 +83,16 @@ export function parseStreamMessage(
     }
 
     case "tool_result": {
-      const content = raw.content as string | undefined;
+      const rawContent = raw.content;
+      let content: string | undefined;
+      if (typeof rawContent === "string") {
+        content = rawContent;
+      } else if (Array.isArray(rawContent)) {
+        content = (rawContent as ContentBlock[])
+          .filter((b) => b.type === "text" && b.text)
+          .map((b) => b.text as string)
+          .join("\n");
+      }
       if (!content) return null;
       return {
         type: "tool_result",
