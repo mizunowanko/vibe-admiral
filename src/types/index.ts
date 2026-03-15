@@ -87,7 +87,15 @@ export type ClientMessage =
   | { type: "fleet:select"; data: { id: string } }
   | {
       type: "fleet:update";
-      data: { id: string; name?: string; repos?: FleetRepo[] };
+      data: {
+        id: string;
+        name?: string;
+        repos?: FleetRepo[];
+        skillSources?: FleetSkillSources;
+        sharedRulePaths?: string[];
+        bridgeRulePaths?: string[];
+        shipRulePaths?: string[];
+      };
     }
   | { type: "fleet:delete"; data: { id: string } }
   | { type: "bridge:send"; data: { fleetId: string; message: string } }
@@ -101,8 +109,10 @@ export type ClientMessage =
   | { type: "ship:reject"; data: { id: string; feedback: string } }
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
+  | { type: "ship:list" }
   | { type: "issue:list"; data: { repo: string } }
-  | { type: "issue:get"; data: { repo: string; number: number } };
+  | { type: "issue:get"; data: { repo: string; number: number } }
+  | { type: "fs:list-dir"; data: { path?: string } };
 
 // === WebSocket Messages: Engine → Frontend ===
 export type ServerMessage =
@@ -135,7 +145,15 @@ export type ServerMessage =
       type: "ship:done";
       data: { id: string; prUrl?: string; merged: boolean };
     }
+  | { type: "ship:data"; data: Ship[] }
   | { type: "fleet:data"; data: Fleet[] }
   | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
   | { type: "issue:data"; data: { repo: string; issues: Issue[] } }
+  | {
+      type: "fs:dir-listing";
+      data: {
+        path: string;
+        entries: Array<{ name: string; isDirectory: boolean }>;
+      };
+    }
   | { type: "error"; data: { source: string; message: string } };

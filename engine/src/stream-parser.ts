@@ -3,6 +3,7 @@ import type { StreamMessage, BridgeAction } from "./types.js";
 const VALID_ACTIONS = new Set([
   "list-issues",
   "create-issue",
+  "edit-issue",
   "sortie",
   "ship-status",
   "close-issue",
@@ -164,6 +165,134 @@ function validateAction(obj: unknown): BridgeAction | null {
       return result;
     }
 
+    case "edit-issue": {
+      if (
+        typeof record.issueNumber !== "number" ||
+        !Number.isInteger(record.issueNumber) ||
+        record.issueNumber <= 0
+      ) {
+        console.warn("[stream-parser] edit-issue requires a positive integer issueNumber");
+        return null;
+      }
+
+      const hasTitle = record.title !== undefined;
+      const hasBody = record.body !== undefined;
+      const hasComment = record.comment !== undefined;
+      const hasAddLabels = record.addLabels !== undefined;
+      const hasRemoveLabels = record.removeLabels !== undefined;
+      const hasParentIssue = record.parentIssue !== undefined;
+
+      if (!hasTitle && !hasBody && !hasComment && !hasAddLabels && !hasRemoveLabels && !hasParentIssue) {
+        console.warn("[stream-parser] edit-issue requires at least one field to change");
+        return null;
+      }
+
+      const editResult: {
+        action: "edit-issue";
+        repo: string;
+        issueNumber: number;
+        title?: string;
+        body?: string;
+        comment?: string;
+        addLabels?: string[];
+        removeLabels?: string[];
+        parentIssue?: number;
+      } = {
+        action: "edit-issue",
+        repo: record.repo as string,
+        issueNumber: record.issueNumber,
+      };
+
+      if (hasTitle) {
+        if (typeof record.title !== "string" || record.title.length === 0) {
+          console.warn("[stream-parser] edit-issue title must be a non-empty string");
+          return null;
+        }
+        if (record.title.length > TITLE_MAX_LENGTH) {
+          console.warn(`[stream-parser] edit-issue title exceeds ${TITLE_MAX_LENGTH} chars`);
+          return null;
+        }
+        editResult.title = record.title;
+      }
+
+      if (hasBody) {
+        if (typeof record.body !== "string") {
+          console.warn("[stream-parser] edit-issue body must be a string");
+          return null;
+        }
+        if (record.body.length > BODY_MAX_LENGTH) {
+          console.warn(`[stream-parser] edit-issue body exceeds ${BODY_MAX_LENGTH} chars`);
+          return null;
+        }
+        editResult.body = record.body;
+      }
+
+      if (hasComment) {
+        if (typeof record.comment !== "string" || record.comment.length === 0) {
+          console.warn("[stream-parser] edit-issue comment must be a non-empty string");
+          return null;
+        }
+        if (record.comment.length > BODY_MAX_LENGTH) {
+          console.warn(`[stream-parser] edit-issue comment exceeds ${BODY_MAX_LENGTH} chars`);
+          return null;
+        }
+        editResult.comment = record.comment;
+      }
+
+      if (hasAddLabels) {
+        if (
+          !Array.isArray(record.addLabels) ||
+          !record.addLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
+        ) {
+          console.warn("[stream-parser] edit-issue addLabels must be non-empty string[]");
+          return null;
+        }
+        if ((record.addLabels as string[]).length > 0) {
+          editResult.addLabels = record.addLabels as string[];
+        }
+      }
+
+      if (hasRemoveLabels) {
+        if (
+          !Array.isArray(record.removeLabels) ||
+          !record.removeLabels.every((l: unknown) => typeof l === "string" && l.length > 0)
+        ) {
+          console.warn("[stream-parser] edit-issue removeLabels must be non-empty string[]");
+          return null;
+        }
+        if ((record.removeLabels as string[]).length > 0) {
+          editResult.removeLabels = record.removeLabels as string[];
+        }
+      }
+
+      if (hasParentIssue) {
+        if (
+          typeof record.parentIssue !== "number" ||
+          !Number.isInteger(record.parentIssue) ||
+          record.parentIssue <= 0
+        ) {
+          console.warn("[stream-parser] edit-issue parentIssue must be a positive integer");
+          return null;
+        }
+        editResult.parentIssue = record.parentIssue;
+      }
+
+      // Reject if no effective fields remain after filtering
+      if (
+        editResult.title === undefined &&
+        editResult.body === undefined &&
+        editResult.comment === undefined &&
+        editResult.addLabels === undefined &&
+        editResult.removeLabels === undefined &&
+        editResult.parentIssue === undefined
+      ) {
+        console.warn("[stream-parser] edit-issue requires at least one effective field");
+        return null;
+      }
+
+      return editResult;
+    }
+
     case "sortie": {
       if (!Array.isArray(record.requests)) {
         console.warn("[stream-parser] sortie missing requests array");
@@ -235,29 +364,6 @@ function validateAction(obj: unknown): BridgeAction | null {
         closeResult.comment = record.comment;
       }
       return closeResult;
-    }
-
-    case "edit-issue": {
-      if (
-        typeof record.issueNumber !== "number" ||
-        !Number.isInteger(record.issueNumber) ||
-        record.issueNumber <= 0
-      ) {
-        console.warn("[stream-parser] edit-issue missing valid issueNumber");
-        return null;
-      }
-      const editResult: Extract<BridgeAction, { action: "edit-issue" }> = {
-        action: "edit-issue",
-        repo: record.repo as string,
-        issueNumber: record.issueNumber,
-      };
-      if (typeof record.title === "string") editResult.title = record.title;
-      if (typeof record.body === "string") editResult.body = record.body;
-      if (record.labels && typeof record.labels === "object") {
-        editResult.labels = record.labels as { add?: string[]; remove?: string[] };
-      }
-      if (typeof record.comment === "string") editResult.comment = record.comment;
-      return editResult;
     }
 
     case "organize-issues": {

@@ -108,7 +108,7 @@ export interface ServerMessage {
 // === Bridge Actions ===
 export type OrganizeOperation =
   | { op: "create"; title: string; body: string; labels?: string[]; parentIssue?: number; dependsOn?: number[] }
-  | { op: "edit"; issueNumber: number; title?: string; body?: string; labels?: { add?: string[]; remove?: string[] }; comment?: string }
+  | { op: "edit"; issueNumber: number; title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; comment?: string; parentIssue?: number }
   | { op: "close"; issueNumber: number; comment?: string };
 
 export type BridgeAction =
@@ -122,18 +122,20 @@ export type BridgeAction =
       parentIssue?: number;
       dependsOn?: number[];
     }
-  | { action: "list-issues"; repo: string; label?: string }
-  | { action: "ship-status" }
-  | { action: "close-issue"; repo: string; issueNumber: number; comment?: string }
   | {
       action: "edit-issue";
       repo: string;
       issueNumber: number;
       title?: string;
       body?: string;
-      labels?: { add?: string[]; remove?: string[] };
       comment?: string;
+      addLabels?: string[];
+      removeLabels?: string[];
+      parentIssue?: number;
     }
+  | { action: "list-issues"; repo: string; label?: string }
+  | { action: "ship-status" }
+  | { action: "close-issue"; repo: string; issueNumber: number; comment?: string }
   | { action: "stop-ship"; shipId: string }
   | { action: "organize-issues"; repo: string; operations: OrganizeOperation[] };
 

@@ -21,6 +21,8 @@ interface ShipState {
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
   selectShip: (id: string | null) => void;
 
+  syncShips: (ships: Ship[]) => void;
+  fetchShips: () => void;
   sortie: (fleetId: string, repo: string, issueNumber: number) => void;
   chatWithShip: (id: string, message: string) => void;
   acceptTest: (id: string) => void;
@@ -122,6 +124,28 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
   selectShip: (id) => set({ selectedShipId: id }),
+
+  syncShips: (shipList) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      // Add/update ships from server, but keep locally-known ships
+      // that may have received more recent status updates
+      for (const s of shipList) {
+        const existing = ships.get(s.id);
+        if (!existing) {
+          ships.set(s.id, s);
+        } else {
+          // Keep the existing entry if it has a more advanced status
+          ships.set(s.id, { ...s, ...existing });
+        }
+      }
+      return { ships };
+    });
+  },
+
+  fetchShips: () => {
+    wsClient.send({ type: "ship:list" });
+  },
 
   sortie: (fleetId, repo, issueNumber) => {
     wsClient.send({

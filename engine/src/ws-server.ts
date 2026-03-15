@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
-import { join, isAbsolute } from "node:path";
+import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
+import { join, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -466,6 +467,11 @@ export class EngineServer {
           // Ship logs are streamed in real-time, no separate endpoint needed
           break;
         }
+        case "ship:list": {
+          const ships = this.shipManager.getAllShips();
+          this.sendTo(ws, { type: "ship:data", data: ships });
+          break;
+        }
 
         // Issue operations (deterministic - no LLM)
         case "issue:list": {
@@ -484,6 +490,29 @@ export class EngineServer {
           this.sendTo(ws, {
             type: "issue:data",
             data: { repo: data.repo as string, issues: [issue] },
+          });
+          break;
+        }
+
+        // Filesystem operations (localhost-only; returns dir names, no file content)
+        case "fs:list-dir": {
+          const dirPath = (data.path as string) || homedir();
+          const resolved = await realpath(resolve(dirPath));
+          const s = await stat(resolved);
+          if (!s.isDirectory()) {
+            throw new Error(`Not a directory: "${resolved}"`);
+          }
+          const dirents = await readdir(resolved, { withFileTypes: true });
+          const entries = dirents
+            .filter((d) => !d.name.startsWith("."))
+            .map((d) => ({ name: d.name, isDirectory: d.isDirectory() }))
+            .sort((a, b) => {
+              if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+              return a.name.localeCompare(b.name);
+            });
+          this.sendTo(ws, {
+            type: "fs:dir-listing",
+            data: { path: resolved, entries },
           });
           break;
         }

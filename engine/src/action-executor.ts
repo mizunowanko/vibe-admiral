@@ -55,14 +55,14 @@ export class ActionExecutor {
         return this.executeSortie(fleetId, action, fleetRepos, skillSources, shipExtraPrompt);
       case "create-issue":
         return this.executeCreateIssue(action);
+      case "edit-issue":
+        return this.executeEditIssue(action);
       case "list-issues":
         return this.executeListIssues(action);
       case "ship-status":
         return this.executeShipStatus(fleetId);
       case "close-issue":
         return this.executeCloseIssue(action);
-      case "edit-issue":
-        return this.executeEditIssue(action);
       case "stop-ship":
         return this.executeStopShip(action);
       case "organize-issues":
@@ -147,6 +147,60 @@ export class ActionExecutor {
     }
   }
 
+  private async executeEditIssue(
+    action: Extract<BridgeAction, { action: "edit-issue" }>,
+  ): Promise<string> {
+    try {
+      const results: string[] = [];
+
+      // If comment is provided, use `gh issue comment`
+      if (action.comment) {
+        await github.commentOnIssue(
+          action.repo,
+          action.issueNumber,
+          action.comment,
+        );
+        results.push(`Comment added to #${action.issueNumber}`);
+      }
+
+      // If title, body, or label changes are provided, use `gh issue edit`
+      const hasEditFields =
+        action.title !== undefined ||
+        action.body !== undefined ||
+        (action.addLabels && action.addLabels.length > 0) ||
+        (action.removeLabels && action.removeLabels.length > 0);
+
+      if (hasEditFields) {
+        await github.editIssue(action.repo, action.issueNumber, {
+          title: action.title,
+          body: action.body,
+          addLabels: action.addLabels,
+          removeLabels: action.removeLabels,
+        });
+        const fields: string[] = [];
+        if (action.title !== undefined) fields.push("title");
+        if (action.body !== undefined) fields.push("body");
+        if (action.addLabels?.length) fields.push(`+labels: ${action.addLabels.join(", ")}`);
+        if (action.removeLabels?.length) fields.push(`-labels: ${action.removeLabels.join(", ")}`);
+        results.push(`Issue #${action.issueNumber} updated (${fields.join(", ")})`);
+      }
+
+      // Set up parent sub-issue relationship
+      if (action.parentIssue) {
+        await github.addSubIssue(
+          action.repo,
+          action.parentIssue,
+          action.issueNumber,
+        );
+        results.push(`Sub-issue of #${action.parentIssue}`);
+      }
+
+      return `[Issue Edit] ${results.join("; ")} (${action.repo})`;
+    } catch (err) {
+      return `[Issue Edit Failed] ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   private async executeListIssues(
     action: Extract<BridgeAction, { action: "list-issues" }>,
   ): Promise<string> {
@@ -156,14 +210,22 @@ export class ActionExecutor {
         return `[Issues] No issues found in ${action.repo}${action.label ? ` with label "${action.label}"` : ""}`;
       }
 
-      // For each issue, check sub-issues to determine blocked/unblocked
+      // For each issue, check sub-issues and body dependencies to determine blocked/unblocked
       const lines: string[] = [];
       for (const issue of issues) {
         const subIssues = await github.getSubIssues(action.repo, issue.number);
-        const openDeps = subIssues.filter((s) => s.state === "OPEN");
-        const blocked = openDeps.length > 0;
+        const openSubDeps = subIssues.filter((s) => s.state === "OPEN");
+        const openBodyDeps = await github.getOpenBodyDependencies(action.repo, issue.body);
+
+        const allBlockers = [
+          ...openSubDeps.map((d) => `#${d.number}`),
+          ...openBodyDeps.map((n) => `#${n}`),
+        ];
+        // Deduplicate in case a dependency appears in both
+        const uniqueBlockers = [...new Set(allBlockers)];
+        const blocked = uniqueBlockers.length > 0;
         const status = blocked
-          ? `BLOCKED (by ${openDeps.map((d) => `#${d.number}`).join(", ")})`
+          ? `BLOCKED (by ${uniqueBlockers.join(", ")})`
           : "UNBLOCKED";
         const labels = issue.labels.length > 0 ? ` [${issue.labels.join(", ")}]` : "";
         lines.push(`  #${issue.number}: ${issue.title}${labels} — ${status}`);
@@ -180,28 +242,12 @@ export class ActionExecutor {
   ): Promise<string> {
     try {
       if (action.comment) {
-        await github.addComment(action.repo, action.issueNumber, action.comment);
+        await github.commentOnIssue(action.repo, action.issueNumber, action.comment);
       }
       await github.closeIssue(action.repo, action.issueNumber);
       return `[Issue Closed] #${action.issueNumber} (${action.repo})`;
     } catch (err) {
       return `[Close Issue Failed] ${err instanceof Error ? err.message : String(err)}`;
-    }
-  }
-
-  private async executeEditIssue(
-    action: Extract<BridgeAction, { action: "edit-issue" }>,
-  ): Promise<string> {
-    try {
-      await github.editIssue(action.repo, action.issueNumber, {
-        title: action.title,
-        body: action.body,
-        labels: action.labels,
-        comment: action.comment,
-      });
-      return `[Issue Updated] #${action.issueNumber} (${action.repo})`;
-    } catch (err) {
-      return `[Edit Issue Failed] ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
@@ -243,17 +289,28 @@ export class ActionExecutor {
         return `Created #${issue.number}: ${issue.title}`;
       }
       case "edit": {
-        await github.editIssue(repo, op.issueNumber, {
-          title: op.title,
-          body: op.body,
-          labels: op.labels,
-          comment: op.comment,
-        });
+        if (op.comment) {
+          await github.commentOnIssue(repo, op.issueNumber, op.comment);
+        }
+        const hasEditFields = op.title !== undefined || op.body !== undefined ||
+          (op.addLabels && op.addLabels.length > 0) ||
+          (op.removeLabels && op.removeLabels.length > 0);
+        if (hasEditFields) {
+          await github.editIssue(repo, op.issueNumber, {
+            title: op.title,
+            body: op.body,
+            addLabels: op.addLabels,
+            removeLabels: op.removeLabels,
+          });
+        }
+        if (op.parentIssue) {
+          await github.addSubIssue(repo, op.parentIssue, op.issueNumber);
+        }
         return `Updated #${op.issueNumber}`;
       }
       case "close": {
         if (op.comment) {
-          await github.addComment(repo, op.issueNumber, op.comment);
+          await github.commentOnIssue(repo, op.issueNumber, op.comment);
         }
         await github.closeIssue(repo, op.issueNumber);
         return `Closed #${op.issueNumber}`;

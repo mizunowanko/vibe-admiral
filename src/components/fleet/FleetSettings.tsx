@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings, Plus, Trash2, X } from "lucide-react";
+import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
+import { DirectoryPicker } from "./DirectoryPicker";
 import type { FleetRepo, FleetSkillSources } from "@/types";
 
 function PathListEditor({
@@ -77,6 +78,7 @@ export function FleetSettings() {
   const [name, setName] = useState(selectedFleet?.name ?? "");
   const [repos, setRepos] = useState<FleetRepo[]>(selectedFleet?.repos ?? []);
   const [newRepoPath, setNewRepoPath] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [skillSources, setSkillSources] = useState<FleetSkillSources>(
     selectedFleet?.skillSources ?? {},
   );
@@ -102,31 +104,42 @@ export function FleetSettings() {
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
   }, [selectedFleet]);
 
-  const handleSave = () => {
-    if (!name.trim()) return;
-    if (isNew) {
-      createFleet(name.trim(), repos);
-    } else {
-      updateFleet(selectedFleet.id, {
-        name: name.trim(),
-        repos,
-        skillSources,
-        sharedRulePaths,
-        bridgeRulePaths,
-        shipRulePaths,
-      });
+  const saveRepos = (nextRepos: FleetRepo[]) => {
+    if (!isNew && name.trim()) {
+      updateFleet(selectedFleet.id, { name: name.trim(), repos: nextRepos });
     }
   };
 
-  const handleAddRepo = () => {
-    const trimmed = newRepoPath.trim();
+  const handleCreate = () => {
+    if (!name.trim()) return;
+    createFleet(name.trim(), repos);
+  };
+
+  const handleSave = () => {
+    if (!name.trim() || isNew) return;
+    updateFleet(selectedFleet.id, {
+      name: name.trim(),
+      repos,
+      skillSources,
+      sharedRulePaths,
+      bridgeRulePaths,
+      shipRulePaths,
+    });
+  };
+
+  const addRepo = (path: string) => {
+    const trimmed = path.trim();
     if (!trimmed || repos.some((r) => r.localPath === trimmed)) return;
-    setRepos([...repos, { localPath: trimmed }]);
+    const nextRepos = [...repos, { localPath: trimmed }];
+    setRepos(nextRepos);
     setNewRepoPath("");
+    saveRepos(nextRepos);
   };
 
   const handleRemoveRepo = (localPath: string) => {
-    setRepos(repos.filter((r) => r.localPath !== localPath));
+    const nextRepos = repos.filter((r) => r.localPath !== localPath);
+    setRepos(nextRepos);
+    saveRepos(nextRepos);
   };
 
   return (
@@ -149,6 +162,11 @@ export function FleetSettings() {
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
+              onBlur={() => {
+                if (!isNew && name.trim() && name.trim() !== selectedFleet.name) {
+                  updateFleet(selectedFleet.id, { name: name.trim() });
+                }
+              }}
               placeholder="My Project Fleet"
             />
           </div>
@@ -190,19 +208,27 @@ export function FleetSettings() {
                   onChange={(e) => setNewRepoPath(e.target.value)}
                   placeholder="/path/to/local/repo"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddRepo();
+                    if (e.key === "Enter") addRepo(newRepoPath);
                   }}
                 />
                 <Button
                   variant="outline"
-                  size="sm"
-                  onClick={handleAddRepo}
-                  disabled={!newRepoPath.trim()}
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => setPickerOpen(true)}
+                  title="Browse..."
                 >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Add
+                  <FolderOpen className="h-4 w-4" />
                 </Button>
               </div>
+              <DirectoryPicker
+                open={pickerOpen}
+                onSelect={(path) => {
+                  addRepo(path);
+                  setPickerOpen(false);
+                }}
+                onCancel={() => setPickerOpen(false)}
+              />
             </div>
           </div>
 
@@ -273,17 +299,24 @@ export function FleetSettings() {
 
           {/* Actions */}
           <div className="flex gap-2 pt-4 border-t border-border">
-            <Button onClick={handleSave} disabled={!name.trim()}>
-              {isNew ? "Create Fleet" : "Save Changes"}
-            </Button>
-            {!isNew && (
-              <Button
-                variant="destructive"
-                onClick={() => deleteFleet(selectedFleet.id)}
-              >
-                <Trash2 className="h-3 w-3 mr-1" />
-                Delete Fleet
+            {isNew && (
+              <Button onClick={handleCreate} disabled={!name.trim()}>
+                Create Fleet
               </Button>
+            )}
+            {!isNew && (
+              <>
+                <Button onClick={handleSave}>
+                  Save Settings
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteFleet(selectedFleet.id)}
+                >
+                  <Trash2 className="h-3 w-3 mr-1" />
+                  Delete Fleet
+                </Button>
+              </>
             )}
           </div>
         </div>
