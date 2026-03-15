@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -26,9 +27,40 @@ function getStatusColor(content: string): string {
 }
 
 export function BridgeMessage({ message }: BridgeMessageProps) {
+  const [toolExpanded, setToolExpanded] = useState(false);
+  const [resultExpanded, setResultExpanded] = useState(false);
+
   const isUser = message.type === "user";
   const isError = message.type === "error";
   const isSystem = message.type === "system";
+
+  // Tool use — collapsible by default
+  if (message.type === "tool_use") {
+    return (
+      <div className="flex w-full justify-start">
+        <button
+          type="button"
+          className={cn(
+            "max-w-[90%] rounded border-l-2 border-muted-foreground/30 px-3 py-1.5 cursor-pointer select-none text-left",
+            "hover:bg-muted/30 transition-colors",
+          )}
+          onClick={() => setToolExpanded(!toolExpanded)}
+        >
+          <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
+            <span className="text-[10px]">{toolExpanded ? "▼" : "▶"}</span>
+            <span className="text-muted-foreground/70">
+              [{message.tool}]
+            </span>
+          </div>
+          {toolExpanded && message.content && message.content !== message.tool && (
+            <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground/80 mt-1.5 font-mono leading-relaxed">
+              {message.content}
+            </pre>
+          )}
+        </button>
+      </div>
+    );
+  }
 
   // Ship status inline badge
   if (isSystem && message.subtype === "ship-status") {
@@ -49,8 +81,15 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
     );
   }
 
-  // Action result
+  // Action result — collapsible when long
   if (isSystem && message.subtype === "action-result") {
+    const content = message.content ?? "";
+    const lines = content.split("\n");
+    const isLong = lines.length > 3;
+    const displayContent = !isLong || resultExpanded
+      ? content
+      : lines.slice(0, 2).join("\n") + "\n…";
+
     return (
       <div className="flex w-full justify-start">
         <div className="max-w-[90%] rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
@@ -58,8 +97,17 @@ export function BridgeMessage({ message }: BridgeMessageProps) {
             [Engine]
           </span>
           <pre className="whitespace-pre-wrap break-words text-card-foreground font-mono text-xs">
-            {message.content}
+            {displayContent}
           </pre>
+          {isLong && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground mt-1 underline underline-offset-2"
+              onClick={() => setResultExpanded(!resultExpanded)}
+            >
+              {resultExpanded ? "show less" : `show more (${lines.length - 2} more lines)`}
+            </button>
+          )}
         </div>
       </div>
     );
