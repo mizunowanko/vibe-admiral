@@ -8,7 +8,7 @@ test.describe.configure({ mode: "serial" });
  */
 async function resetMockEngine(page: Page) {
   await page.evaluate(() => {
-    const ws = new WebSocket("ws://localhost:9720");
+    const ws = new WebSocket("ws://localhost:9721");
     return new Promise<void>((resolve) => {
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "__test:reset" }));
