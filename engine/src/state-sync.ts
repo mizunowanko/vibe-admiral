@@ -141,10 +141,59 @@ export class StateSync {
 
       this.shipManager.updateStatus(shipId, "done");
     } else {
-      // Failed: rollback doing→todo, mark error
-      await this.rollbackLabel(ship.repo, ship.issueNumber);
-      this.shipManager.updateStatus(shipId, "error", "Process failed");
+      // Process exited without declaring done. Before marking as error,
+      // check if the issue was already closed (PR merged) on GitHub.
+      // This handles the race where Ship merges the PR but exits before
+      // sending the "done" status-transition request.
+      const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
+      if (rescued) {
+        console.log(
+          `[state-sync] Ship #${ship.issueNumber} exited as error but issue is already closed — treating as done`,
+        );
+        await this.removeWorktreeWithRetry(ship.worktreePath);
+        this.shipManager.updateStatus(shipId, "done");
+      } else {
+        // Genuinely failed: rollback doing→todo, mark error
+        await this.rollbackLabel(ship.repo, ship.issueNumber);
+        this.shipManager.updateStatus(shipId, "error", "Process failed");
+      }
     }
+  }
+
+  /**
+   * Check if an issue is already closed on GitHub (indicating the PR was merged).
+   * If closed, clean up the status label. Returns true if rescued.
+   */
+  private async rescueIfAlreadyDone(
+    repo: string,
+    issueNumber: number,
+  ): Promise<boolean> {
+    try {
+      const issue = await github.getIssue(repo, issueNumber);
+      if (issue.state === "closed") {
+        // Issue is closed — remove any leftover status/* label
+        const statusLabel = issue.labels.find((l) => l.startsWith("status/"));
+        if (statusLabel) {
+          try {
+            await github.updateLabels(repo, issueNumber, {
+              remove: statusLabel,
+            });
+          } catch (labelErr) {
+            console.warn(
+              `[state-sync] Failed to remove leftover label "${statusLabel}" from #${issueNumber}:`,
+              labelErr,
+            );
+          }
+        }
+        return true;
+      }
+    } catch (err) {
+      console.warn(
+        `[state-sync] Failed to check issue #${issueNumber} state for rescue:`,
+        err,
+      );
+    }
+    return false;
   }
 
   /**
