@@ -191,6 +191,10 @@ export class ShipManager {
   updateStatus(id: string, status: ShipStatus, detail?: string): void {
     const ship = this.ships.get(id);
     if (ship) {
+      // Defensive: clear acceptanceTest when leaving acceptance-test status
+      if (ship.status === "acceptance-test" && status !== "acceptance-test") {
+        ship.acceptanceTest = null;
+      }
       ship.status = status;
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
@@ -220,6 +224,21 @@ export class ShipManager {
     await mkdir(claudeDir, { recursive: true });
     const responseFile = join(claudeDir, "pr-review-response.json");
     await writeFile(responseFile, JSON.stringify(response, null, 2));
+  }
+
+  setAcceptanceTest(
+    shipId: string,
+    request: { url: string; checks: string[] },
+  ): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.acceptanceTest = request;
+  }
+
+  clearAcceptanceTest(shipId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.acceptanceTest = null;
   }
 
   respondToAcceptanceTest(

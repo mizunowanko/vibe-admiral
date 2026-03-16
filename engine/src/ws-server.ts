@@ -308,7 +308,7 @@ export class EngineServer {
       (shipId: string, request: { url: string; checks: string[] }) => {
         const ship = this.shipManager.getShip(shipId);
         if (ship) {
-          ship.acceptanceTest = request;
+          this.shipManager.setAcceptanceTest(shipId, request);
           this.shipManager.updateStatus(shipId, "acceptance-test");
           this.broadcast({
             type: "ship:acceptance-test",
@@ -575,7 +575,7 @@ export class EngineServer {
           // Transactional: sync GitHub label before updating internal state
           const acceptShip = this.shipManager.getShip(acceptId);
           if (acceptShip) {
-            acceptShip.acceptanceTest = null;
+            this.shipManager.clearAcceptanceTest(acceptId);
             try {
               await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");
               this.shipManager.updateStatus(acceptId, "merging");
@@ -597,7 +597,7 @@ export class EngineServer {
           // Transactional: sync GitHub label before updating internal state
           const rejectShip = this.shipManager.getShip(rejectId);
           if (rejectShip) {
-            rejectShip.acceptanceTest = null;
+            this.shipManager.clearAcceptanceTest(rejectId);
             try {
               await this.statusManager.syncPhaseLabel(rejectShip.repo, rejectShip.issueNumber, "implementing");
               this.shipManager.updateStatus(rejectId, "implementing");
