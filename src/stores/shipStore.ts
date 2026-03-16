@@ -13,6 +13,7 @@ interface ShipState {
   ships: Map<string, Ship>;
   shipLogs: Map<string, StreamMessage[]>;
   selectedShipId: string | null;
+  respondingTestIds: Set<string>;
 
   addShip: (ship: Partial<Ship> & { id: string; status: ShipStatus }) => void;
   setShipStatus: (id: string, status: ShipStatus, extra?: ShipStatusData) => void;
@@ -37,6 +38,7 @@ export const useShipStore = create<ShipState>((set) => ({
   ships: new Map(),
   shipLogs: new Map(),
   selectedShipId: null,
+  respondingTestIds: new Set(),
 
   addShip: (shipData) => {
     set((state) => {
@@ -95,7 +97,9 @@ export const useShipStore = create<ShipState>((set) => ({
           createdAt: new Date().toISOString(),
         });
       }
-      return { ships };
+      const respondingTestIds = new Set(state.respondingTestIds);
+      respondingTestIds.delete(id);
+      return { ships, respondingTestIds };
     });
   },
 
@@ -196,14 +200,17 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
   acceptTest: (id) => {
+    set((state) => ({
+      respondingTestIds: new Set(state.respondingTestIds).add(id),
+    }));
     wsClient.send({ type: "ship:accept", data: { id } });
-    // No optimistic update — Engine confirms status via ship:status message
-    // after GitHub label sync succeeds (transactional status transition).
   },
 
   rejectTest: (id, feedback) => {
+    set((state) => ({
+      respondingTestIds: new Set(state.respondingTestIds).add(id),
+    }));
     wsClient.send({ type: "ship:reject", data: { id, feedback } });
-    // No optimistic update — Engine confirms status via ship:status message.
   },
 
   stopShip: (id) => {
