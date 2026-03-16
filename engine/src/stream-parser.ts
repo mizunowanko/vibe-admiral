@@ -212,7 +212,12 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
     case "status-transition": {
       const status = r.status as string | undefined;
       if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;
-      return { request: "status-transition", status: status as ShipStatus };
+      const transition: { request: "status-transition"; status: ShipStatus; planCommentUrl?: string } = {
+        request: "status-transition",
+        status: status as ShipStatus,
+      };
+      if (typeof r.planCommentUrl === "string") transition.planCommentUrl = r.planCommentUrl;
+      return transition;
     }
 
     default:

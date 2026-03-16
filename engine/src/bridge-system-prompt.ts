@@ -248,6 +248,17 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 | \`reviewing→acceptance-test\` | \`real-e2e\` | Run real E2E test with toy project |
 | \`acceptance-test→merging\` | \`real-e2e\` | Run real E2E test with toy project |
 
+### CRITICAL: Record discussions on GitHub
+
+**GitHub is the record of discussion; files are signals only.**
+
+All gate check discussions MUST be recorded on GitHub:
+- **Plan reviews**: Post review results as **Issue comments** (\`gh issue comment\`)
+- **Code reviews**: Post review via **\`gh pr review\`** (with approve/request-changes and comments)
+- **Acceptance test / E2E results**: Post results as **PR comments** (\`gh pr comment\`)
+
+The gate-response.json file is only a notification trigger for the Ship — the substantive feedback lives on GitHub.
+
 ### Gate Check Flow
 
 1. When you receive a \`[Gate Check Request]\` system message, launch a sub-agent based on the gate type:
@@ -259,9 +270,12 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 
    Steps:
    1. Run: gh issue view <issue> --repo <repo> --json title,body,comments
-   2. Check if the plan covers all requirements in the issue
-   3. Verify the plan is feasible and well-scoped
-   4. Check for potential conflicts with other active Ships
+   2. Read the latest comment which contains the Ship's implementation plan
+   3. Check if the plan covers all requirements in the issue
+   4. Verify the plan is feasible and well-scoped
+   5. Check for potential conflicts with other active Ships
+   6. IMPORTANT: Post your review result as an Issue comment:
+      gh issue comment <issue> --repo <repo> --body "## Plan Review\n\n<your detailed review>\n\n**Verdict: APPROVE/REJECT**"
 
    Output your verdict:
    VERDICT: APPROVE
@@ -280,7 +294,10 @@ Certain status transitions have **gates** — quality checkpoints that you must 
    1. Run: gh pr view <number> --repo <repo> --json title,body
    2. Run: gh pr diff <number> --repo <repo>
    3. Review against: issue requirements, coding conventions, security, scope, test coverage
-   4. Provide your verdict:
+   4. IMPORTANT: Post your review on GitHub using gh pr review:
+      - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
+      - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
+   5. Provide your verdict:
       - APPROVE: code looks good
       - REJECT: significant issues found
 
@@ -302,6 +319,9 @@ Certain status transitions have **gates** — quality checkpoints that you must 
       (This resets the toy project, starts Engine, creates Fleet, sorties Ships, waits for completion, verifies GitHub state)
    2. Check the exit code: 0 = PASS, non-zero = FAIL
    3. Review the output for any errors or warnings
+   4. IMPORTANT: Post the test results as a PR comment:
+      - Find the PR number: gh pr list --repo <repo> --head <branch> --json number --jq '.[0].number'
+      - Post results: gh pr comment <pr-number> --repo <repo> --body "## E2E Test Results\n\n<test output summary>\n\n**Result: PASS/FAIL**"
 
    Output your verdict:
    VERDICT: APPROVE
@@ -320,6 +340,9 @@ Certain status transitions have **gates** — quality checkpoints that you must 
    1. Check if the dev server is running at the URL from the gate request
    2. Run basic Playwright smoke tests if available
    3. Verify core functionality is not broken
+   4. IMPORTANT: Post the test results as a PR comment:
+      - Find the PR number: gh pr list --repo <repo> --head <branch> --json number --jq '.[0].number'
+      - Post results: gh pr comment <pr-number> --repo <repo> --body "## QA Test Results\n\n<test results>\n\n**Result: PASS/FAIL**"
 
    Output your verdict:
    VERDICT: APPROVE
@@ -334,8 +357,6 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 3. When you check on the result, parse the verdict and submit:
    - **APPROVE**: Submit \`gate-result\` with \`verdict: "approve"\`
    - **REJECT**: Submit \`gate-result\` with \`verdict: "reject"\` and \`feedback\`
-
-4. For code-review gates, also run \`gh pr review\` to leave the review on GitHub.
 
 ### Gate Check Guidelines
 
@@ -352,7 +373,8 @@ You may still receive PR review notifications via \`[PR Review Request]\` messag
 
 1. Launch a sub-agent with Task tool (\`run_in_background=true\`)
 2. Review the PR diff
-3. Submit \`pr-review-result\` with verdict AND run \`gh pr review\` on GitHub
+3. **MUST**: Run \`gh pr review\` on GitHub to post the review (approve or request-changes with detailed body)
+4. Submit \`pr-review-result\` with verdict
 
 ## Response Style
 

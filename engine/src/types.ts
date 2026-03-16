@@ -168,7 +168,7 @@ export type BridgeRequest =
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
-  | { request: "status-transition"; status: ShipStatus };
+  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string };
 
 // === Admiral Request (union of Bridge + Ship requests) ===
 export type AdmiralRequest = BridgeRequest | ShipRequest;
