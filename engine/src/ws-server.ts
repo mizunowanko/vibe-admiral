@@ -883,7 +883,8 @@ export class EngineServer {
 
       if (response.gate) {
         // Gate check required — initiate gate flow instead of writing response
-        this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to);
+        const planCommentUrl = request.request === "status-transition" ? request.planCommentUrl : undefined;
+        this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl);
         // Write a "pending" response so Ship knows to wait
         await ShipRequestHandler.writeResponse(ship.worktreePath, {
           ok: false,
@@ -914,6 +915,7 @@ export class EngineServer {
     gateType: GateType,
     from: ShipStatus,
     to: ShipStatus,
+    planCommentUrl?: string,
   ): void {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
@@ -948,7 +950,7 @@ export class EngineServer {
     });
 
     // Build gate check message for Bridge
-    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType);
+    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType, planCommentUrl);
 
     // Inject into Bridge chat
     const bridgeMsg = {
@@ -971,19 +973,24 @@ export class EngineServer {
     ship: ShipProcess,
     transition: GateTransition,
     gateType: GateType,
+    planCommentUrl?: string,
   ): string {
     const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
     const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}`;
 
     switch (gateType) {
-      case "plan-review":
-        return `${header}\n${meta}\n\nThe Ship is requesting to move from planning to implementing. Please review the plan and approve or reject the transition.`;
+      case "plan-review": {
+        const planRef = planCommentUrl
+          ? `\nPlan comment: ${planCommentUrl}`
+          : "";
+        return `${header}\n${meta}${planRef}\n\nThe Ship has posted its implementation plan as an Issue comment. Please review the plan (read it from the Issue comments) and post your review result as an Issue comment as well. Then submit your verdict via \`gate-result\` admiral-request.`;
+      }
       case "code-review":
-        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nThe Ship is requesting code review. Please review the PR diff and submit your verdict via \`gate-result\` admiral-request.`;
+        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nThe Ship is requesting code review. Please review the PR diff, post your review via \`gh pr review\` on GitHub, and submit your verdict via \`gate-result\` admiral-request.`;
       case "playwright":
-        return `${header}\n${meta}\n\nThe Ship is requesting acceptance testing. Please run Playwright QA checks and submit your verdict via \`gate-result\` admiral-request.`;
+        return `${header}\n${meta}\n\nThe Ship is requesting acceptance testing. Please run Playwright QA checks, post the results as a PR comment via \`gh pr comment\`, and submit your verdict via \`gate-result\` admiral-request.`;
       case "real-e2e":
-        return `${header}\n${meta}\n\nThe Ship is requesting a real E2E QA gate check. Run the QA E2E test script using a toy project to verify the changes work end-to-end (Engine startup → Fleet creation → Ship sortie → completion). Submit your verdict via \`gate-result\` admiral-request.`;
+        return `${header}\n${meta}\n\nThe Ship is requesting a real E2E QA gate check. Run the QA E2E test script using a toy project to verify the changes work end-to-end (Engine startup → Fleet creation → Ship sortie → completion). Post the results as a PR comment via \`gh pr comment\`, and submit your verdict via \`gate-result\` admiral-request.`;
       case "human":
         return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
     }
