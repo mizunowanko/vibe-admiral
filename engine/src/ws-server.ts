@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import { readFile, writeFile, mkdir, stat, readdir, realpath, unlink } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
 import { join, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -1007,10 +1007,9 @@ export class EngineServer {
       },
     });
 
-    // Clean up gate-request.json and gate-response.json
-    const claudeDir = join(ship.worktreePath, ".claude");
-    unlink(join(claudeDir, "gate-request.json")).catch(() => {});
-    unlink(join(claudeDir, "gate-response.json")).catch(() => {});
+    // Gate files (gate-request.json, gate-response.json) are cleaned up by Ship
+    // after it reads the response. Engine must not delete them here — Ship polls
+    // with `sleep 2` and may miss the file if it's removed too quickly.
   }
 
   private onGateRejected(shipId: string, transition: GateTransition, feedback?: string): void {
