@@ -576,6 +576,10 @@ export class EngineServer {
           const acceptShip = this.shipManager.getShip(acceptId);
           if (acceptShip) {
             acceptShip.acceptanceTest = null;
+            // Resolve pending human gate if present (acceptance-test→merging)
+            if (acceptShip.gateCheck?.gateType === "human" && acceptShip.gateCheck.status === "pending") {
+              this.onGateApproved(acceptId, acceptShip.gateCheck.transition);
+            }
             try {
               await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");
               this.shipManager.updateStatus(acceptId, "merging");
@@ -929,6 +933,25 @@ export class EngineServer {
 
     // Set gate check state on the ship
     this.shipManager.setGateCheck(shipId, transition, gateType);
+
+    // Human gates are handled by the frontend Accept/Reject UI, not by Bridge.
+    // Skip file IPC and Bridge messaging — the acceptance-test-request.json /
+    // acceptance-test-response.json flow and ship:accept/ship:reject handlers
+    // will resolve this gate.
+    if (gateType === "human") {
+      this.broadcast({
+        type: "ship:gate-pending",
+        data: {
+          id: shipId,
+          transition,
+          gateType,
+          fleetId: ship.fleetId,
+          issueNumber: ship.issueNumber,
+          issueTitle: ship.issueTitle,
+        },
+      });
+      return;
+    }
 
     // Write gate-request.json for Ship to detect
     const gateRequest: GateFileRequest = {

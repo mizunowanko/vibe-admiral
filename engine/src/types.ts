@@ -34,7 +34,7 @@ export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
   "planning→implementing": "plan-review",
   "testing→reviewing": "code-review",
   "reviewing→acceptance-test": "real-e2e",
-  "acceptance-test→merging": "real-e2e",
+  "acceptance-test→merging": "human",
 };
 
 /** Status of a pending gate check. */

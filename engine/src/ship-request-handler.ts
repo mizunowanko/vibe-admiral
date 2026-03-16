@@ -87,7 +87,10 @@ export class ShipRequestHandler {
 
     // Check for gate on direct transition (from current → target)
     const gateType = resolveGate(ship.status, targetStatus, gateSettings);
-    if (gateType) {
+    if (gateType === "human" && ship.acceptanceTestApproved) {
+      // Human gate is already satisfied by the frontend Accept button flow.
+      // Skip gate initiation — the human has already approved.
+    } else if (gateType) {
       // If there's already a pending/approved gate for this exact transition, check it
       if (ship.gateCheck?.transition === `${ship.status}→${targetStatus}`) {
         if (ship.gateCheck.status === "approved") {
