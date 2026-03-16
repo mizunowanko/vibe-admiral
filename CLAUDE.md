@@ -5,7 +5,7 @@
 > 詳細は後述の「Admiral 連携アーキテクチャ」セクションを参照してください。
 
 Claude Code を使った並列開発を統括するデスクトップアプリ。
-複数リポにまたがる issue ベースの並列実装を自動化し、人間は受け入れテストのみ介入する「開発指揮システム」。
+複数リポにまたがる issue ベースの並列実装を自動化し、AI agent が品質を担保する「開発指揮システム」。
 
 > プロジェクトの哲学・ビジョン・解決する課題の詳細は [README.md](README.md) を参照。
 
@@ -77,6 +77,26 @@ skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 4. **LLM に任せるとブレる制御が確定的でない** → issue ラベル・worktree・ポート管理はスクリプトに移譲
 5. **CLI の stream-json 出力をそのまま全表示するとメモリを大量消費** → Engine 側でフィルタリング・要約し、フロントエンドにはステータス変化と重要メッセージのみ転送する設計が必要
 
+## 開発哲学: 事後フィードバックモデル
+
+> AI が大体の問題は発見してくれるから、基本的に人間は同期的に確認しない。
+> 人間は後で漏れたものにだけ気づいたら issue で伝える。
+
+### 原則
+
+- **QA agent が品質を担保する**。人間承認は Gate に含めない
+- **人間はフローのボトルネックにならない**。並列 sortie のスループットを最大化する
+- **完璧を同期的に求めるより、問題を非同期で回収する方が全体効率が高い**
+- **人間が発見した問題は新規 issue として起票し、次の sortie で修正する**
+
+### 背景
+
+従来の開発フローでは、コードレビューや受け入れテストで人間の同期的な承認を必須としていた。
+しかし並列 sortie を運用する環境では、人間の承認待ちが全体のスループットを著しく低下させる。
+
+vibe-admiral では Bridge sub-agent による自動 Gate（計画レビュー・コードレビュー・E2E テスト）で品質を担保し、
+人間は非同期的に結果を確認する。問題を発見した場合は新規 issue として起票し、次の sortie で修正する。
+
 ## コーディング規約
 
 dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/CLAUDE.md` を参照。
@@ -100,7 +120,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 | `status/implementing` | 実装中 |
 | `status/testing` | テスト中 |
 | `status/reviewing` | レビュー中 |
-| `status/acceptance-test` | 人間の承認待ち |
+| `status/acceptance-test` | 受け入れテスト中 |
 | `status/merging` | マージ中 |
 | `status/blocked` | 依存関係で着手不可（Bridge が付与可） |
 
