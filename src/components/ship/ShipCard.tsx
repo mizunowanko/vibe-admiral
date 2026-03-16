@@ -130,7 +130,7 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
             PR
           </a>
           {ship.prReviewStatus === "pending" && (
-            <span className="text-[10px] text-orange-400">Bridge review pending</span>
+            <span className="text-[10px] text-slate-400">Bridge review pending</span>
           )}
           {ship.prReviewStatus === "approved" && (
             <span className="text-[10px] text-green-400">Approved</span>
