@@ -86,13 +86,12 @@ test.describe("Fleet management", () => {
       .filter({ hasText: "Select Test Fleet" });
     await fleetButton.click();
 
-    // View switcher should appear (Bridge, Ships, Settings)
+    // Bridge view should appear with chat input
     await expect(
-      page.getByRole("button", { name: "Bridge", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Ships" }),
-    ).toBeVisible();
+      page.getByPlaceholder("Send a command to the Bridge..."),
+    ).toBeVisible({ timeout: 5000 });
+
+    // Settings button should appear in sidebar
     await expect(
       page.getByRole("button", { name: "Settings" }),
     ).toBeVisible();
@@ -129,20 +128,25 @@ test.describe("Bridge", () => {
   });
 });
 
-test.describe("Ships", () => {
+test.describe("Fleet settings", () => {
   test.beforeEach(async ({ page }) => {
     await resetMockEngine(page);
   });
 
-  test("shows ships view", async ({ page }) => {
+  test("opens settings view from sidebar", async ({ page }) => {
     await page.goto("/");
     await waitForConnection(page);
 
     // Create and select fleet
-    await createAndSelectFleet(page, "Ship Test Fleet");
+    await createAndSelectFleet(page, "Settings Test Fleet");
 
-    // Switch to Ships view
-    await page.getByRole("button", { name: "Ships" }).click();
+    // Click Settings button in sidebar
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    // Fleet settings should show the fleet name
+    await expect(page.getByText("Settings Test Fleet")).toBeVisible({
+      timeout: 5000,
+    });
   });
 });
 
@@ -180,13 +184,8 @@ async function createAndSelectFleet(page: Page, name: string) {
   const fleetButton = page.locator("button").filter({ hasText: name });
   await fleetButton.click();
 
-  // Wait for view switcher to appear
-  const bridgeButton = page.getByRole("button", {
-    name: "Bridge",
-    exact: true,
-  });
-  await expect(bridgeButton).toBeVisible({ timeout: 3000 });
-
-  // Switch to Bridge view
-  await bridgeButton.click();
+  // Wait for Bridge view to appear (fleet selection auto-navigates to bridge)
+  await expect(
+    page.getByPlaceholder("Send a command to the Bridge..."),
+  ).toBeVisible({ timeout: 5000 });
 }
