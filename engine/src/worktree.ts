@@ -55,8 +55,8 @@ export async function create(
   );
 }
 
-export async function remove(worktreePath: string): Promise<void> {
-  const repoRoot = await getRepoRoot(worktreePath).catch(() => null);
+export async function remove(worktreePath: string, knownRepoRoot?: string): Promise<void> {
+  const repoRoot = knownRepoRoot ?? await getRepoRoot(worktreePath).catch(() => null);
   if (!repoRoot) return;
 
   // Get the main repo root (first worktree listed)
@@ -97,8 +97,8 @@ export async function listFeatureWorktrees(repoRoot: string): Promise<Worktree[]
   return all.filter((w) => w.branch?.startsWith("feature/"));
 }
 
-export async function forceRemove(worktreePath: string): Promise<void> {
-  const repoRoot = await getRepoRoot(worktreePath).catch(() => null);
+export async function forceRemove(worktreePath: string, knownRepoRoot?: string): Promise<void> {
+  const repoRoot = knownRepoRoot ?? await getRepoRoot(worktreePath).catch(() => null);
   if (!repoRoot) return;
 
   const mainRoot = await git(["worktree", "list", "--porcelain"], repoRoot)

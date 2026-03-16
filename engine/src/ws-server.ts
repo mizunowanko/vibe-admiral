@@ -281,11 +281,15 @@ export class EngineServer {
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
         const ship = this.shipManager.getShip(id);
+        if (!ship) {
+          console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
+          return;
+        }
         // Ship explicitly declares "done" via admiral-request status-transition.
         // If the process exits while in "done" status, treat as success.
         // If in "merging" status (squash merge may kill the process), also treat as success.
         const successPhases = new Set(["done", "merging"]);
-        if (ship && successPhases.has(ship.status)) {
+        if (successPhases.has(ship.status)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else if (
           ship &&
@@ -686,7 +690,15 @@ export class EngineServer {
           break;
         }
         case "ship:stop": {
-          this.shipManager.stopShip(data.id as string);
+          const stopId = data.id as string;
+          const stopShip = this.shipManager.getShip(stopId);
+          this.shipManager.stopShip(stopId);
+          // Explicitly rollback label — don't rely solely on process exit handler
+          if (stopShip) {
+            this.stateSync.rollbackLabel(stopShip.repo, stopShip.issueNumber).catch((err) => {
+              console.warn(`[ws-server] Failed to rollback label on ship:stop for #${stopShip.issueNumber}:`, err);
+            });
+          }
           break;
         }
         case "ship:logs": {
