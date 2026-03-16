@@ -126,7 +126,6 @@ while [ ! -f .claude/gate-response.json ]; do
 done
 GATE_RESULT=$(cat .claude/gate-response.json)
 rm -f .claude/gate-response.json
-rm -f .claude/gate-request.json
 echo "$GATE_RESULT"
 ```
 
@@ -142,8 +141,8 @@ echo "$GATE_RESULT"
 |------|-----------|------|
 | `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
 | `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
-| `reviewing → acceptance-test` | playwright | Bridge が自動 QA を実施 |
-| `acceptance-test → merging` | human | 人間が UI で承認 |
+| `reviewing → acceptance-test` | real-e2e | Bridge が自動 QA を実施 |
+| `acceptance-test → merging` | real-e2e | Bridge が自動 QA を実施 |
 
 ### ステップ対応表
 
@@ -153,7 +152,7 @@ echo "$GATE_RESULT"
 | 4 (計画) | `planning` |
 | 5 (実装) | `implementing` |
 | 6 (ビルド検証) | `testing` |
-| 8 (テスト再実行) | `testing` |
+| 8 (テスト再実行) | （`testing` 継続、遷移表明なし） |
 | 9 (コミット & PR) | `reviewing` |
 | 11 (受け入れテスト) | `acceptance-test` |
 | 15 (マージ) | `merging` |
@@ -306,7 +305,7 @@ git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
    ## Changes
    <コミット内容の箇条書き>
 
-   Resolves #<Issue 番号>
+   Ref #<Issue 番号>
 
    ## Test plan
    <ビルド・テスト・リントコマンドの実行結果>
@@ -318,32 +317,36 @@ git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
 
 **PR が既に存在する場合**: 未 push のコミットがあれば `git push` のみ行う。
 
-PR URL をユーザーに報告して Step 10 へ進む。
+PR URL をユーザーに報告する。
 
-### Step 10: コードレビュー（CI 並行）
-
-push した時点で CI が走り始める。CI の完了を待たずにコードレビューを実施する。
-
-#### VIBE_ADMIRAL 設定時（Gate 方式）
-
-`testing → reviewing` の遷移表明時に Gate が発動し、Bridge が自動的にコードレビューを実施する。
-Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待機する。
+**`VIBE_ADMIRAL` 設定時**: PR 作成・push 後に `reviewing` への status-transition を表明する。
+`testing → reviewing` には code-review Gate があるため、Gate 待機フロー（前述）に入る。
 
 - `approved: true` → Step 11 へ進む
-- `approved: false` → `feedback` を読んで修正 → commit & push → 再度 `status-transition` で `reviewing` を表明
+- `approved: false` → PR レビューコメントに指摘が投稿されている。`gh pr view <pr-number> --repo "$REPO" --json reviews,comments` で確認し、修正 → commit & push → 再度 `status-transition` で `reviewing` を表明
 
-**注**: 従来の `pr-review-response.json` による Bridge レビュー方式は Gate に統合された。
+### Step 10: コードレビュー（VIBE_ADMIRAL 未設定時のみ）
 
-#### VIBE_ADMIRAL 未設定時
+**`VIBE_ADMIRAL` 設定時**: Step 9 の Gate でコードレビューは完了済み。このステップはスキップする。
+
+**`VIBE_ADMIRAL` 未設定時**:
 
 1. `/review-pr` スキルをバックグラウンドで起動する（Task ツール `run_in_background: true`）
 2. Step 11 へ進む
 
 ### Step 11: 受け入れテスト
 
-#### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
+#### VIBE_ADMIRAL 設定時（Gate + ファイル伝言板方式）
 
-1. 受け入れテストに到達したら、空きポートを取得してアプリを起動し、`.claude/acceptance-test-request.json` を作成:
+**`VIBE_ADMIRAL` 設定時**: `acceptance-test` への status-transition を表明する。
+`reviewing → acceptance-test` には real-e2e Gate があるため、Gate 待機フロー（前述）に入る。
+
+- `approved: true` → 受け入れテストに進む
+- `approved: false` → フィードバックに基づいて修正 → commit & push → 再度 `status-transition` で `acceptance-test` を表明
+
+Gate 承認後:
+
+1. 空きポートを取得してアプリを起動し、`.claude/acceptance-test-request.json` を作成:
    ```bash
    # 空きポートを動的に取得
    PORT=$(node -e "const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})")
@@ -415,23 +418,10 @@ gh pr checks "$PR_NUM" --watch
 **このステップを完了するまで絶対に Step 15 に進んではならない。**
 レビュー結果の確認はマージの前提条件である。レビューが未完了の場合は完了を待つこと。
 
-#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
+#### VIBE_ADMIRAL 設定時（Gate 方式）
 
-Step 10 で Bridge レビューの approve/request-changes の対応が完了している場合は、そのまま Step 15 へ進む。
-Step 10 で Bridge レビューをスキップした場合（レスポンスファイルが存在しない場合）は、待機する:
-
-```bash
-if [ ! -f .claude/pr-review-response.json ]; then
-  echo "Waiting for Bridge PR review..."
-  while [ ! -f .claude/pr-review-response.json ]; do
-    sleep 3
-  done
-fi
-cat .claude/pr-review-response.json
-```
-
-- `verdict: "approve"` → Step 15 へ
-- `verdict: "request-changes"` → 修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機
+Step 10 で `testing → reviewing` の Gate（code-review）が完了済み。追加の待機は不要。
+そのまま Step 15 へ進む。
 
 #### VIBE_ADMIRAL 未設定時
 
@@ -446,6 +436,12 @@ cat .claude/pr-review-response.json
 - **LGTM**: 指摘なし → Step 15 へ
 
 ### Step 15: マージ
+
+**`VIBE_ADMIRAL` 設定時**: `merging` への status-transition を表明する。
+`acceptance-test → merging` には real-e2e Gate があるため、Gate 待機フロー（前述）に入る。
+
+- `approved: true` → マージに進む
+- `approved: false` → フィードバックに基づいて修正 → commit & push → 再度 `status-transition` で `merging` を表明
 
 worktree 環境を前提とする。`--delete-branch` は付けない（`gh` がローカルで `git checkout` を試みて worktree と競合するため）。
 
@@ -523,7 +519,7 @@ CLAUDE.md の Conflict Risk Areas を参照すること。
 
 - `.env` は読み書きしない
 - 大きな変更は複数回に分けてコミットしてよい
-- GH Issue のラベル更新を忘れないこと
+- GH Issue のラベル更新を忘れないこと（`VIBE_ADMIRAL` 未設定時のみ。設定時は Engine が管理）
 - 各ステップで問題が発生したらその場で解決してから次に進む
 - ローカルでは関連テストのみ実行し、コンテキスト消費を最小限にする
 - 全テストの網羅的な確認は CI に委ねる
