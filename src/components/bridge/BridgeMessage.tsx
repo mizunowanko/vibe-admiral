@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import type { ImageAttachment, StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 import { getStatusColor } from "@/lib/ship-status";
+import { formatTime } from "@/lib/format-time";
 
 /** Convert base64 ImageAttachments to object URLs, revoking on cleanup. */
 function useImageObjectUrls(images: ImageAttachment[] | undefined): string[] {
@@ -40,12 +41,6 @@ const MARKDOWN_COMPONENTS = {
 interface BridgeMessageProps {
   message: StreamMessage;
   repeatCount?: number;
-}
-
-function formatTime(ts?: number): string | null {
-  if (!ts) return null;
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
