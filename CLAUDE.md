@@ -7,6 +7,8 @@
 Claude Code を使った並列開発を統括するデスクトップアプリ。
 複数リポにまたがる issue ベースの並列実装を自動化し、人間は受け入れテストのみ介入する「開発指揮システム」。
 
+> プロジェクトの哲学・ビジョン・解決する課題の詳細は [README.md](README.md) を参照。
+
 ## 用語
 
 Admiral(アプリ) → Fleet(艦隊=プロジェクト) → Bridge(艦橋=中央管理チャット) → Ship(艦=個別実装セッション) → Sortie(出撃=Ship起動)
@@ -66,6 +68,8 @@ skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 | Build | `npm run build` |
 
 ## このプロジェクトが解決する問題
+
+> 人間向けの課題説明は [README.md](README.md) を参照。以下は AI がコンテキストとして使用するための要約。
 
 1. **dev-shared の `/feature` と `/cleanup` が分離** → 手動で繋ぐのが面倒 → `/implement` で統合
 2. **Claude Code の plan mode 承認後にコンテキスト消失** → 後続ステップを忘れる → `workflow-state.json` で状態永続化
