@@ -59,14 +59,7 @@ export class StatusManager {
    * Read current issue status from GitHub labels.
    */
   async getStatus(repo: string, issueNumber: number): Promise<IssueStatus> {
-    const issue = await github.getIssue(repo, issueNumber);
-    if (issue.state === "closed") return "done";
-    // Check for any active status/* label (anything other than status/todo = doing)
-    const statusLabel = issue.labels.find((l) => l.startsWith("status/"));
-    if (statusLabel === "status/todo") return "todo";
-    if (statusLabel) return "doing";
-    // No recognized label — default to todo
-    return "todo";
+    return (await this.getStatusInfo(repo, issueNumber)).status;
   }
 
   /**
@@ -76,8 +69,22 @@ export class StatusManager {
     repo: string,
     issueNumber: number,
   ): Promise<string | undefined> {
+    return (await this.getStatusInfo(repo, issueNumber)).currentLabel;
+  }
+
+  /**
+   * Internal: fetch issue once and derive both status and current label.
+   */
+  private async getStatusInfo(
+    repo: string,
+    issueNumber: number,
+  ): Promise<{ status: IssueStatus; currentLabel: string | undefined }> {
     const issue = await github.getIssue(repo, issueNumber);
-    return issue.labels.find((l) => l.startsWith("status/"));
+    const currentLabel = issue.labels.find((l) => l.startsWith("status/"));
+    if (issue.state === "closed") return { status: "done", currentLabel };
+    if (currentLabel === "status/todo") return { status: "todo", currentLabel };
+    if (currentLabel) return { status: "doing", currentLabel };
+    return { status: "todo", currentLabel: undefined };
   }
 
   /**
@@ -98,7 +105,10 @@ export class StatusManager {
 
     this.pending.add(key);
     try {
-      const from = await this.getStatus(repo, issueNumber);
+      const { status: from, currentLabel } = await this.getStatusInfo(
+        repo,
+        issueNumber,
+      );
       if (from === to) return; // no-op
 
       const allowed = VALID_TRANSITIONS.get(from);
@@ -108,7 +118,7 @@ export class StatusManager {
         );
       }
 
-      await this.applyTransition(repo, issueNumber, to);
+      await this.applyTransition(repo, issueNumber, to, currentLabel);
     } finally {
       this.pending.delete(key);
     }
@@ -194,10 +204,8 @@ export class StatusManager {
     repo: string,
     issueNumber: number,
     to: IssueStatus,
+    currentLabel: string | undefined,
   ): Promise<void> {
-    // Find current status/* label to remove
-    const currentLabel = await this.getCurrentStatusLabel(repo, issueNumber);
-
     switch (to) {
       case "doing": {
         // todo → doing: remove "status/todo", add "status/implementing"
