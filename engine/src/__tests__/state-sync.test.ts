@@ -33,6 +33,9 @@ type MockShipManager = {
   updateStatus: ReturnType<typeof vi.fn>;
   getActiveShipIssueNumbers: ReturnType<typeof vi.fn>;
   purgeOrphanShips: ReturnType<typeof vi.fn>;
+  restoreFromDisk: ReturnType<typeof vi.fn>;
+  hasRunningProcess: ReturnType<typeof vi.fn>;
+  getAllShips: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -105,6 +108,9 @@ describe("StateSync", () => {
       updateStatus: vi.fn(),
       getActiveShipIssueNumbers: vi.fn().mockReturnValue([]),
       purgeOrphanShips: vi.fn(),
+      restoreFromDisk: vi.fn().mockResolvedValue(0),
+      hasRunningProcess: vi.fn().mockReturnValue(false),
+      getAllShips: vi.fn().mockReturnValue([]),
     };
     mockStatusManager = {
       getStatus: vi.fn(),

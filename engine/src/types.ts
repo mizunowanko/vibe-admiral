@@ -229,6 +229,20 @@ export interface ShipProcess {
   completedAt?: number;
 }
 
+// === Persisted Ship (subset for disk persistence across Engine restarts) ===
+export interface PersistedShip {
+  id: string;
+  fleetId: string;
+  repo: string;
+  issueNumber: number;
+  issueTitle: string;
+  worktreePath: string;
+  branchName: string;
+  sessionId: string | null;
+  status: ShipStatus;
+  createdAt: string;
+}
+
 // === Gate File IPC (Engine → Ship file message board) ===
 export interface GateFileRequest {
   transition: GateTransition;
