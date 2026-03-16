@@ -199,13 +199,14 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
       if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
       if (r.verdict !== "approve" && r.verdict !== "reject") return null;
-      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string } = {
+      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number } = {
         request: "gate-result",
         shipId: r.shipId,
         transition: r.transition as GateTransition,
         verdict: r.verdict,
       };
       if (typeof r.feedback === "string") gateResult.feedback = r.feedback;
+      if (typeof r.issueNumber === "number") gateResult.issueNumber = r.issueNumber;
       return gateResult;
     }
 

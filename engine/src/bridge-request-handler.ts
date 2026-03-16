@@ -109,7 +109,7 @@ export class BridgeRequestHandler {
           item.skill,
         );
         results.push(
-          `Ship ${ship.id.slice(0, 8)}... launched for ${item.repo}#${item.issueNumber} (${ship.issueTitle})`,
+          `Ship ${ship.id} launched for ${item.repo}#${item.issueNumber} (${ship.issueTitle})`,
         );
       } catch (err) {
         results.push(
@@ -128,7 +128,7 @@ export class BridgeRequestHandler {
     }
     const lines = ships.map(
       (s) =>
-        `  Ship ${s.id.slice(0, 8)}... #${s.issueNumber} (${s.issueTitle}): ${s.status}${s.gateCheck ? ` [gate: ${s.gateCheck.transition} ${s.gateCheck.status}]` : ""}`,
+        `  Ship ${s.id} #${s.issueNumber} (${s.issueTitle}): ${s.status}${s.gateCheck ? ` [gate: ${s.gateCheck.transition} ${s.gateCheck.status}]` : ""}`,
     );
     return `[Ship Status]\n${lines.join("\n")}`;
   }
@@ -136,9 +136,13 @@ export class BridgeRequestHandler {
   private handleShipStop(
     request: Extract<BridgeRequest, { request: "ship-stop" }>,
   ): string {
-    const killed = this.shipManager.stopShip(request.shipId);
+    const ship = this.shipManager.resolveShip(request.shipId);
+    if (!ship) {
+      return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
+    }
+    const killed = this.shipManager.stopShip(ship.id);
     if (killed) {
-      return `[Ship Stopped] ${request.shipId}`;
+      return `[Ship Stopped] ${ship.id}`;
     }
     return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
   }
@@ -146,12 +150,12 @@ export class BridgeRequestHandler {
   private handlePRReviewResult(
     request: Extract<BridgeRequest, { request: "pr-review-result" }>,
   ): string {
-    const ship = this.shipManager.getShip(request.shipId);
+    const ship = this.shipManager.resolveShip(request.shipId);
     if (!ship) {
       return `[PR Review Failed] Ship ${request.shipId} not found`;
     }
 
-    this.shipManager.respondToPRReview(request.shipId, {
+    this.shipManager.respondToPRReview(ship.id, {
       verdict: request.verdict,
       comments: request.comments,
     });
@@ -163,7 +167,7 @@ export class BridgeRequestHandler {
   private async handleGateResult(
     request: Extract<BridgeRequest, { request: "gate-result" }>,
   ): Promise<string> {
-    const ship = this.shipManager.getShip(request.shipId);
+    const ship = this.shipManager.resolveShip(request.shipId, request.issueNumber);
     if (!ship) {
       return `[Gate Result Failed] Ship ${request.shipId} not found`;
     }
@@ -178,7 +182,7 @@ export class BridgeRequestHandler {
 
     const approved = request.verdict === "approve";
     await this.shipManager.respondToGate(
-      request.shipId,
+      ship.id,
       approved,
       request.feedback,
     );
@@ -188,11 +192,11 @@ export class BridgeRequestHandler {
       const { to } = parseTransition(request.transition);
       if (this.shipRequestHandler) {
         const result = await this.shipRequestHandler.executeGatedTransition(
-          request.shipId,
+          ship.id,
           to,
         );
         if (result.ok) {
-          this.onGateApproved?.(request.shipId, request.transition);
+          this.onGateApproved?.(ship.id, request.transition);
           return `[Gate Approved] Ship #${ship.issueNumber}: ${request.transition} — transition confirmed`;
         }
         return `[Gate Approved but Transition Failed] Ship #${ship.issueNumber}: ${result.error}`;
@@ -200,7 +204,7 @@ export class BridgeRequestHandler {
       return `[Gate Approved] Ship #${ship.issueNumber}: ${request.transition}`;
     }
 
-    this.onGateRejected?.(request.shipId, request.transition, request.feedback);
+    this.onGateRejected?.(ship.id, request.transition, request.feedback);
     return `[Gate Rejected] Ship #${ship.issueNumber}: ${request.transition}${request.feedback ? ` — ${request.feedback}` : ""}`;
   }
 }

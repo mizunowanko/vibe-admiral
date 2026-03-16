@@ -127,6 +127,38 @@ export class ShipManager {
     return this.ships.get(shipId);
   }
 
+  /**
+   * Resolve a Ship by: exact UUID → prefix match → issueNumber fallback.
+   * Returns undefined if no match or if a prefix matches multiple ships.
+   */
+  resolveShip(shipId: string, issueNumber?: number): ShipProcess | undefined {
+    // 1. Exact match
+    const exact = this.ships.get(shipId);
+    if (exact) return exact;
+
+    // 2. Prefix match (only if shipId is shorter than a full UUID)
+    if (shipId.length < 36) {
+      const prefixMatches: ShipProcess[] = [];
+      for (const ship of this.ships.values()) {
+        if (ship.id.startsWith(shipId)) {
+          prefixMatches.push(ship);
+        }
+      }
+      if (prefixMatches.length === 1) return prefixMatches[0];
+    }
+
+    // 3. issueNumber fallback (active ships only)
+    if (issueNumber !== undefined) {
+      for (const ship of this.ships.values()) {
+        if (ship.issueNumber === issueNumber && ship.status !== "done" && ship.status !== "error") {
+          return ship;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
   getShipsByFleet(fleetId: string): ShipProcess[] {
     return Array.from(this.ships.values()).filter(
       (s) => s.fleetId === fleetId,
