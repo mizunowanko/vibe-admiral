@@ -164,7 +164,7 @@ export type BridgeRequest =
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
-  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string };
+  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
