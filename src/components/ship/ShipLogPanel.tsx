@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatTime } from "@/lib/format-time";
 
 interface ShipLogPanelProps {
   shipId: string;
@@ -98,6 +99,11 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
                   "text-muted-foreground",
               )}
             >
+              {log.timestamp && (
+                <span className="text-muted-foreground/50 select-none">
+                  {formatTime(log.timestamp)}{" "}
+                </span>
+              )}
               <span className="text-muted-foreground/50 select-none">
                 [{log.type}]
               </span>{" "}

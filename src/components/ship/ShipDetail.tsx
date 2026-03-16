@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
+import { formatTime } from "@/lib/format-time";
 
 interface ShipDetailProps {
   shipId: string;
@@ -115,6 +116,11 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
                     : "text-muted-foreground"
               }
             >
+              {log.timestamp && (
+                <span className="text-muted-foreground/50">
+                  {formatTime(log.timestamp)}{" "}
+                </span>
+              )}
               {log.tool && (
                 <span className="text-primary/60">[{log.tool}] </span>
               )}
