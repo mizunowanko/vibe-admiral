@@ -128,7 +128,7 @@ export class EngineServer {
           const pid = this.processManager.getPid(id);
           const connMsg = {
             type: "system" as const,
-            subtype: "bridge-status",
+            subtype: "bridge-status" as const,
             content: `Bridge CLI connected${pid ? ` (pid: ${pid})` : ""}`,
           };
           this.bridgeManager.addToHistory(fleetId, connMsg);
@@ -341,7 +341,7 @@ export class EngineServer {
         if (!hadData) {
           const errMsg = {
             type: "system" as const,
-            subtype: "bridge-status",
+            subtype: "bridge-status" as const,
             content: `Failed to start Bridge CLI: ${error.message}`,
           };
           this.bridgeManager.addToHistory(fleetId, errMsg);
@@ -374,7 +374,7 @@ export class EngineServer {
           // Also inject into Bridge chat
           const acceptanceMessage = {
             type: "system" as const,
-            subtype: "acceptance-test",
+            subtype: "acceptance-test" as const,
             content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
           };
           this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
@@ -407,7 +407,7 @@ export class EngineServer {
       if (ship) {
         const statusMessage = {
           type: "system" as const,
-          subtype: "ship-status",
+          subtype: "ship-status" as const,
           content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${detail ? ` — ${detail}` : ""}`,
         };
         this.bridgeManager.addToHistory(ship.fleetId, statusMessage);
@@ -511,7 +511,7 @@ export class EngineServer {
               // Notify frontend that bridge is starting (after successful launch)
               const startMsg = {
                 type: "system" as const,
-                subtype: "bridge-status",
+                subtype: "bridge-status" as const,
                 content: "Starting Bridge session...",
               };
               this.bridgeManager.addToHistory(fleetId, startMsg);
@@ -919,7 +919,7 @@ export class EngineServer {
 
         const resultMessage = {
           type: "system" as const,
-          subtype: "request-result",
+          subtype: "request-result" as const,
           content: result,
         };
         this.bridgeManager.addToHistory(fleetId, resultMessage);
@@ -933,7 +933,7 @@ export class EngineServer {
 
         const errorMessage = {
           type: "system" as const,
-          subtype: "request-result",
+          subtype: "request-result" as const,
           content: errorResult,
         };
         this.bridgeManager.addToHistory(fleetId, errorMessage);
@@ -1036,7 +1036,7 @@ export class EngineServer {
     // Inject into Bridge chat
     const bridgeMsg = {
       type: "system" as const,
-      subtype: "gate-check-request",
+      subtype: "gate-check-request" as const,
       content: gateMessage,
     };
     this.bridgeManager.addToHistory(ship.fleetId, bridgeMsg);
@@ -1172,7 +1172,7 @@ export class EngineServer {
     // Notify Bridge for code review
     const reviewMessage = {
       type: "system" as const,
-      subtype: "pr-review-request",
+      subtype: "pr-review-request" as const,
       content: `Ship #${ship.issueNumber} (${ship.issueTitle}) created PR #${prNumber}: ${prUrl}\nRepo: ${repo}\nShip ID: ${ship.id}\n\nPlease review the PR using \`gh pr diff ${prNumber} --repo ${repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
     };
     this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
@@ -1213,7 +1213,7 @@ export class EngineServer {
     if (isCompacting) {
       const compactMsg = {
         type: "system" as const,
-        subtype: "ship-status",
+        subtype: "ship-status" as const,
         content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
       };
       this.bridgeManager.addToHistory(ship.fleetId, compactMsg);
@@ -1247,7 +1247,7 @@ export class EngineServer {
     // Notify Bridge for re-review
     const reviewMessage = {
       type: "system" as const,
-      subtype: "pr-review-request",
+      subtype: "pr-review-request" as const,
       content: `Ship #${ship.issueNumber} (${ship.issueTitle}) pushed fixes to PR #${prNumber}: ${ship.prUrl}\nRepo: ${ship.repo}\nShip ID: ${ship.id}\n\nThe Ship has addressed the requested changes. Please re-review using \`gh pr diff ${prNumber} --repo ${ship.repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
     };
     this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
