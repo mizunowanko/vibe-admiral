@@ -55,9 +55,10 @@ test.describe("Fleet management", () => {
     // Fill in fleet name
     await page.getByPlaceholder("My Project Fleet").fill("Test Fleet Alpha");
 
-    // Add a repo
-    await page.getByPlaceholder("/path/to/local/repo").fill("/tmp/test-repo");
-    await page.getByRole("button", { name: "Add" }).click();
+    // Add a repo (press Enter to confirm the path)
+    const repoInput = page.getByPlaceholder("/path/to/local/repo");
+    await repoInput.fill("/tmp/test-repo");
+    await repoInput.press("Enter");
 
     // Repo should appear in the list
     await expect(page.getByText("/tmp/test-repo")).toBeVisible();
