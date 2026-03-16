@@ -82,14 +82,21 @@ export class StateSync {
 
   /**
    * Remove worktree with retry, falling back to forceRemove on failure.
+   * Accepts an optional repoRoot so that removal works even if the
+   * worktree directory has already been deleted.
    */
   async removeWorktreeWithRetry(
     worktreePath: string,
     maxRetries = 3,
+    repoRoot?: string,
   ): Promise<void> {
+    // Pre-resolve repoRoot so that later retries and forceRemove
+    // don't fail if the worktree directory disappears mid-cleanup.
+    const resolvedRoot = repoRoot ?? await worktree.getRepoRoot(worktreePath).catch(() => undefined);
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        await worktree.remove(worktreePath);
+        await worktree.remove(worktreePath, resolvedRoot);
         return;
       } catch (err) {
         if (attempt === maxRetries) {
@@ -97,7 +104,7 @@ export class StateSync {
             `[state-sync] Normal worktree remove failed after ${maxRetries + 1} attempts, trying force remove`,
           );
           try {
-            await worktree.forceRemove(worktreePath);
+            await worktree.forceRemove(worktreePath, resolvedRoot);
           } catch (forceErr) {
             console.error(
               `[state-sync] Force worktree remove also failed for ${worktreePath}:`,
@@ -134,13 +141,25 @@ export class StateSync {
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
-      try {
-        await this.statusManager.markDone(ship.repo, ship.issueNumber);
-      } catch (err) {
-        console.warn(
-          `[state-sync] Failed to mark #${ship.issueNumber} as done:`,
-          err,
-        );
+      // Retry markDone with exponential backoff for consistency with failure path
+      for (let attempt = 0; attempt <= 3; attempt++) {
+        try {
+          await this.statusManager.markDone(ship.repo, ship.issueNumber);
+          break;
+        } catch (err) {
+          if (attempt === 3) {
+            console.warn(
+              `[state-sync] Failed to mark #${ship.issueNumber} as done after ${attempt + 1} attempts:`,
+              err,
+            );
+          } else {
+            const delay = 500 * Math.pow(2, attempt);
+            console.warn(
+              `[state-sync] markDone attempt ${attempt + 1} failed for #${ship.issueNumber}, retrying in ${delay}ms`,
+            );
+            await sleep(delay);
+          }
+        }
       }
     } else {
       // Update in-memory status immediately so ship-status queries return
