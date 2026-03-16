@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import { writeFile } from "node:fs/promises";
-import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse, GateTransition, GateType, GateFileResponse } from "./types.js";
+import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse, GateTransition, GateType, GateFileResponse, PersistedShip } from "./types.js";
+
+const SHIPS_FILE = join(homedir(), ".vibe-admiral", "ships.json");
 
 const execFileAsync = promisify(execFile);
 
@@ -190,6 +192,10 @@ export class ShipManager {
     return active;
   }
 
+  hasRunningProcess(shipId: string): boolean {
+    return this.processManager.isRunning(shipId);
+  }
+
   updateStatus(id: string, status: ShipStatus, detail?: string): void {
     const ship = this.ships.get(id);
     if (ship) {
@@ -204,6 +210,7 @@ export class ShipManager {
       // Note: GitHub label sync is now handled transactionally by ShipRequestHandler.
       // This method only updates in-memory state and notifies the frontend.
       this.onStatusChange?.(id, status, detail);
+      this.persistToDisk();
     }
   }
 
@@ -355,6 +362,7 @@ export class ShipManager {
     }
     if (purged > 0) {
       console.log(`[ship-manager] Purged ${purged} orphan ship(s)`);
+      this.persistToDisk();
     }
     return purged;
   }
@@ -405,5 +413,88 @@ export class ShipManager {
       this.processManager.kill(id);
     }
     this.acceptanceWatcher.unwatchAll();
+  }
+
+  /**
+   * Persist active ships to disk so reconcileOnStartup can identify
+   * genuinely active ships after an Engine restart.
+   * Only ships with non-terminal statuses are persisted.
+   */
+  private persistToDisk(): void {
+    const active: PersistedShip[] = [];
+    for (const ship of this.ships.values()) {
+      if (ship.status !== "done" && ship.status !== "error") {
+        active.push({
+          id: ship.id,
+          fleetId: ship.fleetId,
+          repo: ship.repo,
+          issueNumber: ship.issueNumber,
+          issueTitle: ship.issueTitle,
+          worktreePath: ship.worktreePath,
+          branchName: ship.branchName,
+          sessionId: ship.sessionId,
+          status: ship.status,
+          createdAt: ship.createdAt,
+        });
+      }
+    }
+    // Fire-and-forget: persistence is best-effort, don't block the caller
+    const dir = join(homedir(), ".vibe-admiral");
+    mkdir(dir, { recursive: true })
+      .then(() => writeFile(SHIPS_FILE, JSON.stringify(active, null, 2)))
+      .catch((err) => {
+        console.warn("[ship-manager] Failed to persist ships to disk:", err);
+      });
+  }
+
+  /**
+   * Restore ships from disk persistence file.
+   * Called during startup reconciliation to recover active ship data
+   * that was lost when the Engine process restarted.
+   * Restored ships are added to the in-memory Map so that
+   * getActiveShipIssueNumbers() returns them during reconciliation.
+   */
+  async restoreFromDisk(): Promise<number> {
+    try {
+      const content = await readFile(SHIPS_FILE, "utf-8");
+      const persisted = JSON.parse(content) as PersistedShip[];
+      let restored = 0;
+      for (const ps of persisted) {
+        // Skip if a ship with this ID already exists in memory
+        if (this.ships.has(ps.id)) continue;
+        // Only restore ships that had active (non-terminal) statuses
+        if (ps.status === "done" || ps.status === "error") continue;
+
+        const ship: ShipProcess = {
+          id: ps.id,
+          fleetId: ps.fleetId,
+          repo: ps.repo,
+          issueNumber: ps.issueNumber,
+          issueTitle: ps.issueTitle,
+          worktreePath: ps.worktreePath,
+          branchName: ps.branchName,
+          sessionId: ps.sessionId,
+          status: ps.status,
+          isCompacting: false,
+          prUrl: null,
+          prReviewStatus: null,
+          acceptanceTest: null,
+          acceptanceTestApproved: false,
+          gateCheck: null,
+          errorType: null,
+          retryCount: 0,
+          createdAt: ps.createdAt,
+        };
+        this.ships.set(ps.id, ship);
+        restored++;
+      }
+      if (restored > 0) {
+        console.log(`[ship-manager] Restored ${restored} ship(s) from disk`);
+      }
+      return restored;
+    } catch {
+      // File doesn't exist or is invalid — normal on first run
+      return 0;
+    }
   }
 }

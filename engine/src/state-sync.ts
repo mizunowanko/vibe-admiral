@@ -229,6 +229,11 @@ export class StateSync {
   ): Promise<void> {
     console.log("[state-sync] Running startup reconciliation...");
 
+    // Restore persisted ships from disk before any cleanup.
+    // This ensures getActiveShipIssueNumbers() returns ships that were active
+    // when the Engine last shut down, preventing false orphan detection.
+    await this.shipManager.restoreFromDisk();
+
     // Purge completed/error ships with no running process (ghosts from previous runs)
     this.shipManager.purgeOrphanShips();
 
@@ -287,6 +292,22 @@ export class StateSync {
           `[state-sync] Failed to audit worktrees for ${repo.localPath}:`,
           err,
         );
+      }
+    }
+
+    // 3. Mark restored ships (from disk) that have no running process as "error".
+    // Their worktrees and labels were protected during reconciliation above.
+    // Now mark them so the UI shows they were interrupted by an Engine restart.
+    for (const ship of this.shipManager.getAllShips()) {
+      if (
+        ship.status !== "done" &&
+        ship.status !== "error" &&
+        !this.shipManager.hasRunningProcess(ship.id)
+      ) {
+        console.warn(
+          `[state-sync] Ship #${ship.issueNumber} (${ship.id.slice(0, 8)}...) has no running process — marking as error`,
+        );
+        this.shipManager.updateStatus(ship.id, "error", "Engine restarted — no running process");
       }
     }
 
