@@ -88,6 +88,15 @@ export interface Issue {
 }
 
 // === Stream Message (Claude Code stream-json output) ===
+export type StreamMessageSubtype =
+  | "ship-status"
+  | "compact-status"
+  | "bridge-status"
+  | "acceptance-test"
+  | "request-result"
+  | "pr-review-request"
+  | "gate-check-request";
+
 export interface StreamMessage {
   type:
     | "assistant"
@@ -102,7 +111,7 @@ export interface StreamMessage {
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
-  subtype?: string;
+  subtype?: StreamMessageSubtype;
   timestamp?: number;
   toolUseId?: string;
   images?: ImageAttachment[];

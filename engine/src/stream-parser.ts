@@ -1,4 +1,4 @@
-import type { StreamMessage, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus, GateTransition } from "./types.js";
+import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus, GateTransition } from "./types.js";
 import { GATE_TRANSITIONS } from "./gate-config.js";
 
 interface ContentBlock {
@@ -104,7 +104,7 @@ export function parseStreamMessage(
       }
       return {
         type: "system",
-        subtype,
+        subtype: subtype as StreamMessageSubtype | undefined,
         content: (raw.content as string) ?? subtype ?? "system",
       };
     }

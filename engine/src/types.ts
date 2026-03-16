@@ -114,12 +114,21 @@ export interface Issue {
 }
 
 // === Stream Message ===
+export type StreamMessageSubtype =
+  | "ship-status"
+  | "compact-status"
+  | "bridge-status"
+  | "acceptance-test"
+  | "request-result"
+  | "pr-review-request"
+  | "gate-check-request";
+
 export interface StreamMessage {
   type: string;
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
-  subtype?: string;
+  subtype?: StreamMessageSubtype;
   [key: string]: unknown;
 }
 
