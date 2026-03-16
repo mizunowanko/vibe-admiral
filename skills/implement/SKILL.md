@@ -354,7 +354,7 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
    # dev server が実際にポートを listen するまで待機（30秒タイムアウト）
    echo "Waiting for dev server to start on port $PORT..."
    for i in $(seq 1 30); do
-     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[0-9]'; then
+     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[1-9]'; then
        echo "Dev server is ready on port $PORT"
        break
      fi
@@ -403,7 +403,7 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
    ```bash
    echo "Waiting for dev server to start on port $PORT..."
    for i in $(seq 1 30); do
-     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[0-9]'; then
+     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[1-9]'; then
        echo "Dev server is ready on port $PORT"
        break
      fi
