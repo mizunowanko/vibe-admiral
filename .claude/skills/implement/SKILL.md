@@ -74,6 +74,84 @@ echo "${VIBE_ADMIRAL:-not_set}"
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
 
+## ステータス遷移（admiral-request プロトコル）
+
+**`VIBE_ADMIRAL` 設定時のみ有効。**
+Ship はステータス遷移を admiral-request ブロックで Engine に表明する。
+Engine は GitHub ラベル更新に成功した場合のみ遷移を確定し、結果を `.claude/admiral-request-response.json` に書き込む。
+
+### 遷移の表明手順
+
+**各ステップの冒頭で**、以下のコードブロックを assistant テキストとして出力する:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "<phase-name>" }
+```
+````
+
+出力後、Engine からのレスポンスを確認する:
+
+```bash
+# Wait for Engine response
+while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
+RESPONSE=$(cat .claude/admiral-request-response.json)
+rm -f .claude/admiral-request-response.json
+echo "$RESPONSE"
+```
+
+- `ok: true` → 遷移確定、次の作業に進む
+- `ok: false` (Gate なし) → `error` フィールドを確認して対処
+- `ok: false` + `error` に "Gate check initiated" を含む → Gate 待機フローに入る
+
+### Gate 待機フロー
+
+特定のステータス遷移には Gate（関門）が設定されている。Gate 付き遷移を表明した場合、
+Engine は `ok: false` を返し、Bridge sub-agent が品質チェックを実施する。
+Ship は `.claude/gate-response.json` の出現を待機する:
+
+```bash
+echo "Gate check initiated. Waiting for Bridge approval..."
+rm -f .claude/admiral-request-response.json
+while [ ! -f .claude/gate-response.json ]; do
+  sleep 2
+done
+GATE_RESULT=$(cat .claude/gate-response.json)
+rm -f .claude/gate-response.json
+rm -f .claude/gate-request.json
+echo "$GATE_RESULT"
+```
+
+- `approved: true` → Gate 承認。Engine が自動でステータスを確定する。次の作業に進む
+- `approved: false` → Gate 拒否。`feedback` を確認して修正し、再度 `status-transition` を表明する
+
+### Gate 付き遷移の一覧
+
+| 遷移 | Gate タイプ | 内容 |
+|------|-----------|------|
+| `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
+| `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
+| `reviewing → acceptance-test` | real-e2e | Bridge が toy project で real E2E テストを実施 |
+| `acceptance-test → merging` | real-e2e | Bridge が toy project で real E2E テストを実施 |
+
+### ステップ対応表
+
+| Step | ステータス (`status`) |
+|------|---------------------|
+| 3 (調査) | `investigating` |
+| 4 (計画) | `planning` |
+| 5 (実装) | `implementing` |
+| 6 (ビルド検証) | `testing` |
+| 8 (テスト再実行) | `testing` |
+| 9 (コミット & PR) | `reviewing` |
+| 11 (受け入れテスト) | `acceptance-test` |
+| 15 (マージ) | `merging` |
+| 15.5 (完了) | `done` |
+
+### `VIBE_ADMIRAL` 未設定時
+
+admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。
+
 ## ワークフロー
 
 ### Step 1: GH Issue の特定
@@ -210,12 +288,22 @@ PR URL をユーザーに報告して Step 10 へ進む。
 
 push した時点で CI が走り始める。CI の完了を待たずにコードレビューを実施する。
 
+#### VIBE_ADMIRAL 設定時（Gate 方式）
+
+`testing → reviewing` の遷移表明時に Gate が発動し、Bridge が自動的にコードレビューを実施する。
+Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待機する。
+
+- `approved: true` → Step 11 へ進む
+- `approved: false` → `feedback` を読んで修正 → commit & push → 再度 `status-transition` で `reviewing` を表明
+
+**注**: 従来の `pr-review-response.json` による Bridge レビュー方式は Gate に統合された。
+
+#### VIBE_ADMIRAL 未設定時
+
 1. `/review-pr` スキルをバックグラウンドで起動する（Task ツール `run_in_background: true`）
 2. Step 11 へ進む
 
 ### Step 11: 受け入れテスト
-
-**Native プロジェクトの場合**: このステップをスキップして Step 12 へ進む。
 
 #### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
 
@@ -291,6 +379,26 @@ gh pr checks "$PR_NUM" --watch
 **このステップを完了するまで絶対に Step 15 に進んではならない。**
 レビュー結果の確認はマージの前提条件である。レビューが未完了の場合は完了を待つこと。
 
+#### VIBE_ADMIRAL 設定時（Bridge レビュー方式）
+
+Step 10 で Bridge レビューの approve/request-changes の対応が完了している場合は、そのまま Step 15 へ進む。
+Step 10 で Bridge レビューをスキップした場合（レスポンスファイルが存在しない場合）は、待機する:
+
+```bash
+if [ ! -f .claude/pr-review-response.json ]; then
+  echo "Waiting for Bridge PR review..."
+  while [ ! -f .claude/pr-review-response.json ]; do
+    sleep 3
+  done
+fi
+cat .claude/pr-review-response.json
+```
+
+- `verdict: "approve"` → Step 15 へ
+- `verdict: "request-changes"` → 修正 → commit & push → `rm -f .claude/pr-review-response.json` → 再度待機
+
+#### VIBE_ADMIRAL 未設定時
+
 バックグラウンドのレビュー結果を確認する（Read ツールで output_file を確認）。
 レビューエージェントがまだ実行中の場合は、完了するまで待機する（output_file を定期的に確認）。
 
@@ -311,7 +419,21 @@ gh pr merge "$PR_NUM" --squash
 
 - マージ後に `already used by worktree` エラーが出ても、`gh pr view --json state --jq '.state'` が `MERGED` なら無視してよい
 
-### Step 15.5: 掃除
+### Step 15.5: 完了表明と掃除
+
+**`VIBE_ADMIRAL` 設定時**: まず `done` ステータスを表明する:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "done" }
+```
+````
+
+```bash
+while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
+cat .claude/admiral-request-response.json
+rm -f .claude/admiral-request-response.json
+```
 
 1. workflow-state.json の削除:
    ```bash

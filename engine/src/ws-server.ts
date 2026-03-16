@@ -982,6 +982,8 @@ export class EngineServer {
         return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nThe Ship is requesting code review. Please review the PR diff and submit your verdict via \`gate-result\` admiral-request.`;
       case "playwright":
         return `${header}\n${meta}\n\nThe Ship is requesting acceptance testing. Please run Playwright QA checks and submit your verdict via \`gate-result\` admiral-request.`;
+      case "real-e2e":
+        return `${header}\n${meta}\n\nThe Ship is requesting a real E2E QA gate check. Run the QA E2E test script using a toy project to verify the changes work end-to-end (Engine startup → Fleet creation → Ship sortie → completion). Submit your verdict via \`gate-result\` admiral-request.`;
       case "human":
         return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
     }

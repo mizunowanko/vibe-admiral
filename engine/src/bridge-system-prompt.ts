@@ -245,8 +245,8 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 |------------|-----------|---------------|
 | \`planning→implementing\` | \`plan-review\` | Review the Ship's implementation plan for completeness and feasibility |
 | \`testing→reviewing\` | \`code-review\` | Review the PR diff for quality, conventions, and correctness |
-| \`reviewing→acceptance-test\` | \`playwright\` | Run automated QA checks (Web apps) |
-| \`acceptance-test→merging\` | \`human\` | Human approval via UI (no Bridge action needed) |
+| \`reviewing→acceptance-test\` | \`real-e2e\` | Run real E2E test with toy project |
+| \`acceptance-test→merging\` | \`real-e2e\` | Run real E2E test with toy project |
 
 ### Gate Check Flow
 
@@ -292,7 +292,26 @@ Certain status transitions have **gates** — quality checkpoints that you must 
    \`)
    \`\`\`
 
-   **For playwright gates:** (Web apps only)
+   **For real-e2e gates:**
+   \`\`\`
+   Task(description="Real E2E QA for Ship #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
+   Run the real E2E QA test to verify the Ship's changes work end-to-end.
+
+   Steps:
+   1. Run: npx tsx e2e/qa-gate-e2e.ts
+      (This resets the toy project, starts Engine, creates Fleet, sorties Ships, waits for completion, verifies GitHub state)
+   2. Check the exit code: 0 = PASS, non-zero = FAIL
+   3. Review the output for any errors or warnings
+
+   Output your verdict:
+   VERDICT: APPROVE
+   or
+   VERDICT: REJECT
+   FEEDBACK: <what failed, including relevant error output>
+   \`)
+   \`\`\`
+
+   **For playwright gates:** (Web apps only, legacy — prefer real-e2e)
    \`\`\`
    Task(description="QA check for Ship #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
    Run QA checks for the Ship's changes.
