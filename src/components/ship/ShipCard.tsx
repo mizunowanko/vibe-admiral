@@ -3,15 +3,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, isSafeUrl } from "@/lib/utils";
 import { STATUS_CONFIG } from "@/lib/ship-status";
-import { Square, ExternalLink } from "lucide-react";
+import { Square, ExternalLink, RotateCcw } from "lucide-react";
 
 interface ShipCardProps {
   ship: Ship;
   onSelect: () => void;
   onStop: () => void;
+  onRetry?: () => void;
 }
 
-export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
+export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
   const config = STATUS_CONFIG[ship.status];
   const isActive = ship.status !== "done" && ship.status !== "error";
 
@@ -60,6 +61,20 @@ export function ShipCard({ ship, onSelect, onStop }: ShipCardProps) {
             }}
           >
             <Square className="h-3 w-3" />
+          </Button>
+        )}
+        {ship.status === "error" && onRetry && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-primary"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry();
+            }}
+          >
+            <RotateCcw className="h-3 w-3" />
+            Retry
           </Button>
         )}
       </div>

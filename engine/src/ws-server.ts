@@ -17,6 +17,7 @@ import { BridgeRequestHandler } from "./bridge-request-handler.js";
 import * as github from "./github.js";
 import {
   parseStreamMessage,
+  extractSessionId,
   extractRequests,
   stripRequestBlocks,
   isBridgeRequest,
@@ -45,6 +46,12 @@ export class EngineServer {
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
   private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+  private rateLimitedShips = new Set<string>();
+
+  /** Max auto-retry attempts for rate-limited Ships. */
+  private static readonly MAX_RATE_LIMIT_RETRIES = 3;
+  /** Base delay for exponential backoff (ms). */
+  private static readonly RATE_LIMIT_BASE_DELAY_MS = 2_000;
 
   /** Gate checks pending longer than this are auto-rejected (ms). */
   private static readonly GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -184,6 +191,18 @@ export class EngineServer {
           }
         }
       } else {
+        // Extract sessionId from init messages (before parsing drops them)
+        const sessionId = extractSessionId(msg);
+        if (sessionId) {
+          const ship = this.shipManager.getShip(id);
+          if (ship && !ship.sessionId) {
+            ship.sessionId = sessionId;
+            console.log(
+              `[ws-server] Ship ${id.slice(0, 8)}... sessionId captured: ${sessionId.slice(0, 12)}...`,
+            );
+          }
+        }
+
         // Detect compact status changes from raw message (before parsing)
         this.detectCompactStatus(id, msg);
 
@@ -268,11 +287,48 @@ export class EngineServer {
         const successPhases = new Set(["done", "merging"]);
         if (ship && successPhases.has(ship.status)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
+        } else if (
+          ship &&
+          this.rateLimitedShips.has(id) &&
+          ship.sessionId &&
+          ship.retryCount < EngineServer.MAX_RATE_LIMIT_RETRIES
+        ) {
+          // Rate-limited Ship with sessionId — auto-retry with backoff
+          this.rateLimitedShips.delete(id);
+          ship.retryCount++;
+          const delay = EngineServer.RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, ship.retryCount - 1);
+          console.log(
+            `[ws-server] Ship ${id.slice(0, 8)}... scheduling rate-limit retry #${ship.retryCount} in ${delay}ms`,
+          );
+          this.shipManager.updateStatus(id, ship.status, `Rate limited — retrying in ${Math.round(delay / 1000)}s (attempt ${ship.retryCount}/${EngineServer.MAX_RATE_LIMIT_RETRIES})`);
+          setTimeout(() => {
+            this.processManager.resumeSession(
+              id,
+              ship.sessionId!,
+              "The previous session was interrupted by a rate limit error. Continue from where you left off.",
+              ship.worktreePath,
+            );
+            console.log(
+              `[ws-server] Ship ${id.slice(0, 8)}... resumed after rate-limit (attempt ${ship.retryCount})`,
+            );
+          }, delay);
         } else {
           // Process exited without declaring done — treat as failure
+          this.rateLimitedShips.delete(id);
           this.stateSync.onProcessExit(id, false).catch(console.error);
         }
       }
+    });
+
+    this.processManager.on("rate-limit", (id: string) => {
+      if (id.startsWith("bridge-")) return;
+      const ship = this.shipManager.getShip(id);
+      if (!ship) return;
+      ship.errorType = "rate_limit";
+      this.rateLimitedShips.add(id);
+      console.warn(
+        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit (retry ${ship.retryCount}/${EngineServer.MAX_RATE_LIMIT_RETRIES})`,
+      );
     });
 
     this.processManager.on("error", (id: string, error: Error) => {
@@ -606,6 +662,26 @@ export class EngineServer {
               // Still update internal state — the Ship already received the reject response
               this.shipManager.updateStatus(rejectId, "implementing");
             }
+          }
+          break;
+        }
+        case "ship:retry": {
+          const retryId = data.id as string;
+          const retryShip = this.shipManager.getShip(retryId);
+          if (!retryShip || retryShip.status !== "error") {
+            throw new Error(`Ship "${retryId}" is not in error state`);
+          }
+
+          // Load ship rules for re-sortie fallback
+          const retriedFleets = await this.loadFleets();
+          const retryFleet = retriedFleets.find((f) => f.id === retryShip.fleetId);
+          const retrySharedRules = await this.loadRules(retryFleet?.sharedRulePaths ?? []);
+          const retryShipRules = await this.loadRules(retryFleet?.shipRulePaths ?? []);
+          const retryExtraPrompt = [retrySharedRules, retryShipRules].filter(Boolean).join("\n\n") || undefined;
+
+          const result = this.shipManager.retryShip(retryId, retryExtraPrompt);
+          if (!result) {
+            throw new Error(`Failed to retry Ship "${retryId}"`);
           }
           break;
         }

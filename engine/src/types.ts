@@ -11,6 +11,9 @@ export type ShipStatus =
   | "done"
   | "error";
 
+/** Classification of Ship error cause. */
+export type ShipErrorType = "rate_limit" | "unknown";
+
 // === Gate ===
 
 /** A transition key in the format "from→to" (using full-width arrow). */
@@ -96,6 +99,8 @@ export interface Ship {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  errorType: ShipErrorType | null;
+  retryCount: number;
   createdAt: string;
 }
 
@@ -209,6 +214,8 @@ export interface ShipProcess {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  errorType: ShipErrorType | null;
+  retryCount: number;
   createdAt: string;
   completedAt?: number;
 }

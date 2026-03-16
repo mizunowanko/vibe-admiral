@@ -10,6 +10,20 @@ interface ContentBlock {
 }
 
 /**
+ * Extract sessionId from a raw init message.
+ * Returns the sessionId string if this is an init message, null otherwise.
+ * Must be called BEFORE parseStreamMessage (which drops init messages).
+ */
+export function extractSessionId(
+  raw: Record<string, unknown>,
+): string | null {
+  if (raw.type !== "system") return null;
+  if (raw.subtype !== "init") return null;
+  const sessionId = raw.session_id as string | undefined;
+  return sessionId ?? null;
+}
+
+/**
  * Transform raw Claude CLI stream-json output into a StreamMessage
  * that the frontend can display.
  *
