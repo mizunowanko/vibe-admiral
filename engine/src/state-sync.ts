@@ -127,6 +127,10 @@ export class StateSync {
     ship.isCompacting = false;
 
     if (succeeded) {
+      // Update in-memory status immediately so ship-status queries return
+      // the correct state while async GitHub operations are in progress.
+      this.shipManager.updateStatus(shipId, "done");
+
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
@@ -138,11 +142,13 @@ export class StateSync {
           err,
         );
       }
-
-      this.shipManager.updateStatus(shipId, "done");
     } else {
-      // Process exited without declaring done. Before marking as error,
-      // check if the issue was already closed (PR merged) on GitHub.
+      // Update in-memory status immediately so ship-status queries return
+      // "error" while async GitHub operations (rescue check, label rollback)
+      // are in progress. May be overridden to "done" if rescue succeeds.
+      this.shipManager.updateStatus(shipId, "error", "Process exited");
+
+      // Check if the issue was already closed (PR merged) on GitHub.
       // This handles the race where Ship merges the PR but exits before
       // sending the "done" status-transition request.
       const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
@@ -153,9 +159,8 @@ export class StateSync {
         await this.removeWorktreeWithRetry(ship.worktreePath);
         this.shipManager.updateStatus(shipId, "done");
       } else {
-        // Genuinely failed: rollback doing→todo, mark error
+        // Genuinely failed: rollback doing→todo
         await this.rollbackLabel(ship.repo, ship.issueNumber);
-        this.shipManager.updateStatus(shipId, "error", "Process failed");
       }
     }
   }
