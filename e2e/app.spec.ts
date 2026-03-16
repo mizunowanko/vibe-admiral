@@ -93,7 +93,7 @@ test.describe("Fleet management", () => {
 
     // Settings button should appear in sidebar
     await expect(
-      page.getByRole("button", { name: "Settings" }),
+      page.getByRole("button", { name: "Settings", exact: true }),
     ).toBeVisible();
   });
 });
@@ -138,13 +138,15 @@ test.describe("Fleet settings", () => {
     await waitForConnection(page);
 
     // Create and select fleet
-    await createAndSelectFleet(page, "Settings Test Fleet");
+    await createAndSelectFleet(page, "Config Test Fleet");
 
     // Click Settings button in sidebar
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page
+      .getByRole("button", { name: "Settings", exact: true })
+      .click();
 
     // Fleet settings should show the fleet name
-    await expect(page.getByText("Settings Test Fleet")).toBeVisible({
+    await expect(page.getByText("Config Test Fleet")).toBeVisible({
       timeout: 5000,
     });
   });
