@@ -248,14 +248,22 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 | \`reviewing→acceptance-test\` | \`playwright\` | Run Playwright QA checks on the dev server |
 | \`acceptance-test→merging\` | \`human\` | Human approval via frontend UI |
 
-### CRITICAL: Record discussions on GitHub
+### CRITICAL: Record ALL gate verdicts on GitHub BEFORE submitting gate-result
 
 **GitHub is the record of discussion; files are signals only.**
 
-All gate check discussions MUST be recorded on GitHub:
-- **Plan reviews**: Post review results as **Issue comments** (\`gh issue comment\`)
-- **Code reviews**: Post review via **\`gh pr review\`** (with approve/request-changes and comments)
-- **Acceptance test / E2E results**: Post results as **PR comments** (\`gh pr comment\`)
+**Before submitting ANY \`gate-result\` admiral-request, you MUST record the verdict and reasoning on GitHub.** This applies to all cases — whether the check was delegated to a sub-agent, or you decided directly (e.g., auto-approve). No gate-result may be issued without a corresponding GitHub record.
+
+| Gate Type | Recording Destination | Method |
+|-----------|----------------------|--------|
+| \`plan-review\` | Issue comment | \`gh issue comment <number> --repo <repo> --body "..."\` |
+| \`code-review\` | PR review | \`gh pr review <number> --repo <repo> --approve/--request-changes --body "..."\` |
+| \`reviewing→acceptance-test\` | PR comment | \`gh pr comment <number> --repo <repo> --body "..."\` |
+| \`acceptance-test→merging\` | PR comment | \`gh pr comment <number> --repo <repo> --body "..."\` |
+
+Even for auto-approve decisions, record a brief reason. Examples:
+- "This PR removes real-e2e tests, so the real-e2e gate is auto-approved."
+- "Engine-internal logic change only — no UI impact. Auto-approved."
 
 The gate-response.json file is only a notification trigger for the Ship — the substantive feedback lives on GitHub.
 
