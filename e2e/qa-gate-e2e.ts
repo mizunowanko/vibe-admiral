@@ -14,7 +14,7 @@
  * Designed to be run by Bridge sub-agent during real-e2e gate checks.
  */
 
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,6 +94,31 @@ async function resetToyProject(): Promise<void> {
   if (stdout) console.log(stdout);
   if (stderr) console.error(stderr);
   log("Reset complete.");
+}
+
+// ── Step 1.5: Kill stale processes on the test port ─────────────────
+
+function killPortProcess(port: number): void {
+  try {
+    const out = execFileSync("lsof", ["-ti", `tcp:${port}`], {
+      encoding: "utf-8",
+    }).trim();
+    if (out) {
+      const pids = out.split("\n").filter(Boolean);
+      for (const pid of pids) {
+        log(`Killing stale process on port ${port}: pid ${pid}`);
+        try {
+          process.kill(Number(pid), "SIGKILL");
+        } catch {
+          // Process may have already exited
+        }
+      }
+      // Brief wait for OS to release the port
+      execFileSync("sleep", ["1"]);
+    }
+  } catch {
+    // lsof returns non-zero when no process found — that's fine
+  }
 }
 
 // ── Step 2: Start Engine ────────────────────────────────────────────
@@ -436,6 +461,9 @@ async function main(): Promise<void> {
 
     // Step 1: Reset toy project
     await resetToyProject();
+
+    // Step 1.5: Kill stale processes on the test port
+    killPortProcess(ENGINE_PORT);
 
     // Step 2: Start engine
     engine = startEngine();

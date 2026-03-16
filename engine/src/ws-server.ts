@@ -44,6 +44,10 @@ export class EngineServer {
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
+  private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Gate checks pending longer than this are auto-rejected (ms). */
+  private static readonly GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -74,6 +78,7 @@ export class EngineServer {
     this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
+    this.startGateTimeoutScanner();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
 
@@ -1243,7 +1248,46 @@ export class EngineServer {
     return parts.join("\n\n");
   }
 
+  private startGateTimeoutScanner(): void {
+    // Scan every 30 seconds for stale gate checks
+    this.gateTimeoutTimer = setInterval(() => {
+      this.scanGateTimeouts();
+    }, 30_000);
+    // Allow Node to exit even if the timer is still running
+    this.gateTimeoutTimer.unref();
+  }
+
+  private scanGateTimeouts(): void {
+    const now = Date.now();
+    for (const ship of this.shipManager.getAllShips()) {
+      if (
+        ship.gateCheck &&
+        ship.gateCheck.status === "pending" &&
+        now - new Date(ship.gateCheck.requestedAt).getTime() > EngineServer.GATE_TIMEOUT_MS
+      ) {
+        const transition = ship.gateCheck.transition;
+        console.warn(
+          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out (${transition}). Auto-rejecting.`,
+        );
+        this.shipManager.respondToGate(
+          ship.id,
+          false,
+          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
+        ).catch(console.error);
+        this.onGateRejected(
+          ship.id,
+          transition,
+          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
+        );
+      }
+    }
+  }
+
   shutdown(): void {
+    if (this.gateTimeoutTimer) {
+      clearInterval(this.gateTimeoutTimer);
+      this.gateTimeoutTimer = null;
+    }
     this.shipManager.stopAll();
     this.bridgeManager.stopAll();
     this.processManager.killAll();

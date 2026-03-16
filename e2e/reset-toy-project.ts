@@ -27,6 +27,19 @@ const ACTIVE_ISSUES = [1, 3];
 // Issues to close (too complex or dependent for E2E)
 const INACTIVE_ISSUES = [2, 4];
 
+// All status/* labels that may need to be removed during reset
+const STATUS_LABELS = [
+  "status/todo",
+  "status/investigating",
+  "status/planning",
+  "status/implementing",
+  "status/testing",
+  "status/reviewing",
+  "status/acceptance-test",
+  "status/merging",
+  "status/blocked",
+];
+
 async function run(
   cmd: string,
   args: string[],
@@ -206,37 +219,46 @@ async function resetIssues(): Promise<void> {
   console.log("Step 5: Resetting issue labels...");
 
   for (const num of ACTIVE_ISSUES) {
-    console.log(`  Issue #${num}: reopen + todo label`);
+    console.log(`  Issue #${num}: reopen + status/todo label`);
     // Reopen (ignore error if already open)
     await gh(["issue", "reopen", String(num), "--repo", REPO]);
-    // Remove "doing" if present, add "todo"
+    // Remove all status/* labels, then add status/todo
+    for (const label of STATUS_LABELS) {
+      await gh([
+        "issue",
+        "edit",
+        String(num),
+        "--repo",
+        REPO,
+        "--remove-label",
+        label,
+      ]);
+    }
     await gh([
       "issue",
       "edit",
       String(num),
       "--repo",
       REPO,
-      "--remove-label",
-      "doing",
       "--add-label",
-      "todo",
+      "status/todo",
     ]);
   }
 
   for (const num of INACTIVE_ISSUES) {
     console.log(`  Issue #${num}: close + remove labels`);
-    // Remove working labels first
-    await gh([
-      "issue",
-      "edit",
-      String(num),
-      "--repo",
-      REPO,
-      "--remove-label",
-      "doing",
-      "--remove-label",
-      "todo",
-    ]);
+    // Remove all status/* labels
+    for (const label of STATUS_LABELS) {
+      await gh([
+        "issue",
+        "edit",
+        String(num),
+        "--repo",
+        REPO,
+        "--remove-label",
+        label,
+      ]);
+    }
     // Close
     await gh(["issue", "close", String(num), "--repo", REPO]);
   }
