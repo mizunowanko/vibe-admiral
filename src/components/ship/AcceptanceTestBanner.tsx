@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useShipStore } from "@/stores/shipStore";
 import { isSafeUrl } from "@/lib/utils";
-import { ExternalLink, Check, X } from "lucide-react";
+import { ExternalLink, Check, X, Loader2 } from "lucide-react";
 
 interface AcceptanceTestBannerProps {
   ship: Ship;
@@ -15,6 +15,7 @@ export function AcceptanceTestBanner({ ship }: AcceptanceTestBannerProps) {
   const [showFeedback, setShowFeedback] = useState(false);
   const acceptTest = useShipStore((s) => s.acceptTest);
   const rejectTest = useShipStore((s) => s.rejectTest);
+  const isResponding = useShipStore((s) => s.respondingTestIds.has(ship.id));
 
   if (!ship.acceptanceTest || ship.status !== "acceptance-test") return null;
 
@@ -52,7 +53,12 @@ export function AcceptanceTestBanner({ ship }: AcceptanceTestBannerProps) {
       </ul>
 
       {/* Actions */}
-      {showFeedback ? (
+      {isResponding ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Processing...
+        </div>
+      ) : showFeedback ? (
         <div className="flex gap-2">
           <Input
             value={feedback}
