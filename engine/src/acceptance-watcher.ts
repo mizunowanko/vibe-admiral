@@ -12,6 +12,29 @@ export interface AcceptanceTestResponse {
 export class AcceptanceWatcher extends EventEmitter {
   private watchers = new Map<string, FSWatcher>();
 
+  private async checkUrlReachable(url: string): Promise<boolean> {
+    const maxRetries = 5;
+    const retryInterval = 2000;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(url, {
+          method: "GET",
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok || res.status < 500) return true;
+      } catch {
+        // Connection refused or timeout — retry
+      }
+      if (i < maxRetries - 1) {
+        await new Promise((r) => setTimeout(r, retryInterval));
+      }
+    }
+    return false;
+  }
+
   watch(worktreePath: string, shipId: string): void {
     const claudeDir = join(worktreePath, ".claude");
     const requestFile = join(claudeDir, "acceptance-test-request.json");
@@ -27,6 +50,15 @@ export class AcceptanceWatcher extends EventEmitter {
         try {
           const content = await readFile(requestFile, "utf-8");
           const request = JSON.parse(content) as AcceptanceTestRequest;
+
+          // Verify the URL is reachable before notifying frontend
+          const reachable = await this.checkUrlReachable(request.url);
+          if (!reachable) {
+            console.warn(
+              `[acceptance-watcher] URL ${request.url} is not reachable after retries for ship ${shipId}`,
+            );
+          }
+
           this.emit("request", shipId, request);
         } catch {
           // File might not be fully written yet
