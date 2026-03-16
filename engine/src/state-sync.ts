@@ -205,6 +205,9 @@ export class StateSync {
   ): Promise<void> {
     console.log("[state-sync] Running startup reconciliation...");
 
+    // Purge completed/error ships with no running process (ghosts from previous runs)
+    this.shipManager.purgeOrphanShips();
+
     const activeShips = this.shipManager.getActiveShipIssueNumbers();
 
     for (const repo of repos) {

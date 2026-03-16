@@ -260,16 +260,13 @@ export class ShipManager {
     skillSources?: FleetSkillSources,
   ): Promise<void> {
     // Copy /implement skill from the main repo's skills/ (or custom path)
+    // This is essential for Ship operation — failure is fatal.
     const implementSrc = skillSources?.implement
       ? join(skillSources.implement, "SKILL.md")
       : join(repoRoot, "skills", "implement", "SKILL.md");
     const implementDestDir = join(worktreePath, ".claude", "skills", "implement");
-    try {
-      await mkdir(implementDestDir, { recursive: true });
-      await copyFile(implementSrc, join(implementDestDir, "SKILL.md"));
-    } catch (err) {
-      console.warn(`[ship-manager] Failed to deploy /implement skill: ${err}`);
-    }
+    await mkdir(implementDestDir, { recursive: true });
+    await copyFile(implementSrc, join(implementDestDir, "SKILL.md"));
 
     // Copy dev-shared skills if devSharedDir is configured
     const devSharedDir = skillSources?.devSharedDir;
@@ -286,6 +283,27 @@ export class ShipManager {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill from dev-shared`);
       }
     }
+  }
+
+  /**
+   * Remove completed/error Ships that have no running process.
+   * Called during startup reconciliation to clear ghosts from previous runs.
+   */
+  purgeOrphanShips(): number {
+    let purged = 0;
+    for (const [id, ship] of this.ships) {
+      if (
+        (ship.status === "done" || ship.status === "error") &&
+        !this.processManager.isRunning(id)
+      ) {
+        this.ships.delete(id);
+        purged++;
+      }
+    }
+    if (purged > 0) {
+      console.log(`[ship-manager] Purged ${purged} orphan ship(s)`);
+    }
+    return purged;
   }
 
   stopAll(): void {
