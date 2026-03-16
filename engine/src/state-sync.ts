@@ -224,23 +224,27 @@ export class StateSync {
       // 1. Audit active status/* labels: if no active Ship, roll back to "status/todo"
       // Note: "status/blocked" is excluded — it is set manually by Bridge/human
       // to indicate dependency blocks and should persist across Engine restarts.
-      try {
-        for (const label of ACTIVE_STATUS_LABELS) {
-          const labeledIssues = await github.listIssues(repo.remote, label);
+      // Parallelize all label queries with Promise.allSettled to reduce startup latency.
+      const labelResults = await Promise.allSettled(
+        [...ACTIVE_STATUS_LABELS].map(async (label) => {
+          const labeledIssues = await github.listIssues(repo.remote!, label);
           for (const issue of labeledIssues) {
             if (!isActive(issue.number)) {
               console.warn(
                 `[state-sync] Orphan "${label}" label on #${issue.number} — rolling back to "status/todo"`,
               );
-              await this.rollbackLabel(repo.remote, issue.number);
+              await this.rollbackLabel(repo.remote!, issue.number);
             }
           }
+        }),
+      );
+      for (const result of labelResults) {
+        if (result.status === "rejected") {
+          console.warn(
+            `[state-sync] Failed to audit a status label for ${repo.remote}:`,
+            result.reason,
+          );
         }
-      } catch (err) {
-        console.warn(
-          `[state-sync] Failed to audit status labels for ${repo.remote}:`,
-          err,
-        );
       }
 
       // 2. Clean up orphan feature worktrees
