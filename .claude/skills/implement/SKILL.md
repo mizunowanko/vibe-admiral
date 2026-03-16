@@ -343,12 +343,26 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
 
 #### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
 
-1. 受け入れテストに到達したら、空きポートを取得してアプリを起動し、`.claude/acceptance-test-request.json` を作成:
+1. 受け入れテストに到達したら、空きポートを取得してアプリを起動する。**アプリが実際に listen 状態になるまで待機してから** `.claude/acceptance-test-request.json` を作成する:
    ```bash
    # 空きポートを動的に取得
    PORT=$(node -e "const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})")
    # アプリを起動（run_in_background: true）
    PORT=$PORT npm run dev
+   ```
+   ```bash
+   # dev server が実際にポートを listen するまで待機（30秒タイムアウト）
+   echo "Waiting for dev server to start on port $PORT..."
+   for i in $(seq 1 30); do
+     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[1-9]'; then
+       echo "Dev server is ready on port $PORT"
+       break
+     fi
+     if [ $i -eq 30 ]; then
+       echo "WARNING: Dev server did not start within 30s on port $PORT"
+     fi
+     sleep 1
+   done
    ```
    ```bash
    cat > .claude/acceptance-test-request.json << ATEOF
@@ -385,14 +399,28 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
    ```bash
    PORT=$PORT npm run dev
    ```
-3. **`open http://localhost:$PORT` でブラウザを自動で開く**
-4. AskUserQuestion で確認依頼する。確認ポイントは変更内容から自動生成する:
+3. dev server が実際にポートを listen するまで待機する:
+   ```bash
+   echo "Waiting for dev server to start on port $PORT..."
+   for i in $(seq 1 30); do
+     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[1-9]'; then
+       echo "Dev server is ready on port $PORT"
+       break
+     fi
+     if [ $i -eq 30 ]; then
+       echo "WARNING: Dev server did not start within 30s on port $PORT"
+     fi
+     sleep 1
+   done
+   ```
+4. **`open http://localhost:$PORT` でブラウザを自動で開く**
+5. AskUserQuestion で確認依頼する。確認ポイントは変更内容から自動生成する:
    - 変更した UI コンポーネントの表示確認
    - 新機能の動作確認
    - レイアウト崩れがないか
-5. OK → アプリ停止 → Step 12 へ
-6. NG → フィードバック取得 → 修正 → commit & push → 2回目以降は E2E テスト追加 → `open http://localhost:$PORT` で再度ブラウザを開いて再確認ループ
-7. 3回以上 NG → `/second-opinion` を検討
+6. OK → アプリ停止 → Step 12 へ
+7. NG → フィードバック取得 → 修正 → commit & push → 2回目以降は E2E テスト追加 → `open http://localhost:$PORT` で再度ブラウザを開いて再確認ループ
+8. 3回以上 NG → `/second-opinion` を検討
 
 ### Step 12: CI パス確認
 
