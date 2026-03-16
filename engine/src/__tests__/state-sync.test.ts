@@ -1,0 +1,345 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { StateSync, ACTIVE_STATUS_LABELS } from "../state-sync.js";
+
+// Mock external modules
+vi.mock("../github.js", () => ({
+  getIssue: vi.fn(),
+  updateLabels: vi.fn(),
+  listIssues: vi.fn(),
+}));
+
+vi.mock("../worktree.js", () => ({
+  getRepoRoot: vi.fn(),
+  remove: vi.fn(),
+  forceRemove: vi.fn(),
+  listFeatureWorktrees: vi.fn(),
+}));
+
+import * as github from "../github.js";
+import * as worktree from "../worktree.js";
+import type { ShipProcess, Issue } from "../types.js";
+
+const mockGetIssue = vi.mocked(github.getIssue);
+const mockUpdateLabels = vi.mocked(github.updateLabels);
+const mockListIssues = vi.mocked(github.listIssues);
+const mockGetRepoRoot = vi.mocked(worktree.getRepoRoot);
+const mockWorktreeRemove = vi.mocked(worktree.remove);
+const mockForceRemove = vi.mocked(worktree.forceRemove);
+const mockListFeatureWorktrees = vi.mocked(worktree.listFeatureWorktrees);
+
+type MockShipManager = {
+  getShipByIssue: ReturnType<typeof vi.fn>;
+  getShip: ReturnType<typeof vi.fn>;
+  updateStatus: ReturnType<typeof vi.fn>;
+  getActiveShipIssueNumbers: ReturnType<typeof vi.fn>;
+  purgeOrphanShips: ReturnType<typeof vi.fn>;
+};
+
+type MockStatusManager = {
+  getStatus: ReturnType<typeof vi.fn>;
+  markDone: ReturnType<typeof vi.fn>;
+  rollback: ReturnType<typeof vi.fn>;
+};
+
+const REPO = "owner/repo";
+
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
+  return {
+    number: 1,
+    title: "Test",
+    body: "",
+    labels: [],
+    state: "open",
+    ...overrides,
+  };
+}
+
+function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
+  return {
+    id: "ship-1",
+    fleetId: "fleet-1",
+    repo: REPO,
+    issueNumber: 42,
+    issueTitle: "Test",
+    status: "implementing",
+    isCompacting: false,
+    branchName: "feature/42-test",
+    worktreePath: "/repo/.worktrees/feature/42-test",
+    sessionId: null,
+    prUrl: null,
+    prReviewStatus: null,
+    acceptanceTest: null,
+    acceptanceTestApproved: false,
+    gateCheck: null,
+    errorType: null,
+    retryCount: 0,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+describe("ACTIVE_STATUS_LABELS", () => {
+  it("contains expected labels", () => {
+    expect(ACTIVE_STATUS_LABELS.has("status/investigating")).toBe(true);
+    expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(true);
+    expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(true);
+  });
+
+  it("excludes status/todo and status/blocked", () => {
+    expect(ACTIVE_STATUS_LABELS.has("status/todo")).toBe(false);
+    expect(ACTIVE_STATUS_LABELS.has("status/blocked")).toBe(false);
+  });
+});
+
+describe("StateSync", () => {
+  let stateSync: StateSync;
+  let mockShipManager: MockShipManager;
+  let mockStatusManager: MockStatusManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockShipManager = {
+      getShipByIssue: vi.fn(),
+      getShip: vi.fn(),
+      updateStatus: vi.fn(),
+      getActiveShipIssueNumbers: vi.fn().mockReturnValue([]),
+      purgeOrphanShips: vi.fn(),
+    };
+    mockStatusManager = {
+      getStatus: vi.fn(),
+      markDone: vi.fn(),
+      rollback: vi.fn(),
+    };
+    stateSync = new StateSync(
+      mockShipManager as unknown as ConstructorParameters<typeof StateSync>[0],
+      mockStatusManager as unknown as ConstructorParameters<typeof StateSync>[1],
+    );
+  });
+
+  describe("sortieGuard", () => {
+    it("rejects if ship already exists for issue", async () => {
+      mockShipManager.getShipByIssue.mockReturnValue(
+        makeShip({ id: "existing" }),
+      );
+      const result = await stateSync.sortieGuard(REPO, 42);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("already has an active Ship");
+    });
+
+    it("rejects if issue is closed (done)", async () => {
+      mockShipManager.getShipByIssue.mockReturnValue(undefined);
+      mockStatusManager.getStatus.mockResolvedValue("done");
+      const result = await stateSync.sortieGuard(REPO, 42);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("already closed");
+    });
+
+    it("rejects if issue already has active status (doing)", async () => {
+      mockShipManager.getShipByIssue.mockReturnValue(undefined);
+      mockStatusManager.getStatus.mockResolvedValue("doing");
+      const result = await stateSync.sortieGuard(REPO, 42);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("already has an active status label");
+    });
+
+    it("allows sortie for todo issues", async () => {
+      mockShipManager.getShipByIssue.mockReturnValue(undefined);
+      mockStatusManager.getStatus.mockResolvedValue("todo");
+      const result = await stateSync.sortieGuard(REPO, 42);
+      expect(result).toEqual({ ok: true });
+    });
+
+    it("returns error when status check fails", async () => {
+      mockShipManager.getShipByIssue.mockReturnValue(undefined);
+      mockStatusManager.getStatus.mockRejectedValue(
+        new Error("network error"),
+      );
+      const result = await stateSync.sortieGuard(REPO, 42);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("Failed to fetch issue");
+    });
+  });
+
+  describe("removeWorktreeWithRetry", () => {
+    it("succeeds on first attempt", async () => {
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+
+      await stateSync.removeWorktreeWithRetry("/repo/.worktrees/feature/42-test");
+      expect(mockWorktreeRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries and succeeds on second attempt", async () => {
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove
+        .mockRejectedValueOnce(new Error("locked"))
+        .mockResolvedValue(undefined);
+
+      await stateSync.removeWorktreeWithRetry(
+        "/repo/.worktrees/feature/42-test",
+        1,
+      );
+      expect(mockWorktreeRemove).toHaveBeenCalledTimes(2);
+    });
+
+    it("falls back to forceRemove after exhausting retries", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockRejectedValue(new Error("persistent error"));
+      mockForceRemove.mockResolvedValue(undefined);
+
+      await stateSync.removeWorktreeWithRetry(
+        "/repo/.worktrees/feature/42-test",
+        0,
+      );
+      expect(mockForceRemove).toHaveBeenCalledTimes(1);
+      vi.mocked(console.warn).mockRestore();
+    });
+  });
+
+  describe("onProcessExit", () => {
+    it("handles successful exit: updates status, removes worktree, marks done", async () => {
+      const ship = makeShip();
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockStatusManager.markDone.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", true);
+
+      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+        "ship-1",
+        "done",
+      );
+      expect(mockWorktreeRemove).toHaveBeenCalled();
+      expect(mockStatusManager.markDone).toHaveBeenCalledWith(REPO, 42);
+    });
+
+    it("handles failed exit with rescue (issue already closed)", async () => {
+      const ship = makeShip();
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetIssue.mockResolvedValue(
+        makeIssue({ state: "closed", labels: ["status/merging"] }),
+      );
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockUpdateLabels.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", false);
+
+      // Should be updated to error first, then rescued to done
+      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+        "ship-1",
+        "error",
+        "Process exited",
+      );
+      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+        "ship-1",
+        "done",
+      );
+    });
+
+    it("handles failed exit without rescue (issue still open)", async () => {
+      const ship = makeShip();
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetIssue.mockResolvedValue(makeIssue({ state: "open" }));
+      mockStatusManager.rollback.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", false);
+
+      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+        "ship-1",
+        "error",
+        "Process exited",
+      );
+      expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 42, 3);
+    });
+
+    it("clears isCompacting flag on exit", async () => {
+      const ship = makeShip({ isCompacting: true });
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockStatusManager.markDone.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", true);
+      expect(ship.isCompacting).toBe(false);
+    });
+
+    it("is a no-op when ship not found", async () => {
+      mockShipManager.getShip.mockReturnValue(undefined);
+      await stateSync.onProcessExit("unknown", true);
+      expect(mockShipManager.updateStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("reconcileOnStartup", () => {
+    it("purges orphan ships first", async () => {
+      await stateSync.reconcileOnStartup([]);
+      expect(mockShipManager.purgeOrphanShips).toHaveBeenCalled();
+    });
+
+    it("rolls back orphan status labels", async () => {
+      mockListIssues.mockImplementation(async (_repo, label) => {
+        if (label === "status/implementing") {
+          return [makeIssue({ number: 99, labels: ["status/implementing"] })];
+        }
+        return [];
+      });
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockListFeatureWorktrees.mockResolvedValue([]);
+      mockStatusManager.rollback.mockResolvedValue(undefined);
+
+      await stateSync.reconcileOnStartup([
+        { remote: REPO, localPath: "/repo" },
+      ]);
+
+      expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 99, 3);
+    });
+
+    it("does not roll back labels for active ships", async () => {
+      mockShipManager.getActiveShipIssueNumbers.mockReturnValue([
+        { repo: REPO, issueNumber: 42 },
+      ]);
+      mockListIssues.mockImplementation(async (_repo, label) => {
+        if (label === "status/implementing") {
+          return [makeIssue({ number: 42, labels: ["status/implementing"] })];
+        }
+        return [];
+      });
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockListFeatureWorktrees.mockResolvedValue([]);
+
+      await stateSync.reconcileOnStartup([
+        { remote: REPO, localPath: "/repo" },
+      ]);
+
+      expect(mockStatusManager.rollback).not.toHaveBeenCalled();
+    });
+
+    it("removes orphan feature worktrees", async () => {
+      mockListIssues.mockResolvedValue([]);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockListFeatureWorktrees.mockResolvedValue([
+        {
+          path: "/repo/.worktrees/feature/99-orphan",
+          branch: "feature/99-orphan",
+          head: "abc",
+        },
+      ]);
+      mockWorktreeRemove.mockResolvedValue(undefined);
+
+      await stateSync.reconcileOnStartup([
+        { remote: REPO, localPath: "/repo" },
+      ]);
+
+      expect(mockWorktreeRemove).toHaveBeenCalled();
+    });
+
+    it("skips repos without remote", async () => {
+      await stateSync.reconcileOnStartup([{ localPath: "/repo" }]);
+      expect(mockListIssues).not.toHaveBeenCalled();
+    });
+  });
+});

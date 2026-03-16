@@ -245,8 +245,8 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 |------------|-----------|---------------|
 | \`planning→implementing\` | \`plan-review\` | Review the Ship's implementation plan for completeness and feasibility |
 | \`testing→reviewing\` | \`code-review\` | Review the PR diff for quality, conventions, and correctness |
-| \`reviewing→acceptance-test\` | \`real-e2e\` | Run real E2E test with toy project |
-| \`acceptance-test→merging\` | \`real-e2e\` | Run real E2E test with toy project |
+| \`reviewing→acceptance-test\` | \`playwright\` | Run Playwright QA checks on the dev server |
+| \`acceptance-test→merging\` | \`human\` | Human approval via frontend UI |
 
 ### CRITICAL: Record discussions on GitHub
 
@@ -309,29 +309,7 @@ The gate-response.json file is only a notification trigger for the Ship — the 
    \`)
    \`\`\`
 
-   **For real-e2e gates:**
-   \`\`\`
-   Task(description="Real E2E QA for Ship #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
-   Run the real E2E QA test to verify the Ship's changes work end-to-end.
-
-   Steps:
-   1. Run: npx tsx e2e/qa-gate-e2e.ts
-      (This resets the toy project, starts Engine, creates Fleet, sorties Ships, waits for completion, verifies GitHub state)
-   2. Check the exit code: 0 = PASS, non-zero = FAIL
-   3. Review the output for any errors or warnings
-   4. IMPORTANT: Post the test results as a PR comment:
-      - Find the PR number: gh pr list --repo <repo> --head <branch> --json number --jq '.[0].number'
-      - Post results: gh pr comment <pr-number> --repo <repo> --body "## E2E Test Results\n\n<test output summary>\n\n**Result: PASS/FAIL**"
-
-   Output your verdict:
-   VERDICT: APPROVE
-   or
-   VERDICT: REJECT
-   FEEDBACK: <what failed, including relevant error output>
-   \`)
-   \`\`\`
-
-   **For playwright gates:** (Web apps only, legacy — prefer real-e2e)
+   **For playwright gates:**
    \`\`\`
    Task(description="QA check for Ship #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
    Run QA checks for the Ship's changes.
