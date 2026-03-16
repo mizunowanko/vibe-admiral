@@ -131,8 +131,8 @@ echo "$GATE_RESULT"
 |------|-----------|------|
 | `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
 | `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
-| `reviewing → acceptance-test` | real-e2e | Bridge が toy project で real E2E テストを実施 |
-| `acceptance-test → merging` | real-e2e | Bridge が toy project で real E2E テストを実施 |
+| `reviewing → acceptance-test` | playwright | Bridge が自動 QA を実施 |
+| `acceptance-test → merging` | human | 人間が UI で承認 |
 
 ### ステップ対応表
 

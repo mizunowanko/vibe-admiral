@@ -55,6 +55,7 @@ engine/               Node.js sidecar
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
 skills/implement/     /implement スキル（feature+cleanup+merge 統合）
+adr/                  Architecture Decision Records
 ```
 
 ## コマンド
@@ -77,7 +78,15 @@ skills/implement/     /implement スキル（feature+cleanup+merge 統合）
 4. **LLM に任せるとブレる制御が確定的でない** → issue ラベル・worktree・ポート管理はスクリプトに移譲
 5. **CLI の stream-json 出力をそのまま全表示するとメモリを大量消費** → Engine 側でフィルタリング・要約し、フロントエンドにはステータス変化と重要メッセージのみ転送する設計が必要
 
-## 開発哲学: 事後フィードバックモデル
+## 開発哲学
+
+### AI 最適化開発モデル
+
+**95%の読者は AI である。** 人間が読みやすいことよりも、AI がノイズなく正確にコンテキストを抽出できることを最優先する。情報は GitHub に集約し、各開発要素を Issue（問題）・Test（仕様）・Code（設計）・ADR（判断）・PR（報告）で表現する。
+
+> 詳細は [ADR-0001](adr/0001-ai-optimized-dev-model.md) を参照。
+
+### 事後フィードバックモデル
 
 > AI が大体の問題は発見してくれるから、基本的に人間は同期的に確認しない。
 > 人間は後で漏れたものにだけ気づいたら issue で伝える。
