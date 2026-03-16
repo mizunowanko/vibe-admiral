@@ -11,6 +11,9 @@ export type ShipStatus =
   | "done" // 完了
   | "error"; // エラー
 
+/** Classification of Ship error cause. */
+export type ShipErrorType = "rate_limit" | "unknown";
+
 // === Fleet ===
 export interface FleetRepo {
   localPath: string;
@@ -70,6 +73,8 @@ export interface Ship {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  errorType: ShipErrorType | null;
+  retryCount: number;
   createdAt: string;
 }
 
@@ -143,6 +148,7 @@ export type ClientMessage =
   | { type: "ship:chat"; data: { id: string; message: string } }
   | { type: "ship:accept"; data: { id: string } }
   | { type: "ship:reject"; data: { id: string; feedback: string } }
+  | { type: "ship:retry"; data: { id: string } }
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
   | { type: "ship:list" }

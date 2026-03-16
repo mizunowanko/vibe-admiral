@@ -31,6 +31,7 @@ interface ShipState {
   chatWithShip: (id: string, message: string) => void;
   acceptTest: (id: string) => void;
   rejectTest: (id: string, feedback: string) => void;
+  retryShip: (id: string) => void;
   stopShip: (id: string) => void;
 }
 
@@ -57,6 +58,8 @@ export const useShipStore = create<ShipState>((set) => ({
         acceptanceTest: null,
         acceptanceTestApproved: false,
         gateCheck: null,
+        errorType: null,
+        retryCount: 0,
         createdAt: new Date().toISOString(),
         ...shipData,
       } as Ship);
@@ -94,6 +97,8 @@ export const useShipStore = create<ShipState>((set) => ({
           acceptanceTest: null,
           acceptanceTestApproved: false,
           gateCheck: null,
+          errorType: null,
+          retryCount: 0,
           createdAt: new Date().toISOString(),
         });
       }
@@ -211,6 +216,10 @@ export const useShipStore = create<ShipState>((set) => ({
       respondingTestIds: new Set(state.respondingTestIds).add(id),
     }));
     wsClient.send({ type: "ship:reject", data: { id, feedback } });
+  },
+
+  retryShip: (id) => {
+    wsClient.send({ type: "ship:retry", data: { id } });
   },
 
   stopShip: (id) => {

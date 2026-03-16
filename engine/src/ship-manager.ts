@@ -98,6 +98,8 @@ export class ShipManager {
       acceptanceTest: null,
       acceptanceTestApproved: false,
       gateCheck: null,
+      errorType: null,
+      retryCount: 0,
       createdAt: new Date().toISOString(),
     };
     this.ships.set(shipId, ship);
@@ -355,6 +357,47 @@ export class ShipManager {
       console.log(`[ship-manager] Purged ${purged} orphan ship(s)`);
     }
     return purged;
+  }
+
+  /**
+   * Retry an errored Ship. If the Ship has a sessionId, resume the session.
+   * Otherwise, re-sortie from scratch.
+   * Returns the resumed/re-launched ShipProcess, or null if not retryable.
+   */
+  retryShip(
+    shipId: string,
+    extraPrompt?: string,
+    skill?: string,
+  ): ShipProcess | null {
+    const ship = this.ships.get(shipId);
+    if (!ship || ship.status !== "error") return null;
+
+    ship.retryCount++;
+    ship.errorType = null;
+
+    if (ship.sessionId) {
+      // Resume existing session
+      this.processManager.resumeSession(
+        shipId,
+        ship.sessionId,
+        "The previous session was interrupted. Continue from where you left off.",
+        ship.worktreePath,
+      );
+      this.updateStatus(shipId, "implementing", "Resumed from session");
+    } else {
+      // No session to resume — re-sortie
+      this.processManager.sortie(
+        shipId,
+        ship.worktreePath,
+        ship.issueNumber,
+        extraPrompt,
+        skill,
+      );
+      this.updateStatus(shipId, "investigating", "Re-sortied");
+    }
+
+    this.acceptanceWatcher.watch(ship.worktreePath, shipId);
+    return ship;
   }
 
   stopAll(): void {

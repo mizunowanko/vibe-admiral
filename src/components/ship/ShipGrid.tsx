@@ -17,6 +17,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
+  const retryShip = useShipStore((s) => s.retryShip);
   const sortie = useShipStore((s) => s.sortie);
   const fleet = useFleetStore((s) => s.selectedFleet);
 
@@ -133,6 +134,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
                   ship={ship}
                   onSelect={() => selectShip(ship.id)}
                   onStop={() => stopShip(ship.id)}
+                  onRetry={() => retryShip(ship.id)}
                 />
               ))}
             </div>

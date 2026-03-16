@@ -1,10 +1,25 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
+/** Rate limit patterns in stderr / error output from Claude CLI. */
+const RATE_LIMIT_PATTERNS = [
+  /rate.?limit/i,
+  /429/,
+  /too many requests/i,
+  /overloaded/i,
+  /rate_limit_error/i,
+  /APIError.*429/i,
+];
+
+export function isRateLimitError(text: string): boolean {
+  return RATE_LIMIT_PATTERNS.some((p) => p.test(text));
+}
+
 export interface ProcessEvents {
   data: (id: string, message: Record<string, unknown>) => void;
   exit: (id: string, code: number | null) => void;
   error: (id: string, error: Error) => void;
+  "rate-limit": (id: string) => void;
 }
 
 export class ProcessManager extends EventEmitter {
@@ -240,11 +255,17 @@ export class ProcessManager extends EventEmitter {
       }
     });
 
+    let stderrBuffer = "";
     proc.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString().trim();
+      stderrBuffer += chunk.toString();
+      const text = stderrBuffer.trim();
       if (text) {
         console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
+        if (isRateLimitError(text)) {
+          this.emit("rate-limit", id);
+        }
         this.emit("error", id, new Error(text));
+        stderrBuffer = "";
       }
     });
 
