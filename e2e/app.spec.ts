@@ -55,9 +55,10 @@ test.describe("Fleet management", () => {
     // Fill in fleet name
     await page.getByPlaceholder("My Project Fleet").fill("Test Fleet Alpha");
 
-    // Add a repo
-    await page.getByPlaceholder("/path/to/local/repo").fill("/tmp/test-repo");
-    await page.getByRole("button", { name: "Add" }).click();
+    // Add a repo (press Enter to confirm the path)
+    const repoInput = page.getByPlaceholder("/path/to/local/repo");
+    await repoInput.fill("/tmp/test-repo");
+    await repoInput.press("Enter");
 
     // Repo should appear in the list
     await expect(page.getByText("/tmp/test-repo")).toBeVisible();
@@ -85,15 +86,14 @@ test.describe("Fleet management", () => {
       .filter({ hasText: "Select Test Fleet" });
     await fleetButton.click();
 
-    // View switcher should appear (Bridge, Ships, Settings)
+    // Bridge view should appear with chat input
     await expect(
-      page.getByRole("button", { name: "Bridge", exact: true }),
-    ).toBeVisible();
+      page.getByPlaceholder("Send a command to the Bridge..."),
+    ).toBeVisible({ timeout: 5000 });
+
+    // Settings button should appear in sidebar
     await expect(
-      page.getByRole("button", { name: "Ships" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Settings" }),
+      page.getByRole("button", { name: "Settings", exact: true }),
     ).toBeVisible();
   });
 });
@@ -128,20 +128,27 @@ test.describe("Bridge", () => {
   });
 });
 
-test.describe("Ships", () => {
+test.describe("Fleet settings", () => {
   test.beforeEach(async ({ page }) => {
     await resetMockEngine(page);
   });
 
-  test("shows ships view", async ({ page }) => {
+  test("opens settings view from sidebar", async ({ page }) => {
     await page.goto("/");
     await waitForConnection(page);
 
     // Create and select fleet
-    await createAndSelectFleet(page, "Ship Test Fleet");
+    await createAndSelectFleet(page, "Config Test Fleet");
 
-    // Switch to Ships view
-    await page.getByRole("button", { name: "Ships" }).click();
+    // Click Settings button in sidebar
+    await page
+      .getByRole("button", { name: "Settings", exact: true })
+      .click();
+
+    // Fleet settings should show the fleet name
+    await expect(page.getByText("Config Test Fleet")).toBeVisible({
+      timeout: 5000,
+    });
   });
 });
 
@@ -179,13 +186,8 @@ async function createAndSelectFleet(page: Page, name: string) {
   const fleetButton = page.locator("button").filter({ hasText: name });
   await fleetButton.click();
 
-  // Wait for view switcher to appear
-  const bridgeButton = page.getByRole("button", {
-    name: "Bridge",
-    exact: true,
-  });
-  await expect(bridgeButton).toBeVisible({ timeout: 3000 });
-
-  // Switch to Bridge view
-  await bridgeButton.click();
+  // Wait for Bridge view to appear (fleet selection auto-navigates to bridge)
+  await expect(
+    page.getByPlaceholder("Send a command to the Bridge..."),
+  ).toBeVisible({ timeout: 5000 });
 }
