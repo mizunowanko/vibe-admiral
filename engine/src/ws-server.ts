@@ -579,6 +579,7 @@ export class EngineServer {
             // Resolve pending human gate if present (acceptance-test→merging)
             if (acceptShip.gateCheck?.gateType === "human" && acceptShip.gateCheck.status === "pending") {
               this.onGateApproved(acceptId, acceptShip.gateCheck.transition);
+              this.shipManager.clearGateCheck(acceptId);
             }
             try {
               await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");

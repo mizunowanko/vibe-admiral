@@ -33,7 +33,7 @@ export type FleetGateSettings = Partial<Record<GateTransition, GateConfig>>;
 export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
   "planning→implementing": "plan-review",
   "testing→reviewing": "code-review",
-  "reviewing→acceptance-test": "real-e2e",
+  "reviewing→acceptance-test": "playwright",
   "acceptance-test→merging": "human",
 };
 
