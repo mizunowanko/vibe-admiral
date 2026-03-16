@@ -108,10 +108,13 @@ export async function forceRemove(worktreePath: string): Promise<void> {
     })
     .catch(() => repoRoot);
 
-  // Remove worktree entry from git
-  await git(["worktree", "remove", worktreePath, "--force"], mainRoot).catch(() => {});
-  // Prune stale worktree entries
-  await git(["worktree", "prune"], mainRoot).catch(() => {});
+  // Remove only the target worktree — do NOT run `git worktree prune` here
+  // because prune operates globally and can destroy other active Ships' worktrees.
+  try {
+    await git(["worktree", "remove", worktreePath, "--force"], mainRoot);
+  } catch (err) {
+    console.warn(`[worktree] Force remove failed for ${worktreePath}:`, err);
+  }
 }
 
 export async function symlinkSettings(
