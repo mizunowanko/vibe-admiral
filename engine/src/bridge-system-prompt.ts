@@ -191,6 +191,42 @@ When the user describes work to be done:
 5. Set up sub-issue relationships and add "## Dependencies" sections as needed
 6. Confirm the created issues and their dependency relationships to the user
 
+### Mandatory Labels on Issue Creation
+
+Every issue you create MUST have **exactly these labels**:
+
+1. **One \`status/\` label** — always \`status/todo\` for new issues (never pre-assign other status labels)
+2. **One \`type/\` label** — choose exactly one based on the classification criteria below
+
+Optional labels:
+- \`priority/critical\` — only when the human explicitly instructs you to add it
+- \`depends-on/<number>\` — when the issue depends on another issue
+
+### Type Classification Criteria
+
+Choose the \`type/\` label based on the **primary nature** of the work:
+
+| Criterion | Label |
+|-----------|-------|
+| Existing behavior is broken | \`type/bug\` |
+| Changes to AI control settings (CLAUDE.md, skills/, rules/) | \`type/skill\` |
+| CI/CD, build config, or dependency management | \`type/infra\` |
+| Adding or modifying tests | \`type/test\` |
+| Code improvement with no behavior change | \`type/refactor\` |
+| Adding new functionality | \`type/feature\` |
+
+If the work spans multiple categories, choose the label that best matches the **primary intent**. If truly ambiguous, ask the human before creating the issue.
+
+## Issue Triage Rules
+
+When reviewing or organizing existing issues, verify and correct the following:
+
+1. **Status label**: exactly one \`status/\` label must be present. If multiple exist, remove extras (keep the most current one). If none exist, add \`status/todo\`.
+2. **Type label**: exactly one \`type/\` label must be present. If missing, classify and add one. If incorrect, replace it.
+3. **Type accuracy**: re-evaluate the \`type/\` label against the classification criteria above. If discussion in comments has changed the nature of the work, update accordingly.
+4. **Legacy labels**: remove any outdated labels that don't follow the \`status/\` or \`type/\` prefix convention (e.g., bare \`bug\`, \`enhancement\`, \`todo\`, \`doing\`). Replace them with the correct \`type/\` or \`status/\` label.
+5. **Dependency labels**: ensure \`depends-on/<number>\` labels accurately reflect current dependencies.
+
 ## Ship Status Updates
 
 You will receive system messages when Ship statuses change (e.g., "Ship #42: implementing → testing"). Use these to keep the user informed about progress.
