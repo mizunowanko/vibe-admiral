@@ -172,6 +172,42 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
+  resumeBridge(
+    id: string,
+    sessionId: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+  ): ChildProcess {
+    // Resume a Bridge session with interactive stdin.
+    // Combines --resume with Bridge's interactive stdio config.
+    const args = [
+      "--resume",
+      sessionId,
+      "-p",
+      "",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--allowedTools",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      ...(systemPrompt
+        ? ["--append-system-prompt", systemPrompt]
+        : []),
+      ...additionalDirs.flatMap((d) => ["--add-dir", d]),
+    ];
+
+    const proc = spawn("claude", args, {
+      cwd: fleetPath,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.setupProcess(id, proc);
+    return proc;
+  }
+
   resumeSession(
     id: string,
     sessionId: string,

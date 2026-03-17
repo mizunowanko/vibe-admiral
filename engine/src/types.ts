@@ -243,6 +243,13 @@ export interface PersistedShip {
   createdAt: string;
 }
 
+// === Persisted Bridge Session (disk persistence across Engine restarts) ===
+export interface PersistedBridgeSession {
+  fleetId: string;
+  sessionId: string | null;
+  createdAt: string;
+}
+
 // === Gate File IPC (Engine → Ship file message board) ===
 export interface GateFileRequest {
   transition: GateTransition;
