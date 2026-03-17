@@ -128,12 +128,25 @@ export type StreamMessageSubtype =
   | "pr-review-request"
   | "gate-check-request";
 
+export interface SystemMessageMeta {
+  category: StreamMessageSubtype;
+  issueNumber?: number;
+  issueTitle?: string;
+  transition?: string;
+  gateType?: GateType;
+  prNumber?: number;
+  prUrl?: string;
+  url?: string;
+  checks?: string[];
+}
+
 export interface StreamMessage {
   type: string;
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
   subtype?: StreamMessageSubtype;
+  meta?: SystemMessageMeta;
   [key: string]: unknown;
 }
 

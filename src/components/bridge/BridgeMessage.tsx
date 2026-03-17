@@ -5,6 +5,7 @@ import type { ImageAttachment, StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 import { getStatusColor } from "@/lib/ship-status";
 import { formatTime } from "@/lib/format-time";
+import { SystemMessageCard } from "./SystemMessageCard";
 
 /** Convert base64 ImageAttachments to object URLs, revoking on cleanup. */
 function useImageObjectUrls(images: ImageAttachment[] | undefined): string[] {
@@ -105,6 +106,20 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
           )}
         </button>
       </div>
+    );
+  }
+
+  // System messages with structured metadata — render as compact 1-line card
+  if (
+    isSystem &&
+    message.meta &&
+    (message.subtype === "gate-check-request" ||
+      message.subtype === "pr-review-request" ||
+      message.subtype === "acceptance-test" ||
+      message.subtype === "ship-status")
+  ) {
+    return (
+      <SystemMessageCard subtype={message.subtype} meta={message.meta} />
     );
   }
 

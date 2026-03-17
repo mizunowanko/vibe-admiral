@@ -380,6 +380,13 @@ export class EngineServer {
             type: "system" as const,
             subtype: "acceptance-test" as const,
             content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
+            meta: {
+              category: "acceptance-test" as const,
+              issueNumber: ship.issueNumber,
+              issueTitle: ship.issueTitle,
+              url: request.url,
+              checks: request.checks,
+            },
           };
           this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
           this.broadcast({
@@ -413,6 +420,11 @@ export class EngineServer {
           type: "system" as const,
           subtype: "ship-status" as const,
           content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${detail ? ` — ${detail}` : ""}`,
+          meta: {
+            category: "ship-status" as const,
+            issueNumber: ship.issueNumber,
+            issueTitle: ship.issueTitle,
+          },
         };
         this.bridgeManager.addToHistory(ship.fleetId, statusMessage);
         this.broadcast({
@@ -1050,6 +1062,13 @@ export class EngineServer {
       type: "system" as const,
       subtype: "gate-check-request" as const,
       content: gateMessage,
+      meta: {
+        category: "gate-check-request" as const,
+        issueNumber: ship.issueNumber,
+        issueTitle: ship.issueTitle,
+        transition,
+        gateType,
+      },
     };
     this.bridgeManager.addToHistory(ship.fleetId, bridgeMsg);
     this.broadcast({
@@ -1184,6 +1203,13 @@ export class EngineServer {
       type: "system" as const,
       subtype: "pr-review-request" as const,
       content: `Ship #${ship.issueNumber} (${ship.issueTitle}) created PR #${prNumber}: ${prUrl}\nRepo: ${repo}\nShip ID: ${ship.id}\n\nPlease review the PR using \`gh pr diff ${prNumber} --repo ${repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
+      meta: {
+        category: "pr-review-request" as const,
+        issueNumber: ship.issueNumber,
+        issueTitle: ship.issueTitle,
+        prNumber,
+        prUrl,
+      },
     };
     this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
     this.broadcast({
