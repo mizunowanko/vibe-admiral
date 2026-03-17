@@ -181,11 +181,12 @@ export class ProcessManager extends EventEmitter {
   ): ChildProcess {
     // Resume a Bridge session with interactive stdin.
     // Combines --resume with Bridge's interactive stdio config.
+    // --resume without -p: keeps the session interactive (stdin-driven).
+    // -p "" would put CLI into non-interactive prompt mode, causing it to
+    // process the empty prompt and exit instead of waiting for stdin.
     const args = [
       "--resume",
       sessionId,
-      "-p",
-      "",
       "--input-format",
       "stream-json",
       "--output-format",

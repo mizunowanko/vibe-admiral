@@ -1,4 +1,4 @@
-import { appendFile, readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { appendFile, readFile, writeFile, mkdir, stat, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { ProcessManager } from "./process-manager.js";
@@ -20,6 +20,7 @@ export interface BridgeSession {
 export class BridgeManager {
   private sessions = new Map<string, BridgeSession>();
   private processManager: ProcessManager;
+  private appendCount = 0;
 
   constructor(processManager: ProcessManager) {
     this.processManager = processManager;
@@ -174,15 +175,22 @@ export class BridgeManager {
     const dir = this.fleetDir(fleetId);
     const filePath = this.historyPath(fleetId);
     const line = JSON.stringify(message) + "\n";
+    this.appendCount++;
     mkdir(dir, { recursive: true })
       .then(() => appendFile(filePath, line))
       .then(async () => {
-        // Rotate if file is too large (check line count periodically)
+        // Rotate periodically using file size as proxy (avoid reading every time)
+        if (this.appendCount % 100 !== 0) return;
+        const s = await stat(filePath).catch(() => null);
+        if (!s || s.size < MAX_HISTORY * 200) return; // ~200 bytes avg per line
         const content = await readFile(filePath, "utf-8");
         const lines = content.trimEnd().split("\n");
         if (lines.length > MAX_HISTORY * 2) {
+          // Atomic rotation: write to temp file, then rename
+          const tmpPath = filePath + ".tmp";
           const trimmed = lines.slice(-MAX_HISTORY).join("\n") + "\n";
-          await writeFile(filePath, trimmed);
+          await writeFile(tmpPath, trimmed);
+          await rename(tmpPath, filePath);
         }
       })
       .catch((err) => {
