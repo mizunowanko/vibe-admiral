@@ -1036,6 +1036,12 @@ export class EngineServer {
 
     const transition = `${from}→${to}` as GateTransition;
 
+    // Dedup guard: skip if a pending gate already exists for this transition
+    if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
+      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
+      return;
+    }
+
     // Set gate check state on the ship
     this.shipManager.setGateCheck(shipId, transition, gateType);
 
