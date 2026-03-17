@@ -34,13 +34,8 @@ const STYLE: Record<
     bg: "bg-amber-500/10",
     text: "text-amber-300",
   },
-  "ship-status": {
-    icon: "⚓",
-    border: "border-border/50",
-    bg: "bg-muted/50",
-    text: "text-muted-foreground",
-  },
-  // subtypes not rendered by this component
+  // subtypes not rendered by this component (use existing renderers)
+  "ship-status": null,
   "compact-status": null,
   "bridge-status": null,
   "request-result": null,
@@ -70,18 +65,11 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
     case "acceptance-test":
       label = `${issueRef} 受け入れテスト依頼`;
       break;
-    case "ship-status":
-      label = issueRef;
-      break;
     default:
       return null;
   }
 
-  const link =
-    meta.prUrl ??
-    (meta.issueNumber
-      ? undefined
-      : undefined);
+  const link = meta.prUrl ?? meta.url;
 
   return (
     <div className="flex w-full justify-start">

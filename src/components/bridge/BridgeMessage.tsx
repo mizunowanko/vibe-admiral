@@ -115,8 +115,7 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     message.meta &&
     (message.subtype === "gate-check-request" ||
       message.subtype === "pr-review-request" ||
-      message.subtype === "acceptance-test" ||
-      message.subtype === "ship-status")
+      message.subtype === "acceptance-test")
   ) {
     return (
       <SystemMessageCard subtype={message.subtype} meta={message.meta} />
