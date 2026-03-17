@@ -61,18 +61,26 @@ STATEEOF
 ## vibe-admiral 連携判定
 
 ```bash
-echo "${VIBE_ADMIRAL:-not_set}"
+if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL` が設定されている場合:
+- 結果が `VIBE_ADMIRAL_ENABLED` の場合:
   - **Worktree 作成/削除**: スキップ（vibe-admiral が実施済み）
   - **ラベル変更**: スキップ（vibe-admiral が実施済み）
   - **受け入れテスト**: ファイル伝言板方式（後述）
   - **Ship 完了後の後処理**: スキップ（vibe-admiral が実施）
-- 設定されていない場合:
+- 結果が `VIBE_ADMIRAL_DISABLED` の場合:
   - **Worktree 作成/削除**: スキル内で実行
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
+
+**CRITICAL**: `VIBE_ADMIRAL_ENABLED` が出力された場合、以下の行動は **絶対に禁止**:
+- `open` コマンドでブラウザを起動すること
+- テキストでユーザーに確認を求めること
+- `AskUserQuestion` を使うこと（`disallowedTools` でブロック済みだが念のため）
+- その他、人間の応答を待つあらゆる行動
+
+Admiral モードでは受け入れテストはファイル伝言板方式（`.claude/acceptance-test-request.json`）のみを使用すること。
 
 ## ステータス遷移（admiral-request プロトコル）
 
