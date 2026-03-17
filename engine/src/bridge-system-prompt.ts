@@ -1,3 +1,24 @@
+import { DEFAULT_GATE_TYPES } from "./types.js";
+import type { GateTransition, GateType } from "./types.js";
+
+/** Human-readable description for each gate type (used in Bridge system prompt). */
+const GATE_DESCRIPTIONS: Record<GateType, string> = {
+  "plan-review": "Review the Ship's implementation plan for completeness and feasibility",
+  "code-review": "Review the PR diff for quality, conventions, and correctness",
+  "playwright": "Run Playwright QA checks to verify the feature works",
+  "human": "Human approval via frontend UI",
+};
+
+/** Build the Gate Types markdown table rows from DEFAULT_GATE_TYPES. */
+function buildGateTypesTable(): string {
+  return (Object.entries(DEFAULT_GATE_TYPES) as [GateTransition, GateType][])
+    .map(
+      ([transition, gateType]) =>
+        `| \`${transition}\` | \`${gateType}\` | ${GATE_DESCRIPTIONS[gateType]} |`,
+    )
+    .join("\n");
+}
+
 /**
  * Build the system prompt for Bridge (central command AI) sessions.
  *
@@ -252,10 +273,7 @@ Certain status transitions have **gates** — quality checkpoints. When a Ship r
 
 | Transition | Gate Type | What to Check |
 |------------|-----------|---------------|
-| \`planning→implementing\` | \`plan-review\` | Review the Ship's implementation plan for completeness and feasibility |
-| \`testing→reviewing\` | \`code-review\` | Review the PR diff for quality, conventions, and correctness |
-| \`reviewing→acceptance-test\` | \`real-e2e\` | Run real E2E test with toy project |
-| \`acceptance-test→merging\` | \`human\` | Human approval via frontend UI |
+${buildGateTypesTable()}
 
 ### Dispatch Launch Templates
 
@@ -323,21 +341,21 @@ If rejecting:
 \`)
 \`\`\`
 
-**For real-e2e gates:**
+**For playwright gates:**
 \`\`\`
-Task(description="Dispatch: real-e2e #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
-You are a Dispatch agent performing a real E2E gate check.
+Task(description="Dispatch: playwright #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
+You are a Dispatch agent performing a Playwright QA gate check.
 
 Ship ID: <ship-id>
 Repo: <repo>
 
 Steps:
-1. Run: npx tsx e2e/qa-gate-e2e.ts
-2. Check the exit code: 0 = PASS, non-zero = FAIL
-3. Review the output for any errors or warnings
+1. Read the PR diff to understand what changed: gh pr diff <pr-number> --repo <repo>
+2. Determine appropriate QA checks based on the changes (UI verification, API checks, code analysis, etc.)
+3. Run the checks (e.g., curl endpoints, run Playwright tests, or analyze code paths)
 4. IMPORTANT: Record the results on GitHub:
    - Find PR number: gh pr list --repo <repo> --head <branch> --json number --jq '.[0].number'
-   - Post results: gh pr comment <pr-number> --repo <repo> --body "## E2E Test Results\\n\\n<summary>\\n\\n**Result: PASS/FAIL**"
+   - Post results: gh pr comment <pr-number> --repo <repo> --body "## QA Check Results\\n\\n<summary>\\n\\n**Result: PASS/FAIL**"
 5. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If passing:
