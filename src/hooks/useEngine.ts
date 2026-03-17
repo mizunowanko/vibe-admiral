@@ -15,6 +15,7 @@ export function useEngine() {
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
   const setShipDone = useShipStore((s) => s.setShipDone);
+  const setNothingToDo = useShipStore((s) => s.setNothingToDo);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
   const syncShips = useShipStore((s) => s.syncShips);
@@ -124,6 +125,15 @@ export function useEngine() {
           break;
         }
 
+        case "ship:nothing-to-do": {
+          const nothingData = msg.data as {
+            id: string;
+            reason: string;
+          };
+          setNothingToDo(nothingData.id, nothingData.reason);
+          break;
+        }
+
         case "ship:gate-pending": {
           const gateData = msg.data as {
             id: string;
@@ -197,6 +207,7 @@ export function useEngine() {
     addShipLog,
     setAcceptanceTest,
     setShipDone,
+    setNothingToDo,
     setGateCheck,
     clearGateCheck,
     syncShips,

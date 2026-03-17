@@ -15,6 +15,7 @@ interface ShipCardProps {
 export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
   const config = STATUS_CONFIG[ship.status];
   const isActive = ship.status !== "done" && ship.status !== "error";
+  const isNothingToDo = ship.status === "done" && ship.nothingToDo;
 
   return (
     <div
@@ -31,11 +32,11 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
           <span className="text-sm font-mono text-muted-foreground">
             #{ship.issueNumber}
           </span>
-          <Badge className={cn("text-[10px]", config.color)}>
+          <Badge className={cn("text-[10px]", isNothingToDo ? "bg-slate-500/20 text-slate-400" : config.color)}>
             {config.animate && (
               <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
             )}
-            {config.label}
+            {isNothingToDo ? "Nothing to Do" : config.label}
           </Badge>
           {ship.isCompacting && (
             <Badge className="text-[10px] bg-purple-500/20 text-purple-400">
@@ -128,6 +129,15 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
               {ship.gateCheck.feedback}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Nothing To Do */}
+      {ship.nothingToDo && ship.nothingToDoReason && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <span className="text-[10px] text-muted-foreground">
+            {ship.nothingToDoReason}
+          </span>
         </div>
       )}
 

@@ -100,6 +100,8 @@ export interface Ship {
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
+  nothingToDo: boolean;
+  nothingToDoReason: string | null;
   retryCount: number;
   createdAt: string;
 }
@@ -195,7 +197,8 @@ export type BridgeRequest =
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
-  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string };
+  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string }
+  | { request: "nothing-to-do"; reason: string };
 
 // === Admiral Request (union of Bridge + Ship requests) ===
 export type AdmiralRequest = BridgeRequest | ShipRequest;
@@ -237,6 +240,8 @@ export interface ShipProcess {
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
+  nothingToDo: boolean;
+  nothingToDoReason: string | null;
   retryCount: number;
   createdAt: string;
   completedAt?: number;

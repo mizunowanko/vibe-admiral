@@ -1015,6 +1015,39 @@ export class EngineServer {
           console.log(
             `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
           );
+
+          // Notify frontend and Bridge when Ship declares nothing-to-do
+          if (request.request === "nothing-to-do") {
+            const reason = request.reason;
+            this.broadcast({
+              type: "ship:nothing-to-do",
+              data: {
+                id: shipId,
+                fleetId: ship.fleetId,
+                repo: ship.repo,
+                issueNumber: ship.issueNumber,
+                issueTitle: ship.issueTitle,
+                reason,
+              },
+            });
+
+            // Inject into Bridge chat
+            const nothingMsg = {
+              type: "system" as const,
+              subtype: "ship-status" as const,
+              content: `Ship #${ship.issueNumber} (${ship.issueTitle}): nothing to do — ${reason}`,
+              meta: {
+                category: "ship-status" as const,
+                issueNumber: ship.issueNumber,
+                issueTitle: ship.issueTitle,
+              },
+            };
+            this.bridgeManager.addToHistory(ship.fleetId, nothingMsg);
+            this.broadcast({
+              type: "bridge:stream",
+              data: { fleetId: ship.fleetId, message: nothingMsg },
+            });
+          }
         } else {
           console.warn(
             `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,

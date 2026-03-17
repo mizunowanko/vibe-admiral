@@ -235,6 +235,12 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return transition;
     }
 
+    case "nothing-to-do": {
+      const reason = r.reason as string | undefined;
+      if (typeof reason !== "string" || !reason) return null;
+      return { request: "nothing-to-do", reason };
+    }
+
     default:
       return null;
   }
@@ -267,7 +273,7 @@ export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
 
 /** Type guard: check if a request is a Ship request. */
 export function isShipRequest(req: AdmiralRequest): req is ShipRequest {
-  return req.request === "status-transition";
+  return req.request === "status-transition" || req.request === "nothing-to-do";
 }
 
 /**

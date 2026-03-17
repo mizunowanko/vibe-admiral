@@ -23,6 +23,7 @@ interface ShipState {
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
+  setNothingToDo: (id: string, reason: string) => void;
   selectShip: (id: string | null) => void;
 
   syncShips: (ships: Ship[]) => void;
@@ -170,6 +171,22 @@ export const useShipStore = create<ShipState>((set) => ({
           ...ship,
           status: "done",
           prUrl: prUrl ?? ship.prUrl,
+        });
+      }
+      return { ships };
+    });
+  },
+
+  setNothingToDo: (id, reason) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      const ship = ships.get(id);
+      if (ship) {
+        ships.set(id, {
+          ...ship,
+          status: "done",
+          nothingToDo: true,
+          nothingToDoReason: reason,
         });
       }
       return { ships };

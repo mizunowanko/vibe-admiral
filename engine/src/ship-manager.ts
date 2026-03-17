@@ -101,6 +101,8 @@ export class ShipManager {
       acceptanceTestApproved: false,
       gateCheck: null,
       errorType: null,
+      nothingToDo: false,
+      nothingToDoReason: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
     };
@@ -482,6 +484,8 @@ export class ShipManager {
           acceptanceTestApproved: false,
           gateCheck: null,
           errorType: null,
+          nothingToDo: false,
+          nothingToDoReason: null,
           retryCount: 0,
           createdAt: ps.createdAt,
         };

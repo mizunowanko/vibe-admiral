@@ -74,6 +74,8 @@ export interface Ship {
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
+  nothingToDo?: boolean;
+  nothingToDoReason?: string | null;
   retryCount: number;
   createdAt: string;
 }
@@ -236,6 +238,17 @@ export type ServerMessage =
         gateType: GateType;
         approved: boolean;
         feedback?: string;
+      };
+    }
+  | {
+      type: "ship:nothing-to-do";
+      data: {
+        id: string;
+        fleetId: string;
+        repo: string;
+        issueNumber: number;
+        issueTitle: string;
+        reason: string;
       };
     }
   | { type: "ship:data"; data: Ship[] }

@@ -48,6 +48,8 @@ export class ShipRequestHandler {
     switch (request.request) {
       case "status-transition":
         return this.handleStatusTransition(shipId, request.status, gateSettings);
+      case "nothing-to-do":
+        return this.handleNothingToDo(shipId, request.reason);
     }
   }
 
@@ -165,6 +167,21 @@ export class ShipRequestHandler {
 
     // Label update succeeded — now confirm the status internally
     this.shipManager.updateStatus(shipId, targetStatus);
+    return { ok: true };
+  }
+
+  private handleNothingToDo(
+    shipId: string,
+    reason: string,
+  ): StatusTransitionResult {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) {
+      return { ok: false, error: `Ship ${shipId} not found` };
+    }
+
+    ship.nothingToDo = true;
+    ship.nothingToDoReason = reason;
+    this.shipManager.updateStatus(shipId, "done", `Nothing to do: ${reason}`);
     return { ok: true };
   }
 
