@@ -99,6 +99,8 @@ export interface Ship {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  /** Agent ID of the persistent Escort sub-agent (Task tool) for this Ship. */
+  escortAgentId: string | null;
   errorType: ShipErrorType | null;
   retryCount: number;
   createdAt: string;
@@ -191,7 +193,8 @@ export type BridgeRequest =
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
-  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number };
+  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number; escortAgentId?: string }
+  | { request: "escort-registered"; shipId: string; escortAgentId: string };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
@@ -236,6 +239,8 @@ export interface ShipProcess {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  /** Agent ID of the persistent Escort sub-agent (Task tool) for this Ship. */
+  escortAgentId: string | null;
   errorType: ShipErrorType | null;
   retryCount: number;
   createdAt: string;

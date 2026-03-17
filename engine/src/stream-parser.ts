@@ -213,7 +213,7 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
       if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
       if (r.verdict !== "approve" && r.verdict !== "reject") return null;
-      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number } = {
+      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number; escortAgentId?: string } = {
         request: "gate-result",
         shipId: r.shipId,
         transition: r.transition as GateTransition,
@@ -221,7 +221,18 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       };
       if (typeof r.feedback === "string") gateResult.feedback = r.feedback;
       if (typeof r.issueNumber === "number") gateResult.issueNumber = r.issueNumber;
+      if (typeof r.escortAgentId === "string") gateResult.escortAgentId = r.escortAgentId;
       return gateResult;
+    }
+
+    case "escort-registered": {
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      if (typeof r.escortAgentId !== "string" || !r.escortAgentId) return null;
+      return {
+        request: "escort-registered" as const,
+        shipId: r.shipId,
+        escortAgentId: r.escortAgentId,
+      };
     }
 
     case "status-transition": {

@@ -294,6 +294,9 @@ export class EngineServer {
           console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
           return;
         }
+        // Clear Escort agent ID on Ship exit (Escort is bound to Ship lifecycle)
+        this.shipManager.clearEscortAgentId(id);
+
         // Ship explicitly declares "done" via admiral-request status-transition.
         // If the process exits while in "done" status, treat as success.
         // If in "merging" status (squash merge may kill the process), also treat as success.
@@ -1097,7 +1100,8 @@ export class EngineServer {
     planCommentUrl?: string,
   ): string {
     const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
-    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}`;
+    const escortLine = `Escort ID: ${ship.escortAgentId ?? "none"}`;
+    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}\n${escortLine}`;
 
     switch (gateType) {
       case "plan-review": {

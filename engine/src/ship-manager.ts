@@ -100,6 +100,7 @@ export class ShipManager {
       acceptanceTest: null,
       acceptanceTestApproved: false,
       gateCheck: null,
+      escortAgentId: null,
       errorType: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
@@ -314,6 +315,18 @@ export class ShipManager {
     );
   }
 
+  setEscortAgentId(shipId: string, agentId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.escortAgentId = agentId;
+  }
+
+  clearEscortAgentId(shipId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.escortAgentId = null;
+  }
+
   private async deploySkills(
     repoRoot: string,
     worktreePath: string,
@@ -481,6 +494,7 @@ export class ShipManager {
           acceptanceTest: null,
           acceptanceTestApproved: false,
           gateCheck: null,
+          escortAgentId: null,
           errorType: null,
           retryCount: 0,
           createdAt: ps.createdAt,

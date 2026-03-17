@@ -55,6 +55,8 @@ export class BridgeRequestHandler {
         return this.handlePRReviewResult(request);
       case "gate-result":
         return this.handleGateResult(request);
+      case "escort-registered":
+        return this.handleEscortRegistered(request);
     }
   }
 
@@ -180,6 +182,11 @@ export class BridgeRequestHandler {
       return `[Gate Result Failed] Ship #${ship.issueNumber} gate for ${request.transition} is already ${ship.gateCheck.status}`;
     }
 
+    // Store Escort agent ID if provided (for reuse on subsequent gates)
+    if (request.escortAgentId) {
+      this.shipManager.setEscortAgentId(ship.id, request.escortAgentId);
+    }
+
     const approved = request.verdict === "approve";
     await this.shipManager.respondToGate(
       ship.id,
@@ -206,5 +213,17 @@ export class BridgeRequestHandler {
 
     this.onGateRejected?.(ship.id, request.transition, request.feedback);
     return `[Gate Rejected] Ship #${ship.issueNumber}: ${request.transition}${request.feedback ? ` — ${request.feedback}` : ""}`;
+  }
+
+  private handleEscortRegistered(
+    request: Extract<BridgeRequest, { request: "escort-registered" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId);
+    if (!ship) {
+      return `[Escort Registration Failed] Ship ${request.shipId} not found`;
+    }
+
+    this.shipManager.setEscortAgentId(ship.id, request.escortAgentId);
+    return `[Escort Registered] Ship #${ship.issueNumber}: agent ${request.escortAgentId}`;
   }
 }

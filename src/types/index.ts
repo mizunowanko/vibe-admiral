@@ -73,6 +73,7 @@ export interface Ship {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  escortAgentId: string | null;
   errorType: ShipErrorType | null;
   retryCount: number;
   createdAt: string;
