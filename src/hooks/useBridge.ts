@@ -114,6 +114,10 @@ export function useBridge(fleetId: string | null) {
       const toolUseId = pendingToolUseId.current;
       setPendingQuestion(null);
       pendingToolUseId.current = null;
+      setMessages((prev) => [
+        ...prev,
+        { type: "user", content: answer, timestamp: Date.now() },
+      ]);
       setIsLoading(true);
       wsClient.send({
         type: "bridge:answer",

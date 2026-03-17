@@ -46,6 +46,7 @@ export class EngineServer {
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
   private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+  private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private rateLimitedShips = new Set<string>();
 
   /** Max auto-retry attempts for rate-limited Ships. */
@@ -55,6 +56,8 @@ export class EngineServer {
 
   /** Gate checks pending longer than this are auto-rejected (ms). */
   private static readonly GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  /** Unanswered Bridge questions older than this are auto-answered (ms). */
+  private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -86,6 +89,7 @@ export class EngineServer {
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
     this.startGateTimeoutScanner();
+    this.startQuestionTimeoutScanner();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
 
@@ -163,6 +167,9 @@ export class EngineServer {
               ...(toolUseId ? { toolUseId } : {}),
             };
             this.bridgeManager.addToHistory(fleetId, questionMessage);
+            if (toolUseId) {
+              this.bridgeManager.setPendingQuestion(fleetId, toolUseId);
+            }
             this.broadcast({
               type: "bridge:question",
               data: { fleetId, message: questionMessage },
@@ -492,6 +499,19 @@ export class EngineServer {
         case "bridge:send": {
           const fleetId = data.fleetId as string;
           const message = data.message as string;
+
+          // Guard: reject if a question is pending
+          if (this.bridgeManager.hasPendingQuestion(fleetId)) {
+            this.broadcast({
+              type: "error",
+              data: {
+                source: "bridge:send",
+                message:
+                  "Cannot send a command while a question is pending. Please answer the question first.",
+              },
+            });
+            break;
+          }
           const rawImages = data.images as Array<{ base64: string; mediaType: string }> | undefined;
           const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
           const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB base64 (~3.75 MB raw)
@@ -557,16 +577,13 @@ export class EngineServer {
           const toolUseId = data.toolUseId as string | undefined;
           const bridgeId = `bridge-${ansFleetId}`;
 
-          // Record answer in history as a user message
+          // Record answer in history (no broadcast — frontend shows it optimistically)
           const answerMessage: StreamMessage = {
             type: "user",
             content: answer,
           };
           this.bridgeManager.addToHistory(ansFleetId, answerMessage);
-          this.broadcast({
-            type: "bridge:stream",
-            data: { fleetId: ansFleetId, message: answerMessage },
-          });
+          this.bridgeManager.clearPendingQuestion(ansFleetId);
 
           // Send answer to Bridge stdin as tool_result if toolUseId is available
           if (toolUseId) {
@@ -1406,10 +1423,63 @@ export class EngineServer {
     }
   }
 
+  private startQuestionTimeoutScanner(): void {
+    this.questionTimeoutTimer = setInterval(() => {
+      this.scanQuestionTimeouts();
+    }, 30_000);
+    this.questionTimeoutTimer.unref();
+  }
+
+  private scanQuestionTimeouts(): void {
+    const timedOut = this.bridgeManager.getTimedOutQuestions(
+      EngineServer.QUESTION_TIMEOUT_MS,
+    );
+    for (const { fleetId, toolUseId } of timedOut) {
+      const timeoutSec = EngineServer.QUESTION_TIMEOUT_MS / 1000;
+      console.warn(
+        `[ws-server] Bridge question for fleet ${fleetId} timed out after ${timeoutSec}s. Auto-answering.`,
+      );
+
+      const autoAnswer = `No response from user (timed out after ${timeoutSec}s)`;
+      const bridgeId = `bridge-${fleetId}`;
+
+      // Record auto-answer in history
+      const answerMessage: StreamMessage = {
+        type: "user",
+        content: autoAnswer,
+      };
+      this.bridgeManager.addToHistory(fleetId, answerMessage);
+      this.bridgeManager.clearPendingQuestion(fleetId);
+
+      // Send tool_result to Bridge stdin
+      this.processManager.sendToolResult(bridgeId, toolUseId, autoAnswer);
+
+      // Notify frontend
+      const timeoutMsg: StreamMessage = {
+        type: "system",
+        subtype: "bridge-status",
+        content: `Question auto-answered: no response after ${timeoutSec}s`,
+      };
+      this.bridgeManager.addToHistory(fleetId, timeoutMsg);
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId, message: answerMessage },
+      });
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId, message: timeoutMsg },
+      });
+    }
+  }
+
   shutdown(): void {
     if (this.gateTimeoutTimer) {
       clearInterval(this.gateTimeoutTimer);
       this.gateTimeoutTimer = null;
+    }
+    if (this.questionTimeoutTimer) {
+      clearInterval(this.questionTimeoutTimer);
+      this.questionTimeoutTimer = null;
     }
     this.shipManager.stopAll();
     this.bridgeManager.stopAll();

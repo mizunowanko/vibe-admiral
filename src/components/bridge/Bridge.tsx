@@ -4,7 +4,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
 import { BridgeInput } from "./BridgeInput";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageSquare, Loader2, ArrowDown } from "lucide-react";
+import { MessageSquare, Loader2, ArrowDown, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StreamMessage } from "@/types";
 
@@ -152,6 +152,21 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
           </button>
         )}
       </div>
+
+      {/* Pending Question Banner */}
+      {pendingQuestion && (
+        <div className="flex items-start gap-2 border-t border-blue-500/30 bg-blue-500/10 px-4 py-2">
+          <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" />
+          <div className="min-w-0">
+            <span className="text-xs font-semibold text-blue-400">
+              Bridge is asking:
+            </span>
+            <p className="whitespace-pre-wrap break-words text-sm text-blue-200/80">
+              {pendingQuestion}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <BridgeInput

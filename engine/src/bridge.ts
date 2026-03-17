@@ -15,6 +15,8 @@ export interface BridgeSession {
   systemPrompt?: string;
   sessionId: string | null;
   history: StreamMessage[];
+  pendingToolUseId: string | null;
+  questionAskedAt: number | null;
 }
 
 export class BridgeManager {
@@ -50,6 +52,8 @@ export class BridgeManager {
       systemPrompt,
       sessionId: persisted?.sessionId ?? null,
       history: restoredHistory,
+      pendingToolUseId: null,
+      questionAskedAt: null,
     };
     this.sessions.set(fleetId, session);
 
@@ -142,6 +146,42 @@ export class BridgeManager {
 
   getHistory(fleetId: string): StreamMessage[] {
     return this.sessions.get(fleetId)?.history ?? [];
+  }
+
+  setPendingQuestion(fleetId: string, toolUseId: string): void {
+    const session = this.sessions.get(fleetId);
+    if (session) {
+      session.pendingToolUseId = toolUseId;
+      session.questionAskedAt = Date.now();
+    }
+  }
+
+  clearPendingQuestion(fleetId: string): void {
+    const session = this.sessions.get(fleetId);
+    if (session) {
+      session.pendingToolUseId = null;
+      session.questionAskedAt = null;
+    }
+  }
+
+  hasPendingQuestion(fleetId: string): boolean {
+    return this.sessions.get(fleetId)?.pendingToolUseId != null;
+  }
+
+  /** Return sessions with unanswered questions older than the given age (ms). */
+  getTimedOutQuestions(maxAgeMs: number): Array<{ fleetId: string; toolUseId: string }> {
+    const now = Date.now();
+    const result: Array<{ fleetId: string; toolUseId: string }> = [];
+    for (const [fleetId, session] of this.sessions) {
+      if (
+        session.pendingToolUseId &&
+        session.questionAskedAt &&
+        now - session.questionAskedAt > maxAgeMs
+      ) {
+        result.push({ fleetId, toolUseId: session.pendingToolUseId });
+      }
+    }
+    return result;
   }
 
   stop(fleetId: string): void {
