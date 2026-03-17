@@ -1,3 +1,14 @@
+import { DEFAULT_GATE_TYPES } from "./types.js";
+import type { GateTransition, GateType } from "./types.js";
+
+/** Human-readable description of what each gate type checks. */
+const GATE_TYPE_DESCRIPTIONS: Record<GateType, string> = {
+  "plan-review": "Review the Ship's implementation plan for completeness and feasibility",
+  "code-review": "Review the PR diff for quality, conventions, and correctness",
+  "playwright": "Run Playwright QA checks",
+  "human": "Human approval via frontend UI",
+};
+
 /**
  * Build the system prompt for Bridge (central command AI) sessions.
  *
@@ -250,12 +261,7 @@ Certain status transitions have **gates** — quality checkpoints. When a Ship r
 
 ### Gate Types
 
-| Transition | Gate Type | What to Check |
-|------------|-----------|---------------|
-| \`planning→implementing\` | \`plan-review\` | Review the Ship's implementation plan for completeness and feasibility |
-| \`testing→reviewing\` | \`code-review\` | Review the PR diff for quality, conventions, and correctness |
-| \`reviewing→acceptance-test\` | \`real-e2e\` | Run real E2E test with toy project |
-| \`acceptance-test→merging\` | \`human\` | Human approval via frontend UI |
+${buildGateTypesTable()}
 
 ### Dispatch Launch Templates
 
@@ -303,51 +309,24 @@ Repo: <repo>
 PR: <pr-url>
 
 Steps:
-1. Run: gh pr view <number> --repo <repo> --json title,body
+1. Run: gh pr view <number> --repo <repo> --json title,body,reviews,comments
+   — Read ALL existing reviews and comments to understand previous feedback.
 2. Run: gh pr diff <number> --repo <repo>
-3. Review against: issue requirements, coding conventions, security, scope, test coverage
-4. IMPORTANT: Record your review on GitHub:
+3. If previous reviews exist (especially "REQUEST_CHANGES"), focus your review on whether the Ship has addressed the prior feedback. Do NOT repeat issues that have already been fixed.
+4. Review against: issue requirements, coding conventions, security, scope, test coverage
+5. IMPORTANT: Record your review on GitHub:
    - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
    - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
-5. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+6. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
-\\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "testing→reviewing", "verdict": "approve" }
-\\\`\\\`\\\`
-
-If rejecting:
-\\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "testing→reviewing", "verdict": "reject", "feedback": "<what needs fixing>" }
-\\\`\\\`\\\`
-\`)
-\`\`\`
-
-**For real-e2e gates:**
-\`\`\`
-Task(description="Dispatch: real-e2e #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
-You are a Dispatch agent performing a real E2E gate check.
-
-Ship ID: <ship-id>
-Repo: <repo>
-
-Steps:
-1. Run: npx tsx e2e/qa-gate-e2e.ts
-2. Check the exit code: 0 = PASS, non-zero = FAIL
-3. Review the output for any errors or warnings
-4. IMPORTANT: Record the results on GitHub:
-   - Find PR number: gh pr list --repo <repo> --head <branch> --json number --jq '.[0].number'
-   - Post results: gh pr comment <pr-number> --repo <repo> --body "## E2E Test Results\\n\\n<summary>\\n\\n**Result: PASS/FAIL**"
-5. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
-
-If passing:
 \\\`\\\`\\\`admiral-request
 { "request": "gate-result", "shipId": "<ship-id>", "transition": "<transition>", "verdict": "approve" }
 \\\`\\\`\\\`
 
-If failing:
+If rejecting:
 \\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "<transition>", "verdict": "reject", "feedback": "<what failed>" }
+{ "request": "gate-result", "shipId": "<ship-id>", "transition": "<transition>", "verdict": "reject", "feedback": "<what needs fixing>" }
 \\\`\\\`\\\`
 \`)
 \`\`\`
@@ -404,4 +383,19 @@ The same applies to system messages about Ship status changes — keep your repo
 - Report sortie results and ship status updates promptly
 - When issues are blocked, explain what they're waiting for
 `;
+}
+
+/**
+ * Build the Gate Types table dynamically from DEFAULT_GATE_TYPES so it never
+ * goes stale relative to the code.
+ */
+function buildGateTypesTable(): string {
+  const header = "| Transition | Gate Type | What to Check |\n|------------|-----------|---------------|";
+  const rows = (Object.entries(DEFAULT_GATE_TYPES) as [GateTransition, GateType][])
+    .map(([transition, gateType]) => {
+      const desc = GATE_TYPE_DESCRIPTIONS[gateType] ?? gateType;
+      return `| \`${transition}\` | \`${gateType}\` | ${desc} |`;
+    })
+    .join("\n");
+  return `${header}\n${rows}`;
 }

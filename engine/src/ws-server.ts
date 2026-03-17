@@ -1108,8 +1108,6 @@ export class EngineServer {
       }
       case "code-review":
         return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "real-e2e":
-        return `${header}\n${meta}\n\nLaunch a Dispatch (sub-agent) to run the real E2E QA test. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "playwright":
         return `${header}\n${meta}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "human":
