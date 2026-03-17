@@ -23,8 +23,8 @@ export type GateTransition =
   | "reviewing→acceptance-test"
   | "acceptance-test→merging";
 
-/** Gate type determines which sub-agent or mechanism handles the check. */
-export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+/** Gate type determines which Dispatch sub-agent or mechanism handles the check. */
+export type GateType = "plan-review" | "code-review" | "real-e2e" | "playwright" | "human";
 
 /** Per-gate configuration: true = default type, string = specific type, false = disabled. */
 export type GateConfig = boolean | GateType;
@@ -36,7 +36,7 @@ export type FleetGateSettings = Partial<Record<GateTransition, GateConfig>>;
 export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
   "planning→implementing": "plan-review",
   "testing→reviewing": "code-review",
-  "reviewing→acceptance-test": "playwright",
+  "reviewing→acceptance-test": "real-e2e",
   "acceptance-test→merging": "human",
 };
 

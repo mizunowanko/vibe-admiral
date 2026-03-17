@@ -1076,12 +1076,14 @@ export class EngineServer {
         const planRef = planCommentUrl
           ? `\nPlan comment: ${planCommentUrl}`
           : "";
-        return `${header}\n${meta}${planRef}\n\nThe Ship has posted its implementation plan as an Issue comment. Please review the plan (read it from the Issue comments) and post your review result as an Issue comment as well. Then submit your verdict via \`gate-result\` admiral-request.`;
+        return `${header}\n${meta}${planRef}\n\nLaunch a Dispatch (sub-agent) to review the plan. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       }
       case "code-review":
-        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nThe Ship is requesting code review. Please review the PR diff, post your review via \`gh pr review\` on GitHub, and submit your verdict via \`gate-result\` admiral-request.`;
+        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+      case "real-e2e":
+        return `${header}\n${meta}\n\nLaunch a Dispatch (sub-agent) to run the real E2E QA test. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "playwright":
-        return `${header}\n${meta}\n\nThe Ship is requesting acceptance testing. Please run Playwright QA checks, post the results as a PR comment via \`gh pr comment\`, and submit your verdict via \`gate-result\` admiral-request.`;
+        return `${header}\n${meta}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "human":
         return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
     }
