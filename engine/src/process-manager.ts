@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 /** Rate limit patterns in stderr / error output from Claude CLI. */
 const RATE_LIMIT_PATTERNS = [
@@ -73,7 +75,8 @@ export class ProcessManager extends EventEmitter {
       },
     );
 
-    this.setupProcess(id, proc);
+    const logFilePath = join(worktreePath, ".claude", "ship-log.jsonl");
+    this.setupProcess(id, proc, logFilePath);
     return proc;
   }
 
@@ -241,7 +244,8 @@ export class ProcessManager extends EventEmitter {
       },
     );
 
-    this.setupProcess(id, proc);
+    const logFilePath = join(cwd, ".claude", "ship-log.jsonl");
+    this.setupProcess(id, proc, logFilePath);
     return proc;
   }
 
@@ -269,9 +273,22 @@ export class ProcessManager extends EventEmitter {
     return this.processes.get(id)?.pid;
   }
 
-  private setupProcess(id: string, proc: ChildProcess): void {
+  private setupProcess(
+    id: string,
+    proc: ChildProcess,
+    logFilePath?: string,
+  ): void {
     this.processes.set(id, proc);
     const shortId = id.slice(0, 8);
+
+    // Ensure log directory exists for Ship log persistence
+    if (logFilePath) {
+      try {
+        mkdirSync(dirname(logFilePath), { recursive: true });
+      } catch {
+        // Best-effort: directory may already exist
+      }
+    }
 
     console.log(`[proc:${shortId}] spawned (pid=${proc.pid})`);
 
@@ -286,6 +303,15 @@ export class ProcessManager extends EventEmitter {
         try {
           const msg = JSON.parse(line) as Record<string, unknown>;
           this.emit("data", id, msg);
+
+          // Persist Ship log: skip system init/hook messages (noisy, may contain env info)
+          if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
+            try {
+              appendFileSync(logFilePath, line + "\n");
+            } catch {
+              // Best-effort: don't crash on write failure
+            }
+          }
         } catch {
           // Non-JSON output, ignore
         }
