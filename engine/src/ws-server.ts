@@ -122,6 +122,15 @@ export class EngineServer {
       if (id.startsWith("bridge-")) {
         const fleetId = id.replace("bridge-", "");
 
+        // Extract sessionId from Bridge init messages (before parsing drops them)
+        const sessionId = extractSessionId(msg);
+        if (sessionId) {
+          this.bridgeManager.setSessionId(fleetId, sessionId);
+          console.log(
+            `[ws-server] Bridge ${id} sessionId captured: ${sessionId.slice(0, 12)}...`,
+          );
+        }
+
         // Emit "connected" status on first data from bridge CLI
         if (!this.bridgeFirstData.has(id)) {
           this.bridgeFirstData.add(id);
@@ -517,7 +526,7 @@ export class EngineServer {
                 prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
               }
 
-              this.bridgeManager.launch(
+              await this.bridgeManager.launch(
                 fleetId,
                 process.cwd(),
                 [],

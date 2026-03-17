@@ -72,7 +72,15 @@ export function useBridge(fleetId: string | null) {
     // Request history
     wsClient.send({ type: "bridge:history", data: { fleetId } });
 
-    return unsub;
+    // Re-fetch history on reconnect (Engine may have restarted with persisted data)
+    const unsubConnect = wsClient.onConnect(() => {
+      wsClient.send({ type: "bridge:history", data: { fleetId } });
+    });
+
+    return () => {
+      unsub();
+      unsubConnect();
+    };
   }, [fleetId]);
 
   const sendMessage = useCallback(
