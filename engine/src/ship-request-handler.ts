@@ -135,20 +135,6 @@ export class ShipRequestHandler {
       }
     }
 
-    // Legacy gate: block advancement past acceptance-test until human approves
-    // (This is now handled by the "acceptance-test→merging" gate, but we keep
-    //  this as a safety check)
-    const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
-    if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
-      const humanGate = resolveGate("acceptance-test", "merging", gateSettings);
-      if (!humanGate) {
-        return {
-          ok: false,
-          error: `Cannot advance past acceptance-test: not yet approved`,
-        };
-      }
-    }
-
     // Transactional: sync GitHub label FIRST, then update internal state
     try {
       await this.statusManager.syncPhaseLabel(

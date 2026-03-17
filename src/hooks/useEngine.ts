@@ -13,7 +13,6 @@ export function useEngine() {
   const setShipStatus = useShipStore((s) => s.setShipStatus);
   const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
-  const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
   const setShipDone = useShipStore((s) => s.setShipDone);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
@@ -101,19 +100,6 @@ export function useEngine() {
           break;
         }
 
-        case "ship:acceptance-test": {
-          const atData = msg.data as {
-            id: string;
-            url: string;
-            checks: string[];
-          };
-          setAcceptanceTest(atData.id, {
-            url: atData.url,
-            checks: atData.checks,
-          });
-          break;
-        }
-
         case "ship:done": {
           const doneData = msg.data as {
             id: string;
@@ -195,7 +181,6 @@ export function useEngine() {
     setShipStatus,
     setShipCompacting,
     addShipLog,
-    setAcceptanceTest,
     setShipDone,
     setGateCheck,
     clearGateCheck,

@@ -5,7 +5,6 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { ProcessManager } from "./process-manager.js";
-import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
@@ -18,7 +17,6 @@ const execFileAsync = promisify(execFile);
 export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
-  private acceptanceWatcher: AcceptanceWatcher;
   private statusManager: StatusManager;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
@@ -26,11 +24,9 @@ export class ShipManager {
 
   constructor(
     processManager: ProcessManager,
-    acceptanceWatcher: AcceptanceWatcher,
     statusManager: StatusManager,
   ) {
     this.processManager = processManager;
-    this.acceptanceWatcher = acceptanceWatcher;
     this.statusManager = statusManager;
   }
 
@@ -97,8 +93,6 @@ export class ShipManager {
       sessionId: null,
       prUrl: null,
       prReviewStatus: null,
-      acceptanceTest: null,
-      acceptanceTestApproved: false,
       gateCheck: null,
       errorType: null,
       retryCount: 0,
@@ -109,9 +103,6 @@ export class ShipManager {
     // 7. Launch Claude CLI process
     this.processManager.sortie(shipId, worktreePath, issueNumber, extraPrompt, skill);
 
-    // 8. Start acceptance test watcher
-    this.acceptanceWatcher.watch(worktreePath, shipId);
-
     this.updateStatus(shipId, "investigating");
     return ship;
   }
@@ -119,7 +110,6 @@ export class ShipManager {
   stopShip(shipId: string): boolean {
     const killed = this.processManager.kill(shipId);
     if (killed) {
-      this.acceptanceWatcher.unwatch(shipId);
       const ship = this.ships.get(shipId);
       if (ship) ship.isCompacting = false;
       this.updateStatus(shipId, "error", "Manually stopped");
@@ -199,10 +189,6 @@ export class ShipManager {
   updateStatus(id: string, status: ShipStatus, detail?: string): void {
     const ship = this.ships.get(id);
     if (ship) {
-      // Defensive: clear acceptanceTest when leaving acceptance-test status
-      if (ship.status === "acceptance-test" && status !== "acceptance-test") {
-        ship.acceptanceTest = null;
-      }
       ship.status = status;
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
@@ -233,43 +219,6 @@ export class ShipManager {
     await mkdir(claudeDir, { recursive: true });
     const responseFile = join(claudeDir, "pr-review-response.json");
     await writeFile(responseFile, JSON.stringify(response, null, 2));
-  }
-
-  setAcceptanceTest(
-    shipId: string,
-    request: { url: string; checks: string[] },
-  ): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-    ship.acceptanceTest = request;
-  }
-
-  clearAcceptanceTest(shipId: string): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-    ship.acceptanceTest = null;
-  }
-
-  respondToAcceptanceTest(
-    shipId: string,
-    accepted: boolean,
-    feedback?: string,
-  ): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-
-    if (accepted) {
-      ship.acceptanceTestApproved = true;
-    }
-
-    this.acceptanceWatcher
-      .respond(ship.worktreePath, { accepted, feedback })
-      .catch((err) => {
-        console.error(
-          `Failed to write acceptance test response for ${shipId}:`,
-          err,
-        );
-      });
   }
 
   setGateCheck(
@@ -404,7 +353,6 @@ export class ShipManager {
       this.updateStatus(shipId, "investigating", "Re-sortied");
     }
 
-    this.acceptanceWatcher.watch(ship.worktreePath, shipId);
     return ship;
   }
 
@@ -412,7 +360,6 @@ export class ShipManager {
     for (const [id] of this.ships) {
       this.processManager.kill(id);
     }
-    this.acceptanceWatcher.unwatchAll();
   }
 
   /**
@@ -478,8 +425,6 @@ export class ShipManager {
           isCompacting: false,
           prUrl: null,
           prReviewStatus: null,
-          acceptanceTest: null,
-          acceptanceTestApproved: false,
           gateCheck: null,
           errorType: null,
           retryCount: 0,

@@ -3,9 +3,9 @@ import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn, isSafeUrl } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { STATUS_CONFIG } from "@/lib/ship-status";
-import { Square, ExternalLink } from "lucide-react";
+import { Square } from "lucide-react";
 
 interface BridgeShipBarProps {
   fleetId: string;
@@ -16,7 +16,6 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
-  const acceptTest = useShipStore((s) => s.acceptTest);
 
   const fleetShips = Array.from(ships.values()).filter(
     (s) => s.fleetId === fleetId,
@@ -101,38 +100,6 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                   {ship.repo}
                 </p>
 
-                {/* Acceptance test action */}
-                {ship.status === "acceptance-test" && ship.acceptanceTest && (
-                  <div className="mt-1.5 pt-1.5 border-t border-border flex items-center gap-2">
-                    {isSafeUrl(ship.acceptanceTest.url) ? (
-                      <a
-                        href={ship.acceptanceTest.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-primary hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <ExternalLink className="h-2.5 w-2.5" />
-                        Test
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {ship.acceptanceTest.url}
-                      </span>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-5 text-[10px] px-1.5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        acceptTest(ship.id);
-                      }}
-                    >
-                      Accept
-                    </Button>
-                  </div>
-                )}
               </div>
             );
           })}

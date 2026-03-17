@@ -67,7 +67,7 @@ echo "${VIBE_ADMIRAL:-not_set}"
 - `VIBE_ADMIRAL` が設定されている場合:
   - **Worktree 作成/削除**: スキップ（vibe-admiral が実施済み）
   - **ラベル変更**: スキップ（vibe-admiral が実施済み）
-  - **受け入れテスト**: ファイル伝言板方式（後述）
+  - **受け入れテスト**: Gate 方式（デフォルトは auto-approve。Fleet 設定で playwright 等に変更可能）
   - **Ship 完了後の後処理**: スキップ（vibe-admiral が実施）
 - 設定されていない場合:
   - **Worktree 作成/削除**: スキル内で実行
@@ -142,8 +142,8 @@ echo "$GATE_RESULT"
 |------|-----------|------|
 | `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
 | `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
-| `reviewing → acceptance-test` | playwright | Bridge が自動 QA を実施 |
-| `acceptance-test → merging` | human | 人間が UI で承認 |
+| `reviewing → acceptance-test` | code-review | Bridge が PR の品質を検証（Fleet 設定で playwright に変更可能） |
+| `acceptance-test → merging` | auto-approve | Engine が即座に承認（Fleet 設定で playwright 等に変更可能） |
 
 ### ステップ対応表
 
@@ -341,53 +341,14 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
 
 ### Step 11: 受け入れテスト
 
-#### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
+#### VIBE_ADMIRAL 設定時（Gate 方式）
 
-1. 受け入れテストに到達したら、空きポートを取得してアプリを起動する。**アプリが実際に listen 状態になるまで待機してから** `.claude/acceptance-test-request.json` を作成する:
-   ```bash
-   # 空きポートを動的に取得
-   PORT=$(node -e "const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})")
-   # アプリを起動（run_in_background: true）
-   PORT=$PORT npm run dev
-   ```
-   ```bash
-   # dev server が実際にポートを listen するまで待機（30秒タイムアウト）
-   echo "Waiting for dev server to start on port $PORT..."
-   for i in $(seq 1 30); do
-     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[1-9]'; then
-       echo "Dev server is ready on port $PORT"
-       break
-     fi
-     if [ $i -eq 30 ]; then
-       echo "WARNING: Dev server did not start within 30s on port $PORT"
-     fi
-     sleep 1
-   done
-   ```
-   ```bash
-   cat > .claude/acceptance-test-request.json << ATEOF
-   {
-     "url": "http://localhost:$PORT",
-     "checks": [
-       "確認ポイント1",
-       "確認ポイント2"
-     ]
-   }
-   ATEOF
-   ```
+`reviewing → acceptance-test` の遷移表明時に Gate が発動する。デフォルトでは `auto-approve` のため即座に通過するが、Fleet 設定で `playwright` 等に変更されている場合は Bridge が検証を行う。
 
-2. `.claude/acceptance-test-response.json` の出現を待機:
-   ```bash
-   echo "Waiting for acceptance test response..."
-   while [ ! -f .claude/acceptance-test-response.json ]; do
-     sleep 2
-   done
-   cat .claude/acceptance-test-response.json
-   ```
+Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待機する。
 
-3. レスポンスに基づいて処理:
-   - `accepted: true` → アプリ停止 → Step 12 へ
-   - `accepted: false` → フィードバックを取得 → 修正 → commit & push → request.json を削除 → response.json を削除 → 再度 request.json を作成して再待機
+- `approved: true` → Step 12 へ進む
+- `approved: false` → `feedback` を読んで修正 → commit & push → 再度 `status-transition` を表明
 
 #### VIBE_ADMIRAL 未設定時
 

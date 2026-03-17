@@ -24,7 +24,7 @@ export type GateTransition =
   | "acceptance-test→merging";
 
 /** Gate type determines which sub-agent or mechanism handles the check. */
-export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 
 /** Per-gate configuration: true = default type, string = specific type, false = disabled. */
 export type GateConfig = boolean | GateType;
@@ -36,8 +36,8 @@ export type FleetGateSettings = Partial<Record<GateTransition, GateConfig>>;
 export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
   "planning→implementing": "plan-review",
   "testing→reviewing": "code-review",
-  "reviewing→acceptance-test": "playwright",
-  "acceptance-test→merging": "human",
+  "reviewing→acceptance-test": "code-review",
+  "acceptance-test→merging": "auto-approve",
 };
 
 /** Status of a pending gate check. */
@@ -96,17 +96,10 @@ export interface Ship {
   sessionId: string | null;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
   retryCount: number;
   createdAt: string;
-}
-
-export interface AcceptanceTestRequest {
-  url: string;
-  checks: string[];
 }
 
 // === Issue ===
@@ -123,7 +116,6 @@ export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
   | "bridge-status"
-  | "acceptance-test"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request";
@@ -220,8 +212,6 @@ export interface ShipProcess {
   isCompacting: boolean;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
   retryCount: number;

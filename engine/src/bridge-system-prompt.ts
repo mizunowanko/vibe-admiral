@@ -139,7 +139,7 @@ When the user asks you to start implementation:
 | \`status/implementing\` | Implementation in progress |
 | \`status/testing\` | Running tests |
 | \`status/reviewing\` | Code review in progress |
-| \`status/acceptance-test\` | Awaiting human approval |
+| \`status/acceptance-test\` | Acceptance testing phase |
 | \`status/merging\` | Merge in progress |
 | \`status/blocked\` | Blocked by dependencies (Bridge may set this) |
 
@@ -245,8 +245,8 @@ Certain status transitions have **gates** — quality checkpoints that you must 
 |------------|-----------|---------------|
 | \`planning→implementing\` | \`plan-review\` | Review the Ship's implementation plan for completeness and feasibility |
 | \`testing→reviewing\` | \`code-review\` | Review the PR diff for quality, conventions, and correctness |
-| \`reviewing→acceptance-test\` | \`playwright\` | Run Playwright QA checks on the dev server |
-| \`acceptance-test→merging\` | \`human\` | Human approval via frontend UI |
+| \`reviewing→acceptance-test\` | \`code-review\` | Review the PR for quality (default; can be overridden to \`playwright\` per issue) |
+| \`acceptance-test→merging\` | \`auto-approve\` | Automatically approved by Engine (no check needed) |
 
 ### CRITICAL: Record ALL gate verdicts on GitHub BEFORE submitting gate-result
 

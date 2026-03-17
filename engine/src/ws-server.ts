@@ -10,7 +10,6 @@ const execFileAsync = promisify(execFile);
 import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
-import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import { StatusManager } from "./status-manager.js";
 import { StateSync } from "./state-sync.js";
 import { BridgeRequestHandler } from "./bridge-request-handler.js";
@@ -37,7 +36,6 @@ export class EngineServer {
   private processManager: ProcessManager;
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
-  private acceptanceWatcher: AcceptanceWatcher;
   private statusManager: StatusManager;
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
@@ -58,11 +56,9 @@ export class EngineServer {
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
-    this.acceptanceWatcher = new AcceptanceWatcher();
     this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
-      this.acceptanceWatcher,
       this.statusManager,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
@@ -82,7 +78,6 @@ export class EngineServer {
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
     this.setupProcessEvents();
-    this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
     this.startGateTimeoutScanner();
@@ -362,35 +357,6 @@ export class EngineServer {
     });
   }
 
-  private setupAcceptanceEvents(): void {
-    this.acceptanceWatcher.on(
-      "request",
-      (shipId: string, request: { url: string; checks: string[] }) => {
-        const ship = this.shipManager.getShip(shipId);
-        if (ship) {
-          this.shipManager.setAcceptanceTest(shipId, request);
-          this.shipManager.updateStatus(shipId, "acceptance-test");
-          this.broadcast({
-            type: "ship:acceptance-test",
-            data: { id: shipId, url: request.url, checks: request.checks },
-          });
-
-          // Also inject into Bridge chat
-          const acceptanceMessage = {
-            type: "system" as const,
-            subtype: "acceptance-test" as const,
-            content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
-          };
-          this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
-          this.broadcast({
-            type: "bridge:stream",
-            data: { fleetId: ship.fleetId, message: acceptanceMessage },
-          });
-        }
-      },
-    );
-  }
-
   private setupShipStatusHandler(): void {
     this.shipManager.setStatusChangeHandler((id, status, detail) => {
       const ship = this.shipManager.getShip(id);
@@ -626,46 +592,6 @@ export class EngineServer {
               data.message as string,
               ship.worktreePath,
             );
-          }
-          break;
-        }
-        case "ship:accept": {
-          const acceptId = data.id as string;
-          this.shipManager.respondToAcceptanceTest(acceptId, true);
-          // Transactional: sync GitHub label before updating internal state
-          const acceptShip = this.shipManager.getShip(acceptId);
-          if (acceptShip) {
-            this.shipManager.clearAcceptanceTest(acceptId);
-            try {
-              await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");
-              this.shipManager.updateStatus(acceptId, "merging");
-            } catch (err) {
-              console.warn(`[ws-server] Failed to sync label for ship:accept #${acceptShip.issueNumber}:`, err);
-              // Still update internal state — the Ship already received the accept response
-              this.shipManager.updateStatus(acceptId, "merging");
-            }
-          }
-          break;
-        }
-        case "ship:reject": {
-          const rejectId = data.id as string;
-          this.shipManager.respondToAcceptanceTest(
-            rejectId,
-            false,
-            data.feedback as string,
-          );
-          // Transactional: sync GitHub label before updating internal state
-          const rejectShip = this.shipManager.getShip(rejectId);
-          if (rejectShip) {
-            this.shipManager.clearAcceptanceTest(rejectId);
-            try {
-              await this.statusManager.syncPhaseLabel(rejectShip.repo, rejectShip.issueNumber, "implementing");
-              this.shipManager.updateStatus(rejectId, "implementing");
-            } catch (err) {
-              console.warn(`[ws-server] Failed to sync label for ship:reject #${rejectShip.issueNumber}:`, err);
-              // Still update internal state — the Ship already received the reject response
-              this.shipManager.updateStatus(rejectId, "implementing");
-            }
           }
           break;
         }
@@ -1015,6 +941,16 @@ export class EngineServer {
 
     const transition = `${from}→${to}` as GateTransition;
 
+    // Auto-approve: skip Bridge notification and immediately approve
+    if (gateType === "auto-approve") {
+      console.log(
+        `[ws-server] Ship ${shipId.slice(0, 8)}... auto-approving gate: ${transition}`,
+      );
+      this.onGateApproved(shipId, transition);
+      this.shipManager.clearGateCheck(shipId);
+      return;
+    }
+
     // Set gate check state on the ship
     this.shipManager.setGateCheck(shipId, transition, gateType);
 
@@ -1082,8 +1018,9 @@ export class EngineServer {
         return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nThe Ship is requesting code review. Please review the PR diff, post your review via \`gh pr review\` on GitHub, and submit your verdict via \`gate-result\` admiral-request.`;
       case "playwright":
         return `${header}\n${meta}\n\nThe Ship is requesting acceptance testing. Please run Playwright QA checks, post the results as a PR comment via \`gh pr comment\`, and submit your verdict via \`gate-result\` admiral-request.`;
-      case "human":
-        return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
+      case "auto-approve":
+        // auto-approve is handled before reaching buildGateCheckMessage
+        return `${header}\n${meta}\n\nAuto-approved.`;
     }
   }
 
@@ -1377,7 +1314,6 @@ export class EngineServer {
     this.shipManager.stopAll();
     this.bridgeManager.stopAll();
     this.processManager.killAll();
-    this.acceptanceWatcher.unwatchAll();
     this.wss.close();
   }
 }

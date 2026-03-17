@@ -27,8 +27,6 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     sessionId: null,
     prUrl: null,
     prReviewStatus: null,
-    acceptanceTest: null,
-    acceptanceTestApproved: false,
     gateCheck: null,
     errorType: null,
     retryCount: 0,

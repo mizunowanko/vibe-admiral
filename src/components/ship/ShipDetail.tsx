@@ -1,7 +1,6 @@
 import { useRef, useEffect } from "react";
 import { useShip } from "@/hooks/useShip";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { AcceptanceTestBanner } from "./AcceptanceTestBanner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -92,13 +91,6 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
               </p>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Acceptance Test Banner */}
-      {ship.status === "acceptance-test" && (
-        <div className="p-3">
-          <AcceptanceTestBanner ship={ship} />
         </div>
       )}
 

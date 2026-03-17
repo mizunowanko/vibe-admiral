@@ -46,7 +46,7 @@ export type GateTransition =
   | "reviewing→acceptance-test"
   | "acceptance-test→merging";
 
-export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 export type GateStatus = "pending" | "approved" | "rejected";
 
 export interface GateCheckState {
@@ -70,17 +70,10 @@ export interface Ship {
   sessionId: string | null;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
   retryCount: number;
   createdAt: string;
-}
-
-export interface AcceptanceTestRequest {
-  url: string;
-  checks: string[];
 }
 
 // === Issue ===
@@ -97,7 +90,6 @@ export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
   | "bridge-status"
-  | "acceptance-test"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request";
@@ -155,8 +147,6 @@ export type ClientMessage =
       data: { fleetId: string; issueNumber: number; repo: string };
     }
   | { type: "ship:chat"; data: { id: string; message: string } }
-  | { type: "ship:accept"; data: { id: string } }
-  | { type: "ship:reject"; data: { id: string; feedback: string } }
   | { type: "ship:retry"; data: { id: string } }
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
@@ -183,10 +173,6 @@ export type ServerMessage =
   | {
       type: "ship:compacting";
       data: { id: string; isCompacting: boolean };
-    }
-  | {
-      type: "ship:acceptance-test";
-      data: { id: string; url: string; checks: string[] };
     }
   | {
       type: "ship:created";
