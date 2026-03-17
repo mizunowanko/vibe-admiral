@@ -5,8 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { formatTime } from "@/lib/format-time";
+import { ChatMessage } from "@/components/chat/ChatMessage";
 
 interface ShipLogPanelProps {
   shipId: string;
@@ -25,8 +24,6 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
     () => logs.slice(-LOG_TAIL_LIMIT),
     [logs],
   );
-
-  const baseIndex = logs.length - tailLogs.length;
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -77,41 +74,14 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
 
       {/* Logs */}
       <ScrollArea ref={scrollRef} className="flex-1 p-3 min-h-0" onScroll={handleScroll}>
-        <div className="space-y-0.5 font-mono text-xs">
+        <div className="space-y-3">
           {logs.length > LOG_TAIL_LIMIT && (
             <p className="text-center text-muted-foreground/50 text-[10px] py-1">
               Showing last {LOG_TAIL_LIMIT} of {logs.length} entries
             </p>
           )}
           {tailLogs.map((log, i) => (
-            <div
-              key={baseIndex + i}
-              className={cn(
-                log.type === "error" && "text-red-400",
-                log.type === "user" && "text-blue-400",
-                log.type === "assistant" && "text-foreground/90",
-                log.type === "system" && log.subtype === "compact-status" && "text-purple-400",
-                log.type === "system" && log.subtype !== "compact-status" && "text-yellow-400/80",
-                log.type === "tool_use" && "text-cyan-400/80",
-                log.type === "tool_result" && "text-muted-foreground",
-                log.type === "result" && "text-green-400",
-                !["error", "user", "assistant", "system", "tool_use", "tool_result", "result"].includes(log.type) &&
-                  "text-muted-foreground",
-              )}
-            >
-              {log.timestamp && (
-                <span className="text-muted-foreground/50 select-none">
-                  {formatTime(log.timestamp)}{" "}
-                </span>
-              )}
-              <span className="text-muted-foreground/50 select-none">
-                [{log.type}]
-              </span>{" "}
-              {log.tool && (
-                <span className="text-primary/60">{log.tool}: </span>
-              )}
-              {log.content ?? JSON.stringify(log)}
-            </div>
+            <ChatMessage key={logs.length - tailLogs.length + i} message={log} />
           ))}
           {tailLogs.length === 0 && (
             <p className="text-center text-muted-foreground py-4">
