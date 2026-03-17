@@ -268,7 +268,7 @@ export function extractRequests(text: string): AdmiralRequest[] {
 
 /** Type guard: check if a request is a Bridge-only request. */
 export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
-  return req.request !== "status-transition";
+  return req.request !== "status-transition" && req.request !== "nothing-to-do";
 }
 
 /** Type guard: check if a request is a Ship request. */
