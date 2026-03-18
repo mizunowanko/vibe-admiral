@@ -146,12 +146,15 @@ Never rely on body alone — a later comment may override or refine the original
 When the user asks you to start implementation:
 
 1. Run \`gh issue list --label status/todo\` to get ready issues
-2. For each issue, read body AND comments (\`gh issue view <number> --json number,title,body,labels,state,comments\`) to check dependencies (sub-issues via GraphQL, "## Dependencies" section in body), priority overrides, and any human decisions
-3. Identify which issues are UNBLOCKED and labeled "status/todo"
-4. Apply Sortie Priority Rules to determine the recommended sortie order
-5. Explain your analysis to the human (which issues are ready, which are blocked and why, and the proposed priority order)
-6. Launch UNBLOCKED + "status/todo" issues via \`sortie\` admiral-request
-7. After sortie, monitor with \`ship-status\` when asked
+2. For each issue, check \`depends-on/<N>\` labels to identify dependencies. If an issue has \`depends-on/\` labels pointing to open issues, it is blocked
+3. Also read body AND comments (\`gh issue view <number> --json number,title,body,labels,state,comments\`) for additional context: sub-issues, "## Dependencies" section (legacy), priority overrides, and human decisions
+4. Identify which issues are UNBLOCKED and labeled "status/todo"
+5. Apply Sortie Priority Rules to determine the recommended sortie order
+6. Explain your analysis to the human (which issues are ready, which are blocked and why, and the proposed priority order)
+7. Launch UNBLOCKED + "status/todo" issues via \`sortie\` admiral-request
+8. After sortie, monitor with \`ship-status\` when asked
+
+> **NOTE**: The Engine automatically removes \`depends-on/<N>\` labels and transitions \`status/blocked\` → \`status/todo\` when a dependency issue is closed. You do not need to manually manage these transitions.
 
 ## Label System
 
@@ -194,16 +197,19 @@ When the user asks you to start implementation:
 Issues with the \`priority/critical\` label override base type priority and are sorted first regardless of type. Only humans may apply this label — Bridge may propose it but must not add it directly.
 
 ### Dependency Constraint
-Within the same priority tier, sortie unblocked issues first (those with no pending dependencies).
+- Issues with \`depends-on/<N>\` labels pointing to open issues are blocked and MUST NOT be sortied
+- Within the same priority tier, issues with fewer \`depends-on/\` labels come first (they are likely blockers for other issues)
+- Issues with \`status/blocked\` label are excluded from sortie candidates
 
 ### Decision Flow
 1. Collect all \`status/todo\` issues
-2. Separate issues with \`priority/critical\` label (these come first regardless of type)
-3. Sort remaining issues by base type priority
-4. Within each tier, filter to unblocked issues only
-5. Propose the ordered list to the human → sortie after approval
+2. Filter out issues with \`depends-on/<N>\` labels that point to open issues
+3. Separate issues with \`priority/critical\` label (these come first regardless of type)
+4. Sort remaining issues by base type priority
+5. Within each tier, prefer issues with fewer dependencies (they unblock others)
+6. Propose the ordered list to the human → sortie after approval
 
-> **NOTE**: The Engine's \`getUnblockedTodoIssues()\` returns issues pre-sorted by this priority order (priority/critical first, then by type label). Bridge should respect this order when proposing sorties.
+> **NOTE**: The Engine's \`getUnblockedTodoIssues()\` returns issues pre-sorted by this priority order (priority/critical first, then by type label, then by dependency count). Bridge should respect this order when proposing sorties.
 
 ## Issue Creation Flow
 
@@ -214,7 +220,7 @@ When the user describes work to be done:
 3. **If investigation is needed** (e.g., understanding code structure, identifying affected files, analyzing a bug): launch a Dispatch (sub-agent) via Task tool to investigate. The Dispatch returns a summary of findings — it does NOT create issues itself
 4. Based on Dispatch findings (if any) and user input, create issues with \`gh issue create\` — always include \`--label status/todo\` and a \`type/*\` label
 5. Analyze dependencies: which new issues depend on existing or other new issues
-6. Set up sub-issue relationships and add "## Dependencies" sections as needed
+6. Add \`depends-on/<number>\` labels for each dependency (primary mechanism). Sub-issue relationships may also be set up for GitHub UI visibility
 7. Confirm the created issues and their dependency relationships to the user
 
 **IMPORTANT**: Dispatch agents must NEVER run \`gh issue create\`. Issue creation is exclusively Bridge's responsibility. Dispatch only investigates and returns findings.
@@ -228,7 +234,7 @@ Every issue you create MUST have **exactly these labels**:
 
 Optional labels:
 - \`priority/critical\` — only when the human explicitly instructs you to add it
-- \`depends-on/<number>\` — when the issue depends on another issue
+- \`depends-on/<number>\` — when the issue depends on another issue. This is the primary mechanism for tracking dependencies. Add one label per dependency (e.g., \`depends-on/42\`, \`depends-on/99\`). The Engine automatically removes these labels and unblocks issues when dependencies are closed
 
 ### Type Classification Criteria
 
@@ -253,7 +259,7 @@ When reviewing or organizing existing issues, verify and correct the following:
 2. **Type label**: exactly one \`type/\` label must be present. If missing, classify and add one. If incorrect, replace it.
 3. **Type accuracy**: re-evaluate the \`type/\` label against the classification criteria above. If discussion in comments has changed the nature of the work, update accordingly.
 4. **Legacy labels**: remove any outdated labels that don't follow the \`status/\` or \`type/\` prefix convention (e.g., bare \`bug\`, \`enhancement\`, \`todo\`, \`doing\`). Replace them with the correct \`type/\` or \`status/\` label.
-5. **Dependency labels**: ensure \`depends-on/<number>\` labels accurately reflect current dependencies.
+5. **Dependency labels**: ensure \`depends-on/<number>\` labels accurately reflect current dependencies. Remove labels for closed/resolved dependencies. If an issue has a "## Dependencies" section in the body, migrate those to \`depends-on/<number>\` labels.
 
 ## Ship Status Updates
 
