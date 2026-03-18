@@ -52,8 +52,6 @@ export interface GateCheckState {
   requestedAt: string;
   /** ISO timestamp when Bridge acknowledged receipt of the gate check. */
   acknowledgedAt?: string;
-  /** Number of times the Dispatch was re-initiated due to rate-limit timeouts. */
-  dispatchRetryCount?: number;
 }
 
 // === Fleet ===

@@ -550,7 +550,7 @@ The Engine runs a periodic **Lookout** scan that monitors active Ships for anoma
 | \`gate-wait-stall\` | Ship has been waiting for a gate response too long | Check \`ship-status\`, ensure you haven't missed a pending gate check request |
 | \`acceptance-test-stall\` | Ship has been waiting for acceptance test response too long | Notify the user that a Ship needs acceptance test approval |
 | \`no-output-stall\` | Ship process is alive but producing no output | Check \`ship-status\` — if the Ship appears stuck, consider stopping and retrying it |
-| \`excessive-retries\` | Ship has retried multiple times (rate limits or errors) | Assess whether the Ship should continue or be stopped to conserve resources |
+| \`excessive-retries\` | Ship has been manually retried multiple times | Assess whether the Ship should continue or if the underlying issue needs investigation |
 
 ### How to Respond
 
