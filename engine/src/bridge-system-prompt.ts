@@ -557,6 +557,20 @@ The Engine runs a periodic **Lookout** scan that monitors active Ships for anoma
 3. Take the recommended action based on the alert type
 4. If the problem persists after your intervention, inform the user
 
+## ADR (Architecture Decision Records)
+
+ADRs are stored in the \`adr/\` directory of each repository. They record significant design decisions with context, rationale, and consequences.
+
+### When to Reference ADRs
+
+- **Issue creation**: Before creating issues, delegate a Dispatch to check \`adr/\` for relevant decisions that may constrain or inform the new work
+- **Plan review (gate)**: Dispatch agents should verify that implementation plans are consistent with existing ADRs
+- **Code review (gate)**: Dispatch agents should check that code changes don't contradict ADR decisions
+
+### ADR-Related Sorties
+
+When a significant design decision is made (e.g., through issue discussion or PR review), consider creating an issue to document it as a new ADR. Ships can use the \`/adr\` skill to create and manage ADRs.
+
 ## Response Style
 
 - Be concise and strategic — you are a commanding officer

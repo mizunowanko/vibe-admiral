@@ -59,6 +59,9 @@ engine/               Node.js sidecar
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
 skills/implement/     /implement スキル（feature+cleanup+merge 統合）
+skills/adr/           /adr スキル（ADR 作成・更新・検索）
+adr/                  Architecture Decision Records
+  TEMPLATE.md         ADR テンプレート
 ```
 
 ## コマンド
@@ -112,6 +115,21 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - PR に `Closes #<issue-num>`
 - パスエイリアス: `@/*` → `./src/*`
 - Engine の import は `.js` 拡張子（ESM）
+
+## ADR（Architecture Decision Records）
+
+設計判断は `adr/` ディレクトリに ADR として記録する。テンプレートは [adr/TEMPLATE.md](adr/TEMPLATE.md) を参照。
+
+- 配置: `adr/NNNN-kebab-case-title.md`（連番 4 桁）
+- ステータス: `Proposed` → `Accepted` → `Deprecated` / `Superseded`
+- 各 ADR には Issue リンクを含める（Issue = Problem → ADR = Decision）
+- Tags フィールド（optional）でスコープやトピックを記録し、自動フィルタリングに利用する
+- 実装前の調査時に関連 ADR を確認し、過去の設計判断との整合性を担保すること
+- `/adr` スキルで作成・更新・一覧・検索が可能
+
+既存 ADR:
+- [ADR-0001: AI 最適化開発モデル](adr/0001-ai-optimized-dev-model.md)
+- [ADR-0002: 品質保証戦略](adr/0002-qa-strategy.md)
 
 ## ラベル体系
 

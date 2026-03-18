@@ -337,6 +337,16 @@ export class ShipManager {
     await mkdir(implementDestDir, { recursive: true });
     await copyFile(implementSrc, join(implementDestDir, "SKILL.md"));
 
+    // Copy /adr skill from the main repo's skills/ (non-fatal)
+    const adrSrc = join(repoRoot, "skills", "adr", "SKILL.md");
+    const adrDestDir = join(worktreePath, ".claude", "skills", "adr");
+    try {
+      await mkdir(adrDestDir, { recursive: true });
+      await copyFile(adrSrc, join(adrDestDir, "SKILL.md"));
+    } catch {
+      console.warn("[ship-manager] Failed to deploy /adr skill");
+    }
+
     // Copy dev-shared skills if devSharedDir is configured
     const devSharedDir = skillSources?.devSharedDir;
     if (!devSharedDir) return;

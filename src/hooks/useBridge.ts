@@ -54,6 +54,16 @@ export function useBridge(fleetId: string | null) {
         }
       }
 
+      // Bridge question timeout — clear pending state
+      if (msg.type === "bridge:question-timeout") {
+        const timeoutData = msg.data as { fleetId: string };
+        if (timeoutData.fleetId === fleetId) {
+          setPendingQuestion(null);
+          pendingToolUseId.current = null;
+          setIsLoading(false);
+        }
+      }
+
       if (msg.type === "error") {
         const errorData = msg.data as { source: string; message: string };
         if (
@@ -114,6 +124,11 @@ export function useBridge(fleetId: string | null) {
       const toolUseId = pendingToolUseId.current;
       setPendingQuestion(null);
       pendingToolUseId.current = null;
+      // Optimistic update: immediately show the answer in chat
+      setMessages((prev) => [
+        ...prev,
+        { type: "user", content: answer, timestamp: Date.now() },
+      ]);
       setIsLoading(true);
       wsClient.send({
         type: "bridge:answer",
