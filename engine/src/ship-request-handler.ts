@@ -4,6 +4,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import type { ShipRequest, AdmiralRequestResponse, ShipStatus, FleetGateSettings, GateType } from "./types.js";
 import { resolveGate } from "./gate-config.js";
+import * as github from "./github.js";
 
 /**
  * Extended response that indicates whether a gate check was triggered.
@@ -27,6 +28,8 @@ export interface StatusTransitionResult extends AdmiralRequestResponse {
  * - `status-transition`: Transactional phase change —
  *   validates the transition, checks for gate requirements,
  *   updates GitHub label synchronously, and confirms the new status internally.
+ * - `nothing-to-do`: Ship determined there is no work to do —
+ *   posts a comment on the issue, closes it, and marks the Ship as done.
  */
 export class ShipRequestHandler {
   private shipManager: ShipManager;
@@ -50,6 +53,8 @@ export class ShipRequestHandler {
     switch (request.request) {
       case "status-transition":
         return this.handleStatusTransition(shipId, request.status, gateSettings);
+      case "nothing-to-do":
+        return this.handleNothingToDo(shipId, request.reason);
     }
   }
 
@@ -169,6 +174,50 @@ export class ShipRequestHandler {
 
     // Label update succeeded — now confirm the status internally
     this.shipManager.updateStatus(shipId, targetStatus);
+    return { ok: true };
+  }
+
+  /**
+   * Handle "nothing-to-do": Ship determined there is no work needed.
+   * Posts a comment on the issue, closes it, and marks the Ship as done.
+   */
+  private async handleNothingToDo(
+    shipId: string,
+    reason: string,
+  ): Promise<StatusTransitionResult> {
+    const ship = this.shipManager.getShip(shipId);
+    if (!ship) {
+      return { ok: false, error: `Ship ${shipId} not found` };
+    }
+
+    // Post a comment explaining why there's nothing to do
+    try {
+      await github.commentOnIssue(
+        ship.repo,
+        ship.issueNumber,
+        `## Nothing to do\n\n${reason}\n\nClosing this issue as the problem appears to be already resolved.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`,
+      );
+    } catch (err) {
+      console.warn(
+        `[ship-request-handler] Failed to comment on #${ship.issueNumber}:`,
+        err,
+      );
+    }
+
+    // Close the issue
+    try {
+      await github.closeIssue(ship.repo, ship.issueNumber);
+    } catch (err) {
+      console.warn(
+        `[ship-request-handler] Failed to close #${ship.issueNumber}:`,
+        err,
+      );
+    }
+
+    // Mark Ship as done with nothingToDo flag
+    this.shipManager.setNothingToDo(shipId, reason);
+    this.shipManager.updateStatus(shipId, "done");
+
     return { ok: true };
   }
 

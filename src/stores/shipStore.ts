@@ -7,6 +7,8 @@ interface ShipStatusData {
   repo?: string;
   issueNumber?: number;
   issueTitle?: string;
+  nothingToDo?: boolean;
+  nothingToDoReason?: string;
 }
 
 interface ShipState {
@@ -79,6 +81,10 @@ export const useShipStore = create<ShipState>((set) => ({
           ...(extra?.repo && { repo: extra.repo }),
           ...(extra?.issueNumber && { issueNumber: extra.issueNumber }),
           ...(extra?.issueTitle && { issueTitle: extra.issueTitle }),
+          ...(extra?.nothingToDo && {
+            nothingToDo: extra.nothingToDo,
+            nothingToDoReason: extra.nothingToDoReason,
+          }),
         });
       } else {
         ships.set(id, {

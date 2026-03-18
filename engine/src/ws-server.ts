@@ -26,6 +26,8 @@ import {
 import { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
+import { Lookout } from "./lookout.js";
+import type { LookoutAlert } from "./lookout.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
@@ -42,6 +44,7 @@ export class EngineServer {
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
   private shipRequestHandler: ShipRequestHandler;
+  private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
@@ -69,9 +72,9 @@ export class EngineServer {
   private static readonly MAX_DISPATCH_RETRIES = 2;
 
   /** Gate checks pending longer than this are auto-rejected (ms). */
-  private static readonly GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly GATE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
   /** Extended gate timeout when Bridge is rate-limited (ms). */
-  private static readonly GATE_TIMEOUT_EXTENDED_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly GATE_TIMEOUT_EXTENDED_MS = 15 * 60 * 1000; // 15 minutes
   /** Window within which Bridge rate-limit is considered "recent" (ms). */
   private static readonly RATE_LIMIT_RECENCY_MS = 2 * 60 * 1000; // 2 minutes
   /** Sortie cooldown duration after rate-limit detection (ms). */
@@ -94,6 +97,7 @@ export class EngineServer {
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
     this.shipRequestHandler = new ShipRequestHandler(this.shipManager, this.statusManager);
+    this.lookout = new Lookout(this.shipManager, this.processManager);
 
     // Wire up cross-handler references for gate flow
     this.requestHandler.setShipRequestHandler(this.shipRequestHandler);
@@ -111,6 +115,7 @@ export class EngineServer {
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
     this.startGateTimeoutScanner();
+    this.setupLookout();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
 
@@ -225,6 +230,12 @@ export class EngineServer {
           }
         }
       } else {
+        // Update lastOutputAt for Lookout no-output detection
+        {
+          const ship = this.shipManager.getShip(id);
+          if (ship) ship.lastOutputAt = Date.now();
+        }
+
         // Extract sessionId from init messages (before parsing drops them)
         const sessionId = extractSessionId(msg);
         if (sessionId) {
@@ -476,15 +487,20 @@ export class EngineServer {
           repo: ship?.repo,
           issueNumber: ship?.issueNumber,
           issueTitle: ship?.issueTitle,
+          ...(ship?.nothingToDo && {
+            nothingToDo: true,
+            nothingToDoReason: ship.nothingToDoReason,
+          }),
         },
       });
 
       // Also inject into Bridge chat for the ship's fleet
       if (ship) {
+        const nothingToDoSuffix = ship.nothingToDo && status === "done" ? " (nothing to do)" : "";
         const statusMessage = {
           type: "system" as const,
           subtype: "ship-status" as const,
-          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${detail ? ` — ${detail}` : ""}`,
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${nothingToDoSuffix}${detail ? ` — ${detail}` : ""}`,
           meta: {
             category: "ship-status" as const,
             issueNumber: ship.issueNumber,
@@ -498,6 +514,46 @@ export class EngineServer {
         });
       }
     });
+  }
+
+  private setupLookout(): void {
+    this.lookout.setAlertHandler((alert: LookoutAlert) => {
+      const ship = this.shipManager.getShip(alert.shipId);
+      if (!ship) return;
+
+      const bridgeId = `bridge-${alert.fleetId}`;
+
+      // Build system message for Bridge chat
+      const alertMessage: StreamMessage = {
+        type: "system",
+        subtype: "lookout-alert",
+        content: `[Lookout Alert] ${alert.message}`,
+        meta: {
+          category: "lookout-alert",
+          issueNumber: alert.issueNumber,
+          issueTitle: alert.issueTitle,
+          alertType: alert.alertType,
+          shipId: alert.shipId,
+        },
+      };
+
+      // Add to Bridge history and broadcast to frontend
+      this.bridgeManager.addToHistory(alert.fleetId, alertMessage);
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId: alert.fleetId, message: alertMessage },
+      });
+
+      // Send to Bridge stdin if Bridge is running
+      if (this.processManager.isRunning(bridgeId)) {
+        this.processManager.sendMessage(
+          bridgeId,
+          `[Lookout Alert] ${alert.message}`,
+        );
+      }
+    });
+
+    this.lookout.start();
   }
 
   private async handleMessage(
@@ -1520,9 +1576,12 @@ export class EngineServer {
     for (const ship of this.shipManager.getAllShips()) {
       if (
         ship.gateCheck &&
-        ship.gateCheck.status === "pending" &&
-        now - new Date(ship.gateCheck.requestedAt).getTime() > effectiveTimeout
+        ship.gateCheck.status === "pending"
       ) {
+        // Use acknowledgedAt (when Bridge ACK'd) as the timeout base if available,
+        // otherwise fall back to requestedAt (when Engine sent the request)
+        const timeoutBase = ship.gateCheck.acknowledgedAt ?? ship.gateCheck.requestedAt;
+        if (now - new Date(timeoutBase).getTime() <= effectiveTimeout) continue;
         const transition = ship.gateCheck.transition;
         const dispatchRetryCount = ship.gateCheck.dispatchRetryCount ?? 0;
 
@@ -1534,6 +1593,7 @@ export class EngineServer {
         ) {
           ship.gateCheck.dispatchRetryCount = dispatchRetryCount + 1;
           ship.gateCheck.requestedAt = new Date().toISOString();
+          ship.gateCheck.acknowledgedAt = undefined;
           console.log(
             `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out during rate limit — re-initiating Dispatch retry #${ship.gateCheck.dispatchRetryCount} (${transition})`,
           );

@@ -79,6 +79,8 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
   retryCount: number;
+  nothingToDo?: boolean;
+  nothingToDoReason?: string;
   createdAt: string;
 }
 
@@ -104,7 +106,15 @@ export type StreamMessageSubtype =
   | "acceptance-test"
   | "request-result"
   | "pr-review-request"
-  | "gate-check-request";
+  | "gate-check-request"
+  | "lookout-alert";
+
+// === Lookout ===
+export type LookoutAlertType =
+  | "gate-wait-stall"
+  | "acceptance-test-stall"
+  | "no-output-stall"
+  | "excessive-retries";
 
 export interface SystemMessageMeta {
   category: StreamMessageSubtype;
@@ -116,6 +126,8 @@ export interface SystemMessageMeta {
   prUrl?: string;
   url?: string;
   checks?: string[];
+  alertType?: LookoutAlertType;
+  shipId?: string;
 }
 
 export interface StreamMessage {
@@ -195,7 +207,7 @@ export type ServerMessage =
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
       type: "ship:status";
-      data: { id: string; status: ShipStatus; detail?: string };
+      data: { id: string; status: ShipStatus; detail?: string; nothingToDo?: boolean; nothingToDoReason?: string };
     }
   | {
       type: "ship:compacting";

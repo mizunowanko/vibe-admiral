@@ -56,6 +56,8 @@ export class BridgeRequestHandler {
         return this.handlePRReviewResult(request);
       case "gate-result":
         return this.handleGateResult(request);
+      case "gate-ack":
+        return this.handleGateAck(request);
     }
   }
 
@@ -190,6 +192,29 @@ export class BridgeRequestHandler {
 
     const label = request.verdict === "approve" ? "APPROVED" : "CHANGES REQUESTED";
     return `[PR Review Result] Ship #${ship.issueNumber} PR #${request.prNumber}: ${label}${request.comments ? ` — ${request.comments}` : ""}`;
+  }
+
+  private handleGateAck(
+    request: Extract<BridgeRequest, { request: "gate-ack" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId, request.issueNumber);
+    if (!ship) {
+      return `[Gate ACK Failed] Ship ${request.shipId} not found`;
+    }
+
+    if (!ship.gateCheck || ship.gateCheck.transition !== request.transition) {
+      return `[Gate ACK Failed] Ship #${ship.issueNumber} has no pending gate for ${request.transition}`;
+    }
+
+    if (ship.gateCheck.status !== "pending") {
+      return `[Gate ACK Failed] Ship #${ship.issueNumber} gate for ${request.transition} is already ${ship.gateCheck.status}`;
+    }
+
+    ship.gateCheck.acknowledgedAt = new Date().toISOString();
+    console.log(
+      `[bridge-request] Gate ACK received for Ship #${ship.issueNumber}: ${request.transition} — timeout window reset`,
+    );
+    return `[Gate ACK] Ship #${ship.issueNumber}: ${request.transition} acknowledged — timeout window reset`;
   }
 
   private async handleGateResult(

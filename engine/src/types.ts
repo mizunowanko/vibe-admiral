@@ -50,6 +50,8 @@ export interface GateCheckState {
   status: GateStatus;
   feedback?: string;
   requestedAt: string;
+  /** ISO timestamp when Bridge acknowledged receipt of the gate check. */
+  acknowledgedAt?: string;
   /** Number of times the Dispatch was re-initiated due to rate-limit timeouts. */
   dispatchRetryCount?: number;
 }
@@ -130,7 +132,15 @@ export type StreamMessageSubtype =
   | "acceptance-test"
   | "request-result"
   | "pr-review-request"
-  | "gate-check-request";
+  | "gate-check-request"
+  | "lookout-alert";
+
+// === Lookout ===
+export type LookoutAlertType =
+  | "gate-wait-stall"
+  | "acceptance-test-stall"
+  | "no-output-stall"
+  | "excessive-retries";
 
 export interface SystemMessageMeta {
   category: StreamMessageSubtype;
@@ -142,6 +152,8 @@ export interface SystemMessageMeta {
   prUrl?: string;
   url?: string;
   checks?: string[];
+  alertType?: LookoutAlertType;
+  shipId?: string;
 }
 
 export interface StreamMessage {
@@ -195,11 +207,13 @@ export type BridgeRequest =
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
-  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number };
+  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
+  | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
-  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string };
+  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string }
+  | { request: "nothing-to-do"; reason: string };
 
 // === Admiral Request (union of Bridge + Ship requests) ===
 export type AdmiralRequest = BridgeRequest | ShipRequest;
@@ -242,8 +256,12 @@ export interface ShipProcess {
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
   retryCount: number;
+  nothingToDo?: boolean;
+  nothingToDoReason?: string;
   createdAt: string;
   completedAt?: number;
+  /** Timestamp (ms epoch) of last stdout data from Ship process. Used by Lookout. */
+  lastOutputAt: number | null;
 }
 
 // === Persisted Ship (subset for disk persistence across Engine restarts) ===

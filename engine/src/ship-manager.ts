@@ -103,6 +103,7 @@ export class ShipManager {
       errorType: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
+      lastOutputAt: null,
     };
     this.ships.set(shipId, ship);
 
@@ -211,6 +212,14 @@ export class ShipManager {
       // This method only updates in-memory state and notifies the frontend.
       this.onStatusChange?.(id, status, detail);
       this.persistToDisk();
+    }
+  }
+
+  setNothingToDo(id: string, reason: string): void {
+    const ship = this.ships.get(id);
+    if (ship) {
+      ship.nothingToDo = true;
+      ship.nothingToDoReason = reason;
     }
   }
 
@@ -484,6 +493,7 @@ export class ShipManager {
           errorType: null,
           retryCount: 0,
           createdAt: ps.createdAt,
+          lastOutputAt: null,
         };
         this.ships.set(ps.id, ship);
         restored++;

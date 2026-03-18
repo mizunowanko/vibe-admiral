@@ -224,6 +224,18 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return gateResult;
     }
 
+    case "gate-ack": {
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
+      const gateAck: { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number } = {
+        request: "gate-ack",
+        shipId: r.shipId,
+        transition: r.transition as GateTransition,
+      };
+      if (typeof r.issueNumber === "number") gateAck.issueNumber = r.issueNumber;
+      return gateAck;
+    }
+
     case "status-transition": {
       const status = r.status as string | undefined;
       if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;
@@ -233,6 +245,11 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       };
       if (typeof r.planCommentUrl === "string") transition.planCommentUrl = r.planCommentUrl;
       return transition;
+    }
+
+    case "nothing-to-do": {
+      if (typeof r.reason !== "string" || !r.reason) return null;
+      return { request: "nothing-to-do", reason: r.reason };
     }
 
     default:
@@ -260,14 +277,16 @@ export function extractRequests(text: string): AdmiralRequest[] {
   return requests;
 }
 
+const SHIP_REQUEST_TYPES = new Set(["status-transition", "nothing-to-do"]);
+
 /** Type guard: check if a request is a Bridge-only request. */
 export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
-  return req.request !== "status-transition";
+  return !SHIP_REQUEST_TYPES.has(req.request);
 }
 
 /** Type guard: check if a request is a Ship request. */
 export function isShipRequest(req: AdmiralRequest): req is ShipRequest {
-  return req.request === "status-transition";
+  return SHIP_REQUEST_TYPES.has(req.request);
 }
 
 /**

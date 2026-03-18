@@ -141,23 +141,26 @@ export class StateSync {
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
-      // Retry markDone with exponential backoff for consistency with failure path
-      for (let attempt = 0; attempt <= 3; attempt++) {
-        try {
-          await this.statusManager.markDone(ship.repo, ship.issueNumber);
-          break;
-        } catch (err) {
-          if (attempt === 3) {
-            console.warn(
-              `[state-sync] Failed to mark #${ship.issueNumber} as done after ${attempt + 1} attempts:`,
-              err,
-            );
-          } else {
-            const delay = 500 * Math.pow(2, attempt);
-            console.warn(
-              `[state-sync] markDone attempt ${attempt + 1} failed for #${ship.issueNumber}, retrying in ${delay}ms`,
-            );
-            await sleep(delay);
+      // Skip markDone if Ship already handled issue closure (nothing-to-do case)
+      if (!ship.nothingToDo) {
+        // Retry markDone with exponential backoff for consistency with failure path
+        for (let attempt = 0; attempt <= 3; attempt++) {
+          try {
+            await this.statusManager.markDone(ship.repo, ship.issueNumber);
+            break;
+          } catch (err) {
+            if (attempt === 3) {
+              console.warn(
+                `[state-sync] Failed to mark #${ship.issueNumber} as done after ${attempt + 1} attempts:`,
+                err,
+              );
+            } else {
+              const delay = 500 * Math.pow(2, attempt);
+              console.warn(
+                `[state-sync] markDone attempt ${attempt + 1} failed for #${ship.issueNumber}, retrying in ${delay}ms`,
+              );
+              await sleep(delay);
+            }
           }
         }
       }
