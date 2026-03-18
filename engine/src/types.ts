@@ -50,6 +50,8 @@ export interface GateCheckState {
   status: GateStatus;
   feedback?: string;
   requestedAt: string;
+  /** ISO timestamp when Bridge acknowledged receipt of the gate check. */
+  acknowledgedAt?: string;
   /** Number of times the Dispatch was re-initiated due to rate-limit timeouts. */
   dispatchRetryCount?: number;
 }
@@ -195,7 +197,8 @@ export type BridgeRequest =
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
-  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number };
+  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
+  | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
