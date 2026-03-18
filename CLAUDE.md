@@ -1,8 +1,6 @@
 # vibe-admiral
 
 > **このファイルはリポジトリ固有の開発規約です。**
-> Admiral（Bridge/Ship）への運用指示は Engine が `--append-system-prompt` やスキル経由で別途注入します。
-> 詳細は後述の「Admiral 連携アーキテクチャ」セクションを参照してください。
 
 Claude Code を使った並列開発を統括するデスクトップアプリ。
 複数リポにまたがる issue ベースの並列実装を自動化し、AI agent が品質を担保する「開発指揮システム」。
@@ -58,8 +56,16 @@ engine/               Node.js sidecar
     issue-tracker.ts  issue 状態トラッキング
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
-skills/implement/     /implement スキル（feature+cleanup+merge 統合）
-skills/adr/           /adr スキル（ADR 作成・更新・検索）
+skills/                Skills（Claude Code が on-demand で注入）
+  implement/           /implement オーケストレータ + 5 sub-skills
+  adr/                 /adr スキル（ADR 作成・更新・検索）
+  admiral-protocol/    admiral-request プロトコル仕様
+  gate-plan-review/    plan-review Gate Dispatch
+  gate-code-review/    code-review Gate Dispatch
+  sortie/              Sortie 計画・優先順位
+  issue-manage/        Issue 作成・整理
+  investigate/         調査 Dispatch テンプレート
+  read-issue/          Issue 全コンテキスト取得
 adr/                  Architecture Decision Records
   TEMPLATE.md         ADR テンプレート
 ```
@@ -133,7 +139,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 
 ## ラベル体系
 
-### ステータスラベル（`status/` prefix）— Engine 自動管理、排他的
+### ステータスラベル（`status/` prefix）— 排他的
 | ラベル | 意味 |
 |--------|------|
 | `status/todo` | Sortie 可能 |
@@ -141,7 +147,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 | `status/implementing` | 実装中（コーディング + テスト） |
 | `status/acceptance-test` | 受け入れテスト中（PR レビュー + QA） |
 | `status/merging` | マージ中 |
-| `status/blocked` | 依存関係で着手不可（Bridge が付与可） |
+| `status/blocked` | 依存関係で着手不可 |
 
 ### カテゴリラベル（`type/` prefix）— 人間または Bridge が付与
 | 優先順位 | ラベル | コミット prefix |
@@ -153,29 +159,3 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 | 5 | `type/refactor` | `refactor:` |
 | 6 | `type/feature` | `feat:` |
 
-## Admiral 連携アーキテクチャ
-
-vibe-admiral は Fleet 配下の各リポに対して Claude Code セッション（Bridge / Ship）を起動する。
-各リポの CLAUDE.md は **リポ固有の開発規約** として尊重され、Admiral の運用指示は別経路で注入される。
-
-### 注入経路
-
-| 対象 | 経路 | 内容 |
-|------|------|------|
-| Bridge | `--append-system-prompt`（`bridge-system-prompt.ts` で生成） | Admiral-Request プロトコル、Sortie フロー、ラベル運用、PR レビュー手順 |
-| Ship | `/implement` スキル（`.claude/skills/implement/SKILL.md`） | ワークフロー手順（調査→実装→テスト→PR→マージ） |
-| 共通 | `VIBE_ADMIRAL=true` 環境変数 | Admiral 管理下であることの検出フラグ |
-
-### Fleet 設定による追加ルール
-
-Fleet ごとに以下のパスを設定可能（`engine/src/types.ts` の `Fleet` 型）:
-
-- **`sharedRulePaths`**: Bridge・Ship 双方に注入される Fleet 全体の共通ルール
-- **`bridgeRulePaths`**: Bridge にのみ注入されるルール
-- **`shipRulePaths`**: Ship にのみ注入されるルール
-
-### リポ固有 CLAUDE.md と Admiral 指示の分離原則
-
-- **CLAUDE.md**: リポの技術スタック、ディレクトリ構成、コマンド、コーディング規約、ラベル体系など開発規約のみを記載する。Claude Code が worktree の `cwd` から自動で読み込む
-- **Admiral 運用指示**: Engine が `--append-system-prompt` やスキルファイルとして注入する。CLAUDE.md には書かない
-- **複数リポ対応**: 各リポは独自の CLAUDE.md を持ち、Admiral はそれを変更しない。運用指示は常に別経路で注入される

@@ -498,7 +498,7 @@ rm -f .claude/admiral-request-response.json
 echo "$RESPONSE"
 ```
 
-Gate が発動した場合は Gate 待機フローに従う。auto-approve Gate の場合は即座に承認される。Gate 承認後、マージを実行する。
+Gate が発動した場合は Gate 待機フローに従う。Gate 承認後、マージを実行する。
 
 worktree 環境を前提とする。`--delete-branch` は付けない（`gh` がローカルで `git checkout` を試みて worktree と競合するため）。
 
