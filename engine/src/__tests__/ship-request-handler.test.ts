@@ -20,7 +20,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test",
-    status: "investigating",
+    status: "planning",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/tmp/worktree",
@@ -105,25 +105,29 @@ describe("ShipRequestHandler", () => {
       expect(result.error).toContain("Cannot go backward");
     });
 
-    it("allows forward transition without gate", async () => {
+    it("allows forward transition without gate (gate disabled)", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "investigating" }),
+        makeShip({ status: "planning" }),
       );
       mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
 
-      const result = await handler.handle("ship-1", {
-        request: "status-transition",
-        status: "planning",
-      });
+      const settings: FleetGateSettings = {
+        "planning→implementing": false,
+      };
+      const result = await handler.handle(
+        "ship-1",
+        { request: "status-transition", status: "implementing" },
+        settings,
+      );
       expect(result).toEqual({ ok: true });
       expect(mockStatusManager.syncPhaseLabel).toHaveBeenCalledWith(
         "owner/repo",
         42,
-        "planning",
+        "implementing",
       );
       expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
         "ship-1",
-        "planning",
+        "implementing",
       );
     });
 
@@ -260,16 +264,21 @@ describe("ShipRequestHandler", () => {
 
     it("returns error when GitHub label sync fails", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "investigating" }),
+        makeShip({ status: "planning" }),
       );
       mockStatusManager.syncPhaseLabel.mockRejectedValue(
         new Error("GitHub API error"),
       );
 
-      const result = await handler.handle("ship-1", {
-        request: "status-transition",
-        status: "planning",
-      });
+      // Disable gate so we reach the label sync path
+      const settings: FleetGateSettings = {
+        "planning→implementing": false,
+      };
+      const result = await handler.handle(
+        "ship-1",
+        { request: "status-transition", status: "implementing" },
+        settings,
+      );
       expect(result.ok).toBe(false);
       expect(result.error).toContain("GitHub label sync failed");
     });

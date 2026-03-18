@@ -10,7 +10,7 @@ function sleep(ms: number): Promise<void> {
  */
 const STATUS_TO_LABEL: ReadonlyMap<IssueStatus, string> = new Map([
   ["todo", "status/todo"],
-  ["doing", "status/implementing"],
+  ["doing", "status/planning"],
   ["done", ""], // done = issue closed, no label
 ]);
 
@@ -19,11 +19,8 @@ const STATUS_TO_LABEL: ReadonlyMap<IssueStatus, string> = new Map([
  * Phases that don't map to a label are omitted.
  */
 const PHASE_TO_LABEL: ReadonlyMap<ShipStatus, string> = new Map([
-  ["investigating", "status/investigating"],
   ["planning", "status/planning"],
   ["implementing", "status/implementing"],
-  ["testing", "status/testing"],
-  ["reviewing", "status/reviewing"],
   ["acceptance-test", "status/acceptance-test"],
   ["merging", "status/merging"],
 ]);
@@ -208,7 +205,7 @@ export class StatusManager {
   ): Promise<void> {
     switch (to) {
       case "doing": {
-        // todo → doing: remove "status/todo", add "status/implementing"
+        // todo → doing: remove "status/todo", add "status/planning"
         await github.updateLabels(repo, issueNumber, {
           remove: currentLabel,
           add: STATUS_TO_LABEL.get("doing"),

@@ -28,7 +28,6 @@ import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
-import { resolveGate } from "./gate-config.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
@@ -374,23 +373,8 @@ export class EngineServer {
           this.shipManager.setAcceptanceTest(shipId, request);
           this.shipManager.updateStatus(shipId, "acceptance-test");
 
-          // Check if the acceptance-test→merging gate is auto-approve.
-          // If so, skip broadcasting the acceptance test UI to frontend —
-          // the gate system will handle the transition automatically.
-          this.loadFleets().then((fleets) => {
-            const fleet = fleets.find((f) => f.id === ship.fleetId);
-            const gateType = resolveGate("acceptance-test", "merging", fleet?.gates);
-            const isAutoApprove = gateType === "auto-approve";
-
-            if (isAutoApprove) {
-              console.log(
-                `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test gate is auto-approve — skipping UI broadcast, auto-accepting`,
-              );
-              // Write acceptance-test-response.json so Ship CLI doesn't hang
-              this.shipManager.respondToAcceptanceTest(shipId, true);
-              return;
-            }
-
+          // Broadcast acceptance test to frontend and Bridge
+          this.loadFleets().then(() => {
             this.broadcast({
               type: "ship:acceptance-test",
               data: { id: shipId, url: request.url, checks: request.checks },
@@ -1106,22 +1090,6 @@ export class EngineServer {
 
     const transition = `${from}→${to}` as GateTransition;
 
-    // Auto-approve gates skip Bridge dispatch and resolve immediately
-    if (gateType === "auto-approve") {
-      this.shipManager.setGateCheck(shipId, transition, gateType);
-      this.shipManager.respondToGate(shipId, true).then(() => {
-        this.shipRequestHandler.executeGatedTransition(shipId, to).then((result) => {
-          if (result.ok) {
-            this.onGateApproved(shipId, transition);
-          }
-        }).catch(console.error);
-      }).catch(console.error);
-      console.log(
-        `[ws-server] Ship ${shipId.slice(0, 8)}... auto-approved gate: ${transition}`,
-      );
-      return;
-    }
-
     // Dedup guard: skip if a pending gate already exists for this transition
     if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
       console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
@@ -1232,10 +1200,6 @@ export class EngineServer {
         return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "playwright":
         return `${header}\n${meta}${retryNote}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "auto-approve":
-        // This case should not be reached — auto-approve gates are handled
-        // before buildGateCheckMessage is called. Included for type exhaustiveness.
-        return `${header}\n${meta}\n\nAuto-approved.`;
     }
   }
 

@@ -84,7 +84,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
 
 describe("ACTIVE_STATUS_LABELS", () => {
   it("contains expected labels", () => {
-    expect(ACTIVE_STATUS_LABELS.has("status/investigating")).toBe(true);
+    expect(ACTIVE_STATUS_LABELS.has("status/planning")).toBe(true);
     expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(true);
     expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(true);
   });

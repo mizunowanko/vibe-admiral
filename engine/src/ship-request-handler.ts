@@ -76,8 +76,7 @@ export class ShipRequestHandler {
 
     // Validate forward-only phase advancement
     const phaseOrder: ShipStatus[] = [
-      "sortie", "investigating", "planning", "implementing",
-      "testing", "reviewing", "acceptance-test", "merging",
+      "planning", "implementing", "acceptance-test", "merging",
     ];
     const currentIdx = phaseOrder.indexOf(ship.status);
     const targetIdx = phaseOrder.indexOf(targetStatus);
@@ -129,13 +128,11 @@ export class ShipRequestHandler {
       }
     }
 
-    // Legacy gate: block advancement past reviewing until Bridge approves PR
-    // (This is now handled by the "testing→reviewing" gate, but we keep this
-    //  as a safety check for the merging phase)
+    // Legacy gate: block advancement to merging until code-review gate approves
+    // (safety check when the implementing→acceptance-test gate is disabled)
     const mergingIdx = phaseOrder.indexOf("merging");
     if (targetIdx >= mergingIdx && ship.prReviewStatus !== "approved") {
-      // Only enforce if the code-review gate is disabled
-      const codeReviewGate = resolveGate("testing", "reviewing", gateSettings);
+      const codeReviewGate = resolveGate("implementing", "acceptance-test", gateSettings);
       if (!codeReviewGate) {
         return {
           ok: false,
@@ -144,9 +141,8 @@ export class ShipRequestHandler {
       }
     }
 
-    // Legacy gate: block advancement past acceptance-test until approved
-    // (This is now handled by the "acceptance-test→merging" gate, but we keep
-    //  this as a safety check when the gate is disabled)
+    // Legacy gate: block advancement past acceptance-test until QA approved
+    // (safety check when the acceptance-test→merging gate is disabled)
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
       const acceptanceGate = resolveGate("acceptance-test", "merging", gateSettings);

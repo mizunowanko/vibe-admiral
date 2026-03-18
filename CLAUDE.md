@@ -119,12 +119,9 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 | ラベル | 意味 |
 |--------|------|
 | `status/todo` | Sortie 可能 |
-| `status/investigating` | 調査中 |
-| `status/planning` | 計画中 |
-| `status/implementing` | 実装中 |
-| `status/testing` | テスト中 |
-| `status/reviewing` | レビュー中 |
-| `status/acceptance-test` | 受け入れテスト中 |
+| `status/planning` | 計画中（調査 + 計画） |
+| `status/implementing` | 実装中（コーディング + テスト） |
+| `status/acceptance-test` | 受け入れテスト中（PR レビュー + QA） |
 | `status/merging` | マージ中 |
 | `status/blocked` | 依存関係で着手不可（Bridge が付与可） |
 

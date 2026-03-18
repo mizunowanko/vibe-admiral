@@ -12,8 +12,7 @@ import { DEFAULT_GATE_TYPES } from "./types.js";
  */
 export const GATE_TRANSITIONS: readonly GateTransition[] = [
   "planning→implementing",
-  "testing→reviewing",
-  "reviewing→acceptance-test",
+  "implementing→acceptance-test",
   "acceptance-test→merging",
 ] as const;
 

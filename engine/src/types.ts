@@ -1,11 +1,7 @@
 // === Ship Status ===
 export type ShipStatus =
-  | "sortie"
-  | "investigating"
   | "planning"
   | "implementing"
-  | "testing"
-  | "reviewing"
   | "acceptance-test"
   | "merging"
   | "done"
@@ -19,12 +15,11 @@ export type ShipErrorType = "rate_limit" | "unknown";
 /** A transition key in the format "from→to" (using full-width arrow). */
 export type GateTransition =
   | "planning→implementing"
-  | "testing→reviewing"
-  | "reviewing→acceptance-test"
+  | "implementing→acceptance-test"
   | "acceptance-test→merging";
 
 /** Gate type determines which Dispatch sub-agent or mechanism handles the check. */
-export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
+export type GateType = "plan-review" | "code-review" | "playwright";
 
 /** Per-gate configuration: true = default type, string = specific type, false = disabled. */
 export type GateConfig = boolean | GateType;
@@ -35,9 +30,8 @@ export type FleetGateSettings = Partial<Record<GateTransition, GateConfig>>;
 /** Default gate types for each transition. */
 export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
   "planning→implementing": "plan-review",
-  "testing→reviewing": "code-review",
-  "reviewing→acceptance-test": "code-review",
-  "acceptance-test→merging": "auto-approve",
+  "implementing→acceptance-test": "code-review",
+  "acceptance-test→merging": "playwright",
 };
 
 /** Status of a pending gate check. */
