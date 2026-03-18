@@ -142,7 +142,7 @@ echo "$GATE_RESULT"
 |------|-----------|------|
 | `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
 | `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
-| `reviewing → acceptance-test` | playwright | Bridge が自動 QA を実施 |
+| `reviewing → acceptance-test` | code-review | Bridge が PR の追加機能の動作を検証 |
 | `acceptance-test → merging` | human | 人間が UI で承認 |
 
 ### ステップ対応表
@@ -358,7 +358,7 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
 
 #### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
 
-まず `acceptance-test` への遷移を表明する。この遷移は `reviewing → acceptance-test` の playwright Gate をトリガーする:
+まず `acceptance-test` への遷移を表明する。この遷移は `reviewing → acceptance-test` の code-review Gate をトリガーする:
 
 ````
 ```admiral-request

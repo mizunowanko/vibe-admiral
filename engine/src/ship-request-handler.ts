@@ -15,6 +15,8 @@ export interface StatusTransitionResult extends AdmiralRequestResponse {
     type: GateType;
     from: ShipStatus;
     to: ShipStatus;
+    /** Feedback from the previous rejected gate check (for retry awareness). */
+    previousFeedback?: string;
   };
 }
 
@@ -101,12 +103,14 @@ export class ShipRequestHandler {
           };
         } else if (ship.gateCheck.status === "rejected") {
           // Gate was rejected — Ship should have acted on the feedback
+          // Capture the previous feedback before clearing
+          const prevFeedback = ship.gateCheck.feedback;
           // Clear the rejection and let them re-request
           this.shipManager.clearGateCheck(shipId);
-          // Fall through to initiate a new gate check
+          // Fall through to initiate a new gate check with previous context
           return {
             ok: false,
-            gate: { type: gateType, from: ship.status, to: targetStatus },
+            gate: { type: gateType, from: ship.status, to: targetStatus, previousFeedback: prevFeedback },
             error: `Gate check required for ${ship.status} → ${targetStatus}. Initiating review.`,
           };
         }

@@ -1,3 +1,15 @@
+import { DEFAULT_GATE_TYPES } from "./types.js";
+import { GATE_TRANSITIONS } from "./gate-config.js";
+import type { GateType } from "./types.js";
+
+/** Human-readable description of what each gate type checks. */
+const GATE_TYPE_DESCRIPTIONS: Record<GateType, string> = {
+  "plan-review": "Review the Ship's implementation plan for completeness and feasibility",
+  "code-review": "Review the PR diff for quality, conventions, and correctness",
+  "playwright": "Run Playwright QA checks on the live application",
+  "human": "Human approval via frontend UI",
+};
+
 /**
  * Build the system prompt for Bridge (central command AI) sessions.
  *
@@ -252,10 +264,7 @@ Certain status transitions have **gates** — quality checkpoints. When a Ship r
 
 | Transition | Gate Type | What to Check |
 |------------|-----------|---------------|
-| \`planning→implementing\` | \`plan-review\` | Review the Ship's implementation plan for completeness and feasibility |
-| \`testing→reviewing\` | \`code-review\` | Review the PR diff for quality, conventions, and correctness |
-| \`reviewing→acceptance-test\` | \`real-e2e\` | Run real E2E test with toy project |
-| \`acceptance-test→merging\` | \`human\` | Human approval via frontend UI |
+${GATE_TRANSITIONS.map((t) => `| \`${t}\` | \`${DEFAULT_GATE_TYPES[t]}\` | ${GATE_TYPE_DESCRIPTIONS[DEFAULT_GATE_TYPES[t]]} |`).join("\n")}
 
 ### Dispatch Launch Templates
 
@@ -274,12 +283,13 @@ Repo: <repo>
 
 Steps:
 1. Run: gh issue view <issue> --repo <repo> --json title,body,comments
-2. Read the latest comment which contains the Ship's implementation plan
-3. Check if the plan covers all requirements in the issue
-4. Verify the plan is feasible and well-scoped
-5. IMPORTANT: Record your review on GitHub:
+2. Read ALL comments — check for previous plan review results (APPROVE/REJECT verdicts). If a prior review rejected the plan, note what was flagged
+3. Read the latest implementation plan comment from the Ship
+4. Check if the plan covers all requirements in the issue. If this is a re-review, verify that previous feedback has been addressed
+5. Verify the plan is feasible and well-scoped
+6. IMPORTANT: Record your review on GitHub:
    gh issue comment <issue> --repo <repo> --body "## Plan Review\\n\\n<your detailed review>\\n\\n**Verdict: APPROVE** (or REJECT)"
-6. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+7. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -303,13 +313,14 @@ Repo: <repo>
 PR: <pr-url>
 
 Steps:
-1. Run: gh pr view <number> --repo <repo> --json title,body
-2. Run: gh pr diff <number> --repo <repo>
-3. Review against: issue requirements, coding conventions, security, scope, test coverage
-4. IMPORTANT: Record your review on GitHub:
+1. Run: gh pr view <number> --repo <repo> --json title,body,reviews,comments
+2. Check for previous review history — if there are existing reviews with "request-changes", read them to understand what was previously flagged
+3. Run: gh pr diff <number> --repo <repo>
+4. Review against: issue requirements, coding conventions, security, scope, test coverage. If this is a re-review, verify that previous issues have been addressed
+5. IMPORTANT: Record your review on GitHub:
    - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
    - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
-5. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+6. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -319,35 +330,6 @@ If approving:
 If rejecting:
 \\\`\\\`\\\`admiral-request
 { "request": "gate-result", "shipId": "<ship-id>", "transition": "testing→reviewing", "verdict": "reject", "feedback": "<what needs fixing>" }
-\\\`\\\`\\\`
-\`)
-\`\`\`
-
-**For real-e2e gates:**
-\`\`\`
-Task(description="Dispatch: real-e2e #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=\`
-You are a Dispatch agent performing a real E2E gate check.
-
-Ship ID: <ship-id>
-Repo: <repo>
-
-Steps:
-1. Run: npx tsx e2e/qa-gate-e2e.ts
-2. Check the exit code: 0 = PASS, non-zero = FAIL
-3. Review the output for any errors or warnings
-4. IMPORTANT: Record the results on GitHub:
-   - Find PR number: gh pr list --repo <repo> --head <branch> --json number --jq '.[0].number'
-   - Post results: gh pr comment <pr-number> --repo <repo> --body "## E2E Test Results\\n\\n<summary>\\n\\n**Result: PASS/FAIL**"
-5. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
-
-If passing:
-\\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "<transition>", "verdict": "approve" }
-\\\`\\\`\\\`
-
-If failing:
-\\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "<transition>", "verdict": "reject", "feedback": "<what failed>" }
 \\\`\\\`\\\`
 \`)
 \`\`\`
@@ -364,6 +346,7 @@ If failing:
 - Code reviews: minor style issues are not blockers
 - Missing tests for new logic: reject
 - Security concerns or data loss risks: reject and escalate to the human
+- **Re-reviews**: When the Gate Check Request includes a "RETRY" note, the Dispatch MUST check GitHub for previous review history and verify that prior feedback was addressed. Do NOT repeat the same rejection if the issue was fixed. Always base decisions on the actual code/plan, not on stale prompt information
 
 ## PR Code Review (Legacy)
 

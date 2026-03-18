@@ -998,7 +998,7 @@ export class EngineServer {
       if (response.gate) {
         // Gate check required — initiate gate flow instead of writing response
         const planCommentUrl = request.request === "status-transition" ? request.planCommentUrl : undefined;
-        this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl);
+        this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl, response.gate.previousFeedback);
         // Write a "pending" response so Ship knows to wait
         await ShipRequestHandler.writeResponse(ship.worktreePath, {
           ok: false,
@@ -1030,6 +1030,7 @@ export class EngineServer {
     from: ShipStatus,
     to: ShipStatus,
     planCommentUrl?: string,
+    previousFeedback?: string,
   ): void {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
@@ -1064,7 +1065,7 @@ export class EngineServer {
     });
 
     // Build gate check message for Bridge
-    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType, planCommentUrl);
+    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType, planCommentUrl, previousFeedback);
 
     // Inject into Bridge chat
     const bridgeMsg = {
@@ -1095,23 +1096,25 @@ export class EngineServer {
     transition: GateTransition,
     gateType: GateType,
     planCommentUrl?: string,
+    previousFeedback?: string,
   ): string {
     const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
     const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}`;
+    const retryNote = previousFeedback
+      ? `\n\n⚠️ RETRY: This is a re-review after a previous rejection. The Ship claims to have addressed the following feedback:\n> ${previousFeedback}\nVerify that the previous issues have been fixed. Check GitHub (issue comments or PR reviews) for the full history of prior reviews.`
+      : "";
 
     switch (gateType) {
       case "plan-review": {
         const planRef = planCommentUrl
           ? `\nPlan comment: ${planCommentUrl}`
           : "";
-        return `${header}\n${meta}${planRef}\n\nLaunch a Dispatch (sub-agent) to review the plan. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+        return `${header}\n${meta}${planRef}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the plan. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       }
       case "code-review":
-        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "real-e2e":
-        return `${header}\n${meta}\n\nLaunch a Dispatch (sub-agent) to run the real E2E QA test. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "playwright":
-        return `${header}\n${meta}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+        return `${header}\n${meta}${retryNote}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "human":
         return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
     }

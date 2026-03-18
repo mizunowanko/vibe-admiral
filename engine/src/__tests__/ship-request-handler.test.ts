@@ -208,8 +208,36 @@ describe("ShipRequestHandler", () => {
         type: "plan-review",
         from: "planning",
         to: "implementing",
+        previousFeedback: undefined,
       });
       expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-1");
+    });
+
+    it("passes previous feedback when re-initiating after rejection", async () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeShip({
+          status: "planning",
+          gateCheck: {
+            transition: "planning→implementing",
+            gateType: "plan-review",
+            status: "rejected",
+            feedback: "Plan is missing test strategy",
+            requestedAt: new Date().toISOString(),
+          },
+        }),
+      );
+
+      const result = await handler.handle("ship-1", {
+        request: "status-transition",
+        status: "implementing",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.gate).toEqual({
+        type: "plan-review",
+        from: "planning",
+        to: "implementing",
+        previousFeedback: "Plan is missing test strategy",
+      });
     });
 
     it("respects fleet gate settings (disabled gate)", async () => {
