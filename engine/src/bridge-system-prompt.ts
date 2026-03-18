@@ -321,9 +321,10 @@ Steps:
 4. Read the latest implementation plan comment from the Ship
 5. Check if the plan covers all requirements in the issue. Use the Ship's investigation log context to evaluate feasibility. If this is a re-review, verify that previous feedback has been addressed
 6. Verify the plan is feasible and well-scoped
-7. IMPORTANT: Record your review on GitHub:
+7. Check the "QA Requirement" section: verify the qaRequired judgment is reasonable given the issue type and scope of changes. If the plan omits QA for changes that clearly affect the UI, flag it. If the plan includes QA for non-UI changes (refactor, infra, skill), note it as acceptable but unnecessary
+8. IMPORTANT: Record your review on GitHub:
    gh issue comment <issue> --repo <repo> --body "## Plan Review\\n\\n<your detailed review>\\n\\n**Verdict: APPROVE** (or REJECT)"
-8. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+9. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
