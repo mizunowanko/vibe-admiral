@@ -6,11 +6,8 @@ import { parseDependsOnLabels } from "./github.js";
 
 /** status/* labels that indicate work-in-progress (not todo, not blocked). */
 export const ACTIVE_STATUS_LABELS = new Set([
-  "status/investigating",
   "status/planning",
   "status/implementing",
-  "status/testing",
-  "status/reviewing",
   "status/acceptance-test",
   "status/merging",
 ]);

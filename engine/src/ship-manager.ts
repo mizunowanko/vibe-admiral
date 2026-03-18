@@ -90,7 +90,7 @@ export class ShipManager {
       repo,
       issueNumber,
       issueTitle: issue.title,
-      status: "sortie",
+      status: "planning",
       isCompacting: false,
       branchName,
       worktreePath,
@@ -113,7 +113,7 @@ export class ShipManager {
     // 8. Start acceptance test watcher
     this.acceptanceWatcher.watch(worktreePath, shipId);
 
-    this.updateStatus(shipId, "investigating");
+    this.updateStatus(shipId, "planning");
     return ship;
   }
 
@@ -420,7 +420,7 @@ export class ShipManager {
         extraPrompt,
         skill,
       );
-      this.updateStatus(shipId, "investigating", "Re-sortied");
+      this.updateStatus(shipId, "planning", "Re-sortied");
     }
 
     this.acceptanceWatcher.watch(ship.worktreePath, shipId);

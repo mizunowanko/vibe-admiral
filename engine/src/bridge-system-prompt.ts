@@ -7,7 +7,6 @@ const GATE_TYPE_DESCRIPTIONS: Record<GateType, string> = {
   "plan-review": "Review the Ship's implementation plan for completeness and feasibility",
   "code-review": "Review the PR diff for quality, conventions, and correctness",
   "playwright": "Run Playwright QA checks on the live application",
-  "auto-approve": "Auto-approved (no review needed)",
 };
 
 /**
@@ -108,10 +107,10 @@ Submit the result of a transition gate check. When a Ship requests a status tran
 \`\`\`
 
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "uuid-of-ship", "transition": "testing→reviewing", "verdict": "reject", "feedback": "Description of what needs fixing" }
+{ "request": "gate-result", "shipId": "uuid-of-ship", "transition": "implementing→acceptance-test", "verdict": "reject", "feedback": "Description of what needs fixing" }
 \`\`\`
 
-Valid transitions: \`planning→implementing\`, \`testing→reviewing\`, \`reviewing→acceptance-test\`, \`acceptance-test→merging\`
+Valid transitions: \`planning→implementing\`, \`implementing→acceptance-test\`, \`acceptance-test→merging\`
 
 #### 6. gate-ack
 Acknowledge receipt of a Gate Check Request. Send this IMMEDIATELY when you receive a \`[Gate Check Request]\` system message — BEFORE launching the Dispatch. This resets the Engine's timeout window so the Dispatch has enough time to complete.
@@ -162,12 +161,9 @@ When the user asks you to start implementation:
 | Label | Meaning |
 |-------|---------|
 | \`status/todo\` | Ready for sortie |
-| \`status/investigating\` | Under investigation |
-| \`status/planning\` | Planning phase |
-| \`status/implementing\` | Implementation in progress |
-| \`status/testing\` | Running tests |
-| \`status/reviewing\` | Code review in progress |
-| \`status/acceptance-test\` | Acceptance testing in progress |
+| \`status/planning\` | Planning phase (investigation + planning) |
+| \`status/implementing\` | Implementation in progress (coding + testing) |
+| \`status/acceptance-test\` | Acceptance testing (PR review + QA) |
 | \`status/merging\` | Merge in progress |
 | \`status/blocked\` | Blocked by dependencies (Bridge may set this) |
 
@@ -367,12 +363,12 @@ Steps:
 
 If approving:
 \\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "testing→reviewing", "verdict": "approve" }
+{ "request": "gate-result", "shipId": "<ship-id>", "transition": "implementing→acceptance-test", "verdict": "approve" }
 \\\`\\\`\\\`
 
 If rejecting:
 \\\`\\\`\\\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "testing→reviewing", "verdict": "reject", "feedback": "<what needs fixing>" }
+{ "request": "gate-result", "shipId": "<ship-id>", "transition": "implementing→acceptance-test", "verdict": "reject", "feedback": "<what needs fixing>" }
 \\\`\\\`\\\`
 \`)
 \`\`\`
@@ -489,7 +485,7 @@ Do NOT create issues or make any changes. Only investigate and report.
 
 ## PR Code Review (Legacy)
 
-You may still receive PR review notifications via \`[PR Review Request]\` messages. These are handled through the \`pr-review-result\` admiral-request (request #4) for backward compatibility. The code-review gate (\`testing→reviewing\`) will gradually replace this flow.
+You may still receive PR review notifications via \`[PR Review Request]\` messages. These are handled through the \`pr-review-result\` admiral-request (request #4) for backward compatibility. The code-review gate (\`implementing→acceptance-test\`) will gradually replace this flow.
 
 ### Review Flow for pr-review-result
 

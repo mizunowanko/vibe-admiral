@@ -164,11 +164,8 @@ const REPO_PATTERN_REQ = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
 /** Valid statuses that Ship can request via status-transition. */
 const TRANSITION_TARGETS: ReadonlySet<ShipStatus> = new Set([
-  "investigating",
   "planning",
   "implementing",
-  "testing",
-  "reviewing",
   "acceptance-test",
   "merging",
   "done",
