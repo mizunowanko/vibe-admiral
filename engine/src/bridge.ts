@@ -15,6 +15,10 @@ export interface BridgeSession {
   systemPrompt?: string;
   sessionId: string | null;
   history: StreamMessage[];
+  /** Tool use ID of a pending AskUserQuestion (null when no question pending). */
+  pendingToolUseId: string | null;
+  /** Timestamp (ms epoch) when AskUserQuestion was received (null when no question pending). */
+  questionAskedAt: number | null;
 }
 
 export class BridgeManager {
@@ -50,6 +54,8 @@ export class BridgeManager {
       systemPrompt,
       sessionId: persisted?.sessionId ?? null,
       history: restoredHistory,
+      pendingToolUseId: null,
+      questionAskedAt: null,
     };
     this.sessions.set(fleetId, session);
 
@@ -142,6 +148,41 @@ export class BridgeManager {
 
   getHistory(fleetId: string): StreamMessage[] {
     return this.sessions.get(fleetId)?.history ?? [];
+  }
+
+  setPendingQuestion(fleetId: string, toolUseId: string): void {
+    const session = this.sessions.get(fleetId);
+    if (session) {
+      session.pendingToolUseId = toolUseId;
+      session.questionAskedAt = Date.now();
+    }
+  }
+
+  clearPendingQuestion(fleetId: string): void {
+    const session = this.sessions.get(fleetId);
+    if (session) {
+      session.pendingToolUseId = null;
+      session.questionAskedAt = null;
+    }
+  }
+
+  getPendingQuestion(fleetId: string): { toolUseId: string; askedAt: number } | null {
+    const session = this.sessions.get(fleetId);
+    if (session?.pendingToolUseId && session.questionAskedAt) {
+      return { toolUseId: session.pendingToolUseId, askedAt: session.questionAskedAt };
+    }
+    return null;
+  }
+
+  /** Return all sessions that have a pending question. */
+  getSessionsWithPendingQuestion(): Array<{ fleetId: string; toolUseId: string; askedAt: number }> {
+    const results: Array<{ fleetId: string; toolUseId: string; askedAt: number }> = [];
+    for (const [fleetId, session] of this.sessions) {
+      if (session.pendingToolUseId && session.questionAskedAt) {
+        results.push({ fleetId, toolUseId: session.pendingToolUseId, askedAt: session.questionAskedAt });
+      }
+    }
+    return results;
   }
 
   stop(fleetId: string): void {

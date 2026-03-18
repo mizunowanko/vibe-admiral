@@ -2,11 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { StateSync, ACTIVE_STATUS_LABELS } from "../state-sync.js";
 
 // Mock external modules
-vi.mock("../github.js", () => ({
-  getIssue: vi.fn(),
-  updateLabels: vi.fn(),
-  listIssues: vi.fn(),
-}));
+vi.mock("../github.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../github.js")>();
+  return {
+    ...actual,
+    getIssue: vi.fn(),
+    updateLabels: vi.fn(),
+    listIssues: vi.fn(),
+  };
+});
 
 vi.mock("../worktree.js", () => ({
   getRepoRoot: vi.fn(),
@@ -84,7 +88,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
 
 describe("ACTIVE_STATUS_LABELS", () => {
   it("contains expected labels", () => {
-    expect(ACTIVE_STATUS_LABELS.has("status/investigating")).toBe(true);
+    expect(ACTIVE_STATUS_LABELS.has("status/planning")).toBe(true);
     expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(true);
     expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(true);
   });
@@ -278,6 +282,87 @@ describe("StateSync", () => {
       mockShipManager.getShip.mockReturnValue(undefined);
       await stateSync.onProcessExit("unknown", true);
       expect(mockShipManager.updateStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("auditDependencies", () => {
+    it("removes resolved depends-on label from dependent issues", async () => {
+      mockListIssues.mockResolvedValue([
+        makeIssue({
+          number: 50,
+          labels: ["depends-on/42", "status/blocked", "type/feature"],
+        }),
+      ]);
+      mockUpdateLabels.mockResolvedValue(undefined);
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      // Should remove the depends-on/42 label
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
+        remove: "depends-on/42",
+      });
+    });
+
+    it("transitions status/blocked → status/todo when all deps resolved", async () => {
+      mockListIssues.mockResolvedValue([
+        makeIssue({
+          number: 50,
+          labels: ["depends-on/42", "status/blocked", "type/feature"],
+        }),
+      ]);
+      mockUpdateLabels.mockResolvedValue(undefined);
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      // Should transition blocked → todo
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
+        remove: "status/blocked",
+        add: "status/todo",
+      });
+    });
+
+    it("does not unblock if other depends-on labels still reference open issues", async () => {
+      mockListIssues.mockResolvedValue([
+        makeIssue({
+          number: 50,
+          labels: [
+            "depends-on/42",
+            "depends-on/99",
+            "status/blocked",
+            "type/feature",
+          ],
+        }),
+      ]);
+      mockUpdateLabels.mockResolvedValue(undefined);
+      // depends-on/99 still points to an open issue
+      mockGetIssue.mockResolvedValue(makeIssue({ number: 99, state: "open" }));
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      // Should remove depends-on/42 label
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
+        remove: "depends-on/42",
+      });
+      // Should NOT transition to status/todo because depends-on/99 is still open
+      expect(mockUpdateLabels).not.toHaveBeenCalledWith(REPO, 50, {
+        remove: "status/blocked",
+        add: "status/todo",
+      });
+    });
+
+    it("does nothing when no issues have the label", async () => {
+      mockListIssues.mockResolvedValue([]);
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      expect(mockUpdateLabels).not.toHaveBeenCalled();
+    });
+
+    it("handles listIssues error gracefully (label may not exist)", async () => {
+      mockListIssues.mockRejectedValue(new Error("label not found"));
+
+      // Should not throw
+      await stateSync.auditDependencies(REPO, 42);
     });
   });
 

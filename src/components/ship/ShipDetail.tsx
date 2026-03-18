@@ -5,8 +5,8 @@ import { AcceptanceTestBanner } from "./AcceptanceTestBanner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ChatMessage } from "@/components/chat/ChatMessage";
 import { X } from "lucide-react";
-import { formatTime } from "@/lib/format-time";
 
 interface ShipDetailProps {
   shipId: string;
@@ -95,8 +95,8 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
         </div>
       )}
 
-      {/* Acceptance Test Banner — hidden when gate is auto-approve */}
-      {ship.status === "acceptance-test" && ship.gateCheck?.gateType !== "auto-approve" && (
+      {/* Acceptance Test Banner */}
+      {ship.status === "acceptance-test" && (
         <div className="p-3">
           <AcceptanceTestBanner ship={ship} />
         </div>
@@ -104,28 +104,9 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
 
       {/* Logs */}
       <ScrollArea ref={scrollRef} className="flex-1 p-4">
-        <div className="space-y-1 font-mono text-xs">
+        <div className="space-y-1">
           {logs.map((log, i) => (
-            <div
-              key={i}
-              className={
-                log.type === "error"
-                  ? "text-red-400"
-                  : log.type === "user"
-                    ? "text-blue-400"
-                    : "text-muted-foreground"
-              }
-            >
-              {log.timestamp && (
-                <span className="text-muted-foreground/50">
-                  {formatTime(log.timestamp)}{" "}
-                </span>
-              )}
-              {log.tool && (
-                <span className="text-primary/60">[{log.tool}] </span>
-              )}
-              {log.content ?? JSON.stringify(log)}
-            </div>
+            <ChatMessage key={i} message={log} />
           ))}
           {logs.length === 0 && (
             <p className="text-center text-muted-foreground py-4">

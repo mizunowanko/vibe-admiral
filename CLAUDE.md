@@ -59,6 +59,9 @@ engine/               Node.js sidecar
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
 skills/implement/     /implement スキル（feature+cleanup+merge 統合）
+skills/adr/           /adr スキル（ADR 作成・更新・検索）
+adr/                  Architecture Decision Records
+  TEMPLATE.md         ADR テンプレート
 ```
 
 ## コマンド
@@ -113,18 +116,30 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - パスエイリアス: `@/*` → `./src/*`
 - Engine の import は `.js` 拡張子（ESM）
 
+## ADR（Architecture Decision Records）
+
+設計判断は `adr/` ディレクトリに ADR として記録する。テンプレートは [adr/TEMPLATE.md](adr/TEMPLATE.md) を参照。
+
+- 配置: `adr/NNNN-kebab-case-title.md`（連番 4 桁）
+- ステータス: `Proposed` → `Accepted` → `Deprecated` / `Superseded`
+- 各 ADR には Issue リンクを含める（Issue = Problem → ADR = Decision）
+- Tags フィールド（optional）でスコープやトピックを記録し、自動フィルタリングに利用する
+- 実装前の調査時に関連 ADR を確認し、過去の設計判断との整合性を担保すること
+- `/adr` スキルで作成・更新・一覧・検索が可能
+
+既存 ADR:
+- [ADR-0001: AI 最適化開発モデル](adr/0001-ai-optimized-dev-model.md)
+- [ADR-0002: 品質保証戦略](adr/0002-qa-strategy.md)
+
 ## ラベル体系
 
 ### ステータスラベル（`status/` prefix）— Engine 自動管理、排他的
 | ラベル | 意味 |
 |--------|------|
 | `status/todo` | Sortie 可能 |
-| `status/investigating` | 調査中 |
-| `status/planning` | 計画中 |
-| `status/implementing` | 実装中 |
-| `status/testing` | テスト中 |
-| `status/reviewing` | レビュー中 |
-| `status/acceptance-test` | 受け入れテスト中 |
+| `status/planning` | 計画中（調査 + 計画） |
+| `status/implementing` | 実装中（コーディング + テスト） |
+| `status/acceptance-test` | 受け入れテスト中（PR レビュー + QA） |
 | `status/merging` | マージ中 |
 | `status/blocked` | 依存関係で着手不可（Bridge が付与可） |
 

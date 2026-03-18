@@ -87,7 +87,7 @@ describe("StatusManager", () => {
       await manager.transition(REPO, 1, "doing");
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 1, {
         remove: "status/todo",
-        add: "status/implementing",
+        add: "status/planning",
       });
     });
 
@@ -104,11 +104,11 @@ describe("StatusManager", () => {
 
     it("transitions doing → todo (rollback)", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/reviewing"] }),
+        makeIssue({ labels: ["status/implementing"] }),
       );
       await manager.transition(REPO, 1, "todo");
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 1, {
-        remove: "status/reviewing",
+        remove: "status/implementing",
         add: "status/todo",
       });
     });
@@ -203,10 +203,10 @@ describe("StatusManager", () => {
       mockGetIssue.mockResolvedValue(
         makeIssue({ labels: ["status/implementing"] }),
       );
-      await manager.syncPhaseLabel(REPO, 1, "testing");
+      await manager.syncPhaseLabel(REPO, 1, "acceptance-test");
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 1, {
         remove: "status/implementing",
-        add: "status/testing",
+        add: "status/acceptance-test",
       });
     });
 
@@ -217,9 +217,9 @@ describe("StatusManager", () => {
 
     it("skips update when label is already correct", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/testing"] }),
+        makeIssue({ labels: ["status/acceptance-test"] }),
       );
-      await manager.syncPhaseLabel(REPO, 1, "testing");
+      await manager.syncPhaseLabel(REPO, 1, "acceptance-test");
       expect(mockUpdateLabels).not.toHaveBeenCalled();
     });
   });

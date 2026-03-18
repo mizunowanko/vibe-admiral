@@ -2,14 +2,12 @@ import type { ShipManager } from "./ship-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
+import { parseDependsOnLabels } from "./github.js";
 
 /** status/* labels that indicate work-in-progress (not todo, not blocked). */
 export const ACTIVE_STATUS_LABELS = new Set([
-  "status/investigating",
   "status/planning",
   "status/implementing",
-  "status/testing",
-  "status/reviewing",
   "status/acceptance-test",
   "status/merging",
 ]);
@@ -164,6 +162,16 @@ export class StateSync {
           }
         }
       }
+
+      // Audit depends-on/ labels: unblock issues that depended on the closed issue
+      try {
+        await this.auditDependencies(ship.repo, ship.issueNumber);
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to audit dependencies for #${ship.issueNumber}:`,
+          err,
+        );
+      }
     } else {
       // Update in-memory status immediately so ship-status queries return
       // "error" while async GitHub operations (rescue check, label rollback)
@@ -180,6 +188,16 @@ export class StateSync {
         );
         await this.removeWorktreeWithRetry(ship.worktreePath);
         this.shipManager.updateStatus(shipId, "done");
+
+        // Audit depends-on/ labels for rescued (already-closed) issues too
+        try {
+          await this.auditDependencies(ship.repo, ship.issueNumber);
+        } catch (err) {
+          console.warn(
+            `[state-sync] Failed to audit dependencies for rescued #${ship.issueNumber}:`,
+            err,
+          );
+        }
       } else {
         // Genuinely failed: rollback doing→todo
         await this.rollbackLabel(ship.repo, ship.issueNumber);
@@ -221,6 +239,78 @@ export class StateSync {
       );
     }
     return false;
+  }
+
+  /**
+   * Audit depends-on/ labels after an issue is closed.
+   * Finds open issues that have a `depends-on/<closedIssueNumber>` label,
+   * removes that label, and transitions `status/blocked` → `status/todo`
+   * if all dependencies are now resolved.
+   */
+  async auditDependencies(
+    repo: string,
+    closedIssueNumber: number,
+  ): Promise<void> {
+    const label = `depends-on/${closedIssueNumber}`;
+
+    let dependentIssues: Awaited<ReturnType<typeof github.listIssues>>;
+    try {
+      dependentIssues = await github.listIssues(repo, label);
+    } catch {
+      // Label may not exist — that's fine, nothing to audit
+      return;
+    }
+
+    if (dependentIssues.length === 0) return;
+
+    console.log(
+      `[state-sync] Auditing ${dependentIssues.length} issue(s) with label "${label}"`,
+    );
+
+    for (const issue of dependentIssues) {
+      try {
+        // Remove the resolved depends-on/ label
+        await github.updateLabels(repo, issue.number, { remove: label });
+
+        // Check if all remaining depends-on/ labels are resolved
+        const remainingDeps = parseDependsOnLabels(
+          issue.labels.filter((l) => l !== label),
+        );
+
+        let allResolved = true;
+        if (remainingDeps.length > 0) {
+          for (const depNum of remainingDeps) {
+            try {
+              const dep = await github.getIssue(repo, depNum);
+              if (dep.state === "open") {
+                allResolved = false;
+                break;
+              }
+            } catch {
+              // Can't verify — assume still blocking
+              allResolved = false;
+              break;
+            }
+          }
+        }
+
+        // If all deps resolved and issue has status/blocked, transition to status/todo
+        if (allResolved && issue.labels.includes("status/blocked")) {
+          console.log(
+            `[state-sync] All dependencies resolved for #${issue.number} — unblocking (status/blocked → status/todo)`,
+          );
+          await github.updateLabels(repo, issue.number, {
+            remove: "status/blocked",
+            add: "status/todo",
+          });
+        }
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to audit dependency label for #${issue.number}:`,
+          err,
+        );
+      }
+    }
   }
 
   /**

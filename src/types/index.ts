@@ -1,12 +1,8 @@
 // === Ship Status ===
 export type ShipStatus =
-  | "sortie" // 出撃準備中
-  | "investigating" // 調査中
-  | "planning" // 計画中
-  | "implementing" // 実装中
-  | "testing" // テスト中
-  | "reviewing" // レビュー中
-  | "acceptance-test" // 受け入れテスト中
+  | "planning" // 計画中（調査 + 計画）
+  | "implementing" // 実装中（コーディング + テスト）
+  | "acceptance-test" // 受け入れテスト中（PR レビュー + QA）
   | "merging" // マージ中
   | "done" // 完了
   | "error"; // エラー
@@ -44,11 +40,10 @@ export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 // === Gate ===
 export type GateTransition =
   | "planning→implementing"
-  | "testing→reviewing"
-  | "reviewing→acceptance-test"
+  | "implementing→acceptance-test"
   | "acceptance-test→merging";
 
-export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
+export type GateType = "plan-review" | "code-review" | "playwright";
 export type GateStatus = "pending" | "approved" | "rejected";
 
 export interface GateCheckState {
@@ -264,5 +259,9 @@ export type ServerMessage =
         path: string;
         entries: Array<{ name: string; isDirectory: boolean }>;
       };
+    }
+  | {
+      type: "bridge:question-timeout";
+      data: { fleetId: string };
     }
   | { type: "error"; data: { source: string; message: string } };

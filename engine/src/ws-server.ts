@@ -28,7 +28,6 @@ import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
-import { resolveGate } from "./gate-config.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
@@ -50,11 +49,14 @@ export class EngineServer {
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
   private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+  private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   /** Per-ship mutex to serialize executeShipRequests() calls. */
   private shipRequestLocks = new Map<string, Promise<void>>();
 
   /** Gate checks pending longer than this are auto-rejected (ms). */
   private static readonly GATE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  /** Unanswered Bridge questions auto-answered after this duration (ms). */
+  private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -87,6 +89,7 @@ export class EngineServer {
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
     this.startGateTimeoutScanner();
+    this.startQuestionTimeoutScanner();
     this.setupLookout();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
@@ -165,6 +168,10 @@ export class EngineServer {
               ...(toolUseId ? { toolUseId } : {}),
             };
             this.bridgeManager.addToHistory(fleetId, questionMessage);
+            // Track pending question for timeout and bridge:send guard
+            if (toolUseId) {
+              this.bridgeManager.setPendingQuestion(fleetId, toolUseId);
+            }
             this.broadcast({
               type: "bridge:question",
               data: { fleetId, message: questionMessage },
@@ -374,23 +381,8 @@ export class EngineServer {
           this.shipManager.setAcceptanceTest(shipId, request);
           this.shipManager.updateStatus(shipId, "acceptance-test");
 
-          // Check if the acceptance-test→merging gate is auto-approve.
-          // If so, skip broadcasting the acceptance test UI to frontend —
-          // the gate system will handle the transition automatically.
-          this.loadFleets().then((fleets) => {
-            const fleet = fleets.find((f) => f.id === ship.fleetId);
-            const gateType = resolveGate("acceptance-test", "merging", fleet?.gates);
-            const isAutoApprove = gateType === "auto-approve";
-
-            if (isAutoApprove) {
-              console.log(
-                `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test gate is auto-approve — skipping UI broadcast, auto-accepting`,
-              );
-              // Write acceptance-test-response.json so Ship CLI doesn't hang
-              this.shipManager.respondToAcceptanceTest(shipId, true);
-              return;
-            }
-
+          // Broadcast acceptance test to frontend and Bridge
+          this.loadFleets().then(() => {
             this.broadcast({
               type: "ship:acceptance-test",
               data: { id: shipId, url: request.url, checks: request.checks },
@@ -558,6 +550,20 @@ export class EngineServer {
         case "bridge:send": {
           const fleetId = data.fleetId as string;
           const message = data.message as string;
+
+          // Guard: reject if a question is pending
+          const pending = this.bridgeManager.getPendingQuestion(fleetId);
+          if (pending) {
+            this.sendTo(ws, {
+              type: "error",
+              data: {
+                source: "bridge:send",
+                message: "Cannot send a command while a question is pending. Please answer the question first.",
+              },
+            });
+            break;
+          }
+
           const rawImages = data.images as Array<{ base64: string; mediaType: string }> | undefined;
           const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
           const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB base64 (~3.75 MB raw)
@@ -624,16 +630,15 @@ export class EngineServer {
           const toolUseId = data.toolUseId as string | undefined;
           const bridgeId = `bridge-${ansFleetId}`;
 
-          // Record answer in history as a user message
+          // Clear pending question state
+          this.bridgeManager.clearPendingQuestion(ansFleetId);
+
+          // Record answer in history (no broadcast — frontend uses optimistic update)
           const answerMessage: StreamMessage = {
             type: "user",
             content: answer,
           };
           this.bridgeManager.addToHistory(ansFleetId, answerMessage);
-          this.broadcast({
-            type: "bridge:stream",
-            data: { fleetId: ansFleetId, message: answerMessage },
-          });
 
           // Send answer to Bridge stdin as tool_result if toolUseId is available
           if (toolUseId) {
@@ -1106,22 +1111,6 @@ export class EngineServer {
 
     const transition = `${from}→${to}` as GateTransition;
 
-    // Auto-approve gates skip Bridge dispatch and resolve immediately
-    if (gateType === "auto-approve") {
-      this.shipManager.setGateCheck(shipId, transition, gateType);
-      this.shipManager.respondToGate(shipId, true).then(() => {
-        this.shipRequestHandler.executeGatedTransition(shipId, to).then((result) => {
-          if (result.ok) {
-            this.onGateApproved(shipId, transition);
-          }
-        }).catch(console.error);
-      }).catch(console.error);
-      console.log(
-        `[ws-server] Ship ${shipId.slice(0, 8)}... auto-approved gate: ${transition}`,
-      );
-      return;
-    }
-
     // Dedup guard: skip if a pending gate already exists for this transition
     if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
       console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
@@ -1232,10 +1221,6 @@ export class EngineServer {
         return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "playwright":
         return `${header}\n${meta}${retryNote}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "auto-approve":
-        // This case should not be reached — auto-approve gates are handled
-        // before buildGateCheckMessage is called. Included for type exhaustiveness.
-        return `${header}\n${meta}\n\nAuto-approved.`;
     }
   }
 
@@ -1502,6 +1487,65 @@ export class EngineServer {
     this.gateTimeoutTimer.unref();
   }
 
+  private startQuestionTimeoutScanner(): void {
+    this.questionTimeoutTimer = setInterval(() => {
+      this.scanQuestionTimeouts();
+    }, 30_000);
+    this.questionTimeoutTimer.unref();
+  }
+
+  private scanQuestionTimeouts(): void {
+    const now = Date.now();
+    const pending = this.bridgeManager.getSessionsWithPendingQuestion();
+
+    for (const { fleetId, toolUseId, askedAt } of pending) {
+      if (now - askedAt <= EngineServer.QUESTION_TIMEOUT_MS) continue;
+
+      console.warn(
+        `[ws-server] Bridge question for fleet ${fleetId} timed out after ${EngineServer.QUESTION_TIMEOUT_MS / 1000}s. Auto-answering.`,
+      );
+
+      // Clear pending state
+      this.bridgeManager.clearPendingQuestion(fleetId);
+
+      // Auto-answer with default message
+      const autoAnswer = "No response from user (timed out)";
+      const bridgeId = `bridge-${fleetId}`;
+
+      // Record in history
+      const answerMsg: StreamMessage = {
+        type: "user",
+        content: autoAnswer,
+      };
+      this.bridgeManager.addToHistory(fleetId, answerMsg);
+
+      // Notify frontend
+      const timeoutMsg: StreamMessage = {
+        type: "system",
+        subtype: "bridge-status",
+        content: "Question timed out — auto-answered with default response.",
+      };
+      this.bridgeManager.addToHistory(fleetId, timeoutMsg);
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId, message: answerMsg },
+      });
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId, message: timeoutMsg },
+      });
+
+      // Clear pendingQuestion on frontend
+      this.broadcast({
+        type: "bridge:question-timeout",
+        data: { fleetId },
+      });
+
+      // Send tool_result to Bridge stdin
+      this.processManager.sendToolResult(bridgeId, toolUseId, autoAnswer);
+    }
+  }
+
   private scanGateTimeouts(): void {
     const now = Date.now();
 
@@ -1537,6 +1581,10 @@ export class EngineServer {
     if (this.gateTimeoutTimer) {
       clearInterval(this.gateTimeoutTimer);
       this.gateTimeoutTimer = null;
+    }
+    if (this.questionTimeoutTimer) {
+      clearInterval(this.questionTimeoutTimer);
+      this.questionTimeoutTimer = null;
     }
     this.shipManager.stopAll();
     this.bridgeManager.stopAll();
