@@ -224,6 +224,18 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return gateResult;
     }
 
+    case "gate-ack": {
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
+      const gateAck: { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number } = {
+        request: "gate-ack",
+        shipId: r.shipId,
+        transition: r.transition as GateTransition,
+      };
+      if (typeof r.issueNumber === "number") gateAck.issueNumber = r.issueNumber;
+      return gateAck;
+    }
+
     case "status-transition": {
       const status = r.status as string | undefined;
       if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;

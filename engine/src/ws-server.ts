@@ -69,9 +69,9 @@ export class EngineServer {
   private static readonly MAX_DISPATCH_RETRIES = 2;
 
   /** Gate checks pending longer than this are auto-rejected (ms). */
-  private static readonly GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly GATE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
   /** Extended gate timeout when Bridge is rate-limited (ms). */
-  private static readonly GATE_TIMEOUT_EXTENDED_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly GATE_TIMEOUT_EXTENDED_MS = 15 * 60 * 1000; // 15 minutes
   /** Window within which Bridge rate-limit is considered "recent" (ms). */
   private static readonly RATE_LIMIT_RECENCY_MS = 2 * 60 * 1000; // 2 minutes
   /** Sortie cooldown duration after rate-limit detection (ms). */
@@ -1520,9 +1520,12 @@ export class EngineServer {
     for (const ship of this.shipManager.getAllShips()) {
       if (
         ship.gateCheck &&
-        ship.gateCheck.status === "pending" &&
-        now - new Date(ship.gateCheck.requestedAt).getTime() > effectiveTimeout
+        ship.gateCheck.status === "pending"
       ) {
+        // Use acknowledgedAt (when Bridge ACK'd) as the timeout base if available,
+        // otherwise fall back to requestedAt (when Engine sent the request)
+        const timeoutBase = ship.gateCheck.acknowledgedAt ?? ship.gateCheck.requestedAt;
+        if (now - new Date(timeoutBase).getTime() <= effectiveTimeout) continue;
         const transition = ship.gateCheck.transition;
         const dispatchRetryCount = ship.gateCheck.dispatchRetryCount ?? 0;
 
@@ -1534,6 +1537,7 @@ export class EngineServer {
         ) {
           ship.gateCheck.dispatchRetryCount = dispatchRetryCount + 1;
           ship.gateCheck.requestedAt = new Date().toISOString();
+          ship.gateCheck.acknowledgedAt = undefined;
           console.log(
             `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out during rate limit — re-initiating Dispatch retry #${ship.gateCheck.dispatchRetryCount} (${transition})`,
           );

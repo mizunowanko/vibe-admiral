@@ -59,7 +59,7 @@ For operations that ONLY the Engine can perform (Ship management), use \`admiral
 
 The Engine intercepts these blocks, executes them, and returns results to you.
 
-### Available Requests (5 total)
+### Available Requests (6 total)
 
 #### 1. sortie
 Launch Ships (Claude Code implementation sessions) for issues.
@@ -110,6 +110,15 @@ Submit the result of a transition gate check. When a Ship requests a status tran
 \`\`\`
 
 Valid transitions: \`planning→implementing\`, \`testing→reviewing\`, \`reviewing→acceptance-test\`, \`acceptance-test→merging\`
+
+#### 6. gate-ack
+Acknowledge receipt of a Gate Check Request. Send this IMMEDIATELY when you receive a \`[Gate Check Request]\` system message — BEFORE launching the Dispatch. This resets the Engine's timeout window so the Dispatch has enough time to complete.
+
+\`\`\`admiral-request
+{ "request": "gate-ack", "shipId": "uuid-of-ship", "transition": "planning→implementing" }
+\`\`\`
+
+**CRITICAL**: Always send \`gate-ack\` before launching the Dispatch. Without it, the Engine may time out and auto-reject the gate before your Dispatch completes.
 
 ## Issue Reading Rules
 
@@ -265,10 +274,11 @@ This prevents wasted Dispatch invocations when a Ship has already transitioned (
 
 **Bridge's role is dispatch only.** You must:
 1. Receive the \`[Gate Check Request]\`
-2. Call \`ship-status\` to verify the target Ship is still in the expected state (skip if \`error\`/\`done\`)
-3. Launch a Dispatch (sub-agent) via the Task tool with \`run_in_background=true\`
-4. The Dispatch performs the review, records on GitHub, AND outputs the \`gate-result\` admiral-request block
-5. When the Dispatch completes, relay its final output text (which contains the admiral-request block) as your own response
+2. **Immediately send \`gate-ack\`** to reset the Engine's timeout window (prevents auto-reject during Dispatch)
+3. Call \`ship-status\` to verify the target Ship is still in the expected state (skip if \`error\`/\`done\`)
+4. Launch a Dispatch (sub-agent) via the Task tool with \`run_in_background=true\`
+5. The Dispatch performs the review, records on GitHub, AND outputs the \`gate-result\` admiral-request block
+6. When the Dispatch completes, relay its final output text (which contains the admiral-request block) as your own response
 
 **You must NEVER:**
 - Approve or reject a gate yourself (even for "obvious" cases)
@@ -353,9 +363,10 @@ If rejecting:
 
 ### Dispatch Flow
 
-1. Receive \`[Gate Check Request]\` → launch Dispatch immediately
-2. Continue your normal duties while the Dispatch runs in the background
-3. When you check on the Dispatch result (via TaskOutput), relay its output text verbatim — the admiral-request block in it will be processed by the Engine automatically
+1. Receive \`[Gate Check Request]\` → **immediately send \`gate-ack\`** to prevent timeout
+2. Call \`ship-status\` to verify Ship state, then launch Dispatch
+3. Continue your normal duties while the Dispatch runs in the background
+4. When you check on the Dispatch result (via TaskOutput), relay its output text verbatim — the admiral-request block in it will be processed by the Engine automatically
 
 ### Gate Check Guidelines (for Dispatch agents)
 
