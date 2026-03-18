@@ -41,6 +41,7 @@ const STYLE: Record<
     text: "text-orange-300",
   },
   // subtypes not rendered by this component (use existing renderers)
+  "task-notification": null,
   "ship-status": null,
   "compact-status": null,
   "bridge-status": null,
