@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useShipsByFleet } from "@/hooks/useShip";
 import { useShipStore } from "@/stores/shipStore";
 import { useFleetStore } from "@/stores/fleetStore";
@@ -6,7 +6,7 @@ import { ShipCard } from "./ShipCard";
 import { ShipDetail } from "./ShipDetail";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Ship, Rocket } from "lucide-react";
+import { Ship, Rocket, ChevronDown, ChevronRight } from "lucide-react";
 
 interface ShipGridProps {
   fleetId: string | null;
@@ -24,6 +24,16 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const [sortieRepo, setSortieRepo] = useState("");
   const [sortieIssue, setSortieIssue] = useState("");
   const [showSortieForm, setShowSortieForm] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  const activeShips = useMemo(
+    () => ships.filter((s) => s.status !== "done" && s.status !== "error"),
+    [ships],
+  );
+  const completedShips = useMemo(
+    () => ships.filter((s) => s.status === "done" || s.status === "error"),
+    [ships],
+  );
 
   if (!fleetId) {
     return (
@@ -52,7 +62,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
             <Ship className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-semibold">Ships</h2>
             <span className="text-xs text-muted-foreground">
-              {ships.length} active
+              {activeShips.length} active
             </span>
           </div>
           <Button
@@ -118,7 +128,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
 
         {/* Grid */}
         <div className="flex-1 overflow-auto p-4">
-          {ships.length === 0 ? (
+          {activeShips.length === 0 && completedShips.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <Ship className="h-12 w-12 mb-2 opacity-20" />
               <p className="text-sm">No ships deployed</p>
@@ -127,17 +137,48 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {ships.map((ship) => (
-                <ShipCard
-                  key={ship.id}
-                  ship={ship}
-                  onSelect={() => selectShip(ship.id)}
-                  onStop={() => stopShip(ship.id)}
-                  onRetry={() => retryShip(ship.id)}
-                />
-              ))}
-            </div>
+            <>
+              {activeShips.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {activeShips.map((ship) => (
+                    <ShipCard
+                      key={ship.id}
+                      ship={ship}
+                      onSelect={() => selectShip(ship.id)}
+                      onStop={() => stopShip(ship.id)}
+                    />
+                  ))}
+                </div>
+              )}
+              {completedShips.length > 0 && (
+                <div className={activeShips.length > 0 ? "mt-4" : ""}>
+                  <button
+                    onClick={() => setShowCompleted(!showCompleted)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
+                  >
+                    {showCompleted ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
+                    Completed ({completedShips.length})
+                  </button>
+                  {showCompleted && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {completedShips.map((ship) => (
+                        <ShipCard
+                          key={ship.id}
+                          ship={ship}
+                          onSelect={() => selectShip(ship.id)}
+                          onStop={() => stopShip(ship.id)}
+                          onRetry={() => retryShip(ship.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

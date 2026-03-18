@@ -7,6 +7,7 @@ type MockShipManager = {
   getShip: ReturnType<typeof vi.fn>;
   updateStatus: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
+  setQaRequired: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -30,6 +31,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     acceptanceTest: null,
     acceptanceTestApproved: false,
     gateCheck: null,
+    qaRequired: true,
     errorType: null,
     retryCount: 0,
     createdAt: new Date().toISOString(),
@@ -48,6 +50,7 @@ describe("ShipRequestHandler", () => {
       getShip: vi.fn(),
       updateStatus: vi.fn(),
       clearGateCheck: vi.fn(),
+      setQaRequired: vi.fn(),
     };
     mockStatusManager = {
       syncPhaseLabel: vi.fn(),
@@ -260,6 +263,84 @@ describe("ShipRequestHandler", () => {
         settings,
       );
       expect(result).toEqual({ ok: true });
+    });
+
+    it("skips playwright gate when qaRequired is false", async () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeShip({ status: "acceptance-test", qaRequired: false }),
+      );
+      mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
+
+      const result = await handler.handle("ship-1", {
+        request: "status-transition",
+        status: "merging",
+      });
+      // Should proceed without gate because qaRequired is false
+      expect(result).toEqual({ ok: true });
+      expect(mockStatusManager.syncPhaseLabel).toHaveBeenCalledWith(
+        "owner/repo",
+        42,
+        "merging",
+      );
+    });
+
+    it("triggers playwright gate when qaRequired is true", async () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeShip({ status: "acceptance-test", qaRequired: true }),
+      );
+
+      const result = await handler.handle("ship-1", {
+        request: "status-transition",
+        status: "merging",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.gate).toEqual({
+        type: "playwright",
+        from: "acceptance-test",
+        to: "merging",
+      });
+    });
+
+    it("triggers playwright gate when qaRequired is not set (defaults to true)", async () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeShip({ status: "acceptance-test" }),
+      );
+
+      const result = await handler.handle("ship-1", {
+        request: "status-transition",
+        status: "merging",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.gate).toEqual({
+        type: "playwright",
+        from: "acceptance-test",
+        to: "merging",
+      });
+    });
+
+    it("stores qaRequired when transitioning to implementing", async () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeShip({ status: "planning" }),
+      );
+
+      await handler.handle("ship-1", {
+        request: "status-transition",
+        status: "implementing",
+        qaRequired: false,
+      });
+      expect(mockShipManager.setQaRequired).toHaveBeenCalledWith("ship-1", false);
+    });
+
+    it("does not call setQaRequired when qaRequired is not provided", async () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeShip({ status: "planning" }),
+      );
+
+      await handler.handle("ship-1", {
+        request: "status-transition",
+        status: "implementing",
+      });
+      expect(mockShipManager.setQaRequired).not.toHaveBeenCalled();
     });
 
     it("returns error when GitHub label sync fails", async () => {

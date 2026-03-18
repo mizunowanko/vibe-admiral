@@ -19,7 +19,7 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   const acceptTest = useShipStore((s) => s.acceptTest);
 
   const fleetShips = Array.from(ships.values()).filter(
-    (s) => s.fleetId === fleetId,
+    (s) => s.fleetId === fleetId && s.status !== "done" && s.status !== "error",
   );
 
   if (fleetShips.length === 0) return null;
