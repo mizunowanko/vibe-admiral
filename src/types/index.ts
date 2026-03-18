@@ -265,4 +265,8 @@ export type ServerMessage =
         entries: Array<{ name: string; isDirectory: boolean }>;
       };
     }
+  | {
+      type: "bridge:question-timeout";
+      data: { fleetId: string };
+    }
   | { type: "error"; data: { source: string; message: string } };
