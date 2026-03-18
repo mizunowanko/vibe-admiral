@@ -48,7 +48,7 @@ export type GateTransition =
   | "reviewing→acceptance-test"
   | "acceptance-test→merging";
 
-export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 export type GateStatus = "pending" | "approved" | "rejected";
 
 export interface GateCheckState {
