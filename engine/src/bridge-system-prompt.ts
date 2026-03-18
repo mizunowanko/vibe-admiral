@@ -322,9 +322,14 @@ Steps:
 5. Check if the plan covers all requirements in the issue. Use the Ship's investigation log context to evaluate feasibility. If this is a re-review, verify that previous feedback has been addressed
 6. Verify the plan is feasible and well-scoped
 7. Check the "QA Requirement" section: verify the qaRequired judgment is reasonable given the issue type and scope of changes. If the plan omits QA for changes that clearly affect the UI, flag it. If the plan includes QA for non-UI changes (refactor, infra, skill), note it as acceptable but unnecessary
-8. IMPORTANT: Record your review on GitHub:
+8. IMPORTANT: Record your DETAILED review on GitHub:
    gh issue comment <issue> --repo <repo> --body "## Plan Review\\n\\n<your detailed review>\\n\\n**Verdict: APPROVE** (or REJECT)"
-9. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+9. OUTPUT FORMAT CONSTRAINT — your final response to Bridge must be concise:
+   - Line 1: Verdict (APPROVE or REJECT)
+   - Lines 2-6: Key findings (max 5 bullet points, one line each)
+   - Last: the admiral-request block
+   - Do NOT repeat the detailed review — it is already on GitHub
+10. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -358,10 +363,15 @@ Steps:
 3. Check for previous review history — if there are existing reviews with "request-changes", read them to understand what was previously flagged
 4. Run: gh pr diff <number> --repo <repo>
 5. Review against: issue requirements, coding conventions, security, scope, test coverage. Use the Ship's log context to understand WHY certain implementation choices were made. If this is a re-review, verify that previous issues have been addressed
-6. IMPORTANT: Record your review on GitHub:
+6. IMPORTANT: Record your DETAILED review on GitHub:
    - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
    - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
-7. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+7. OUTPUT FORMAT CONSTRAINT — your final response to Bridge must be concise:
+   - Line 1: Verdict (APPROVE or REJECT)
+   - Lines 2-6: Key findings (max 5 bullet points, one line each)
+   - Last: the admiral-request block
+   - Do NOT include the PR diff, full analysis, or command outputs — the detailed review is already on GitHub
+8. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -417,13 +427,14 @@ Steps:
 3. Determine reproduction steps if possible
 4. Analyze potential fixes and their impact
 
-Output a clear summary of your findings in the following format:
-- **Root cause**: ...
-- **Affected files**: ...
-- **Reproduction**: ...
-- **Suggested fix**: ...
-- **Impact scope**: ...
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 10 lines):
+- **Root cause**: <1 sentence>
+- **Affected files**: <comma-separated list, max 5 files>
+- **Reproduction**: <1-2 sentences>
+- **Suggested fix**: <1-2 sentences>
+- **Impact scope**: <1 sentence>
 
+Do NOT include full analysis, code snippets, or command outputs. Only the structured summary above.
 Do NOT create issues or make any changes. Only investigate and report.
 \`)
 \`\`\`
@@ -441,7 +452,13 @@ Steps:
 2. Read and analyze the relevant sections
 3. Map out the architecture/relationships relevant to the question
 
-Output a clear summary of your findings. Do NOT create issues or make any changes. Only investigate and report.
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 15 lines):
+- Answer the question directly in 2-3 sentences
+- List relevant files (max 5) with a one-line description of each
+- Note any key relationships or dependencies in 1-2 sentences
+
+Do NOT include full file contents, code snippets, or command outputs.
+Do NOT create issues or make any changes. Only investigate and report.
 \`)
 \`\`\`
 
@@ -466,12 +483,13 @@ Steps:
 4. Identify what went wrong and why, using the log context
 5. Determine if the issue is recoverable or needs a new sortie
 
-Output a clear summary of your findings:
-- **Error**: ...
-- **Root cause**: ...
-- **Last Ship actions**: (from log)
-- **Recovery recommendation**: (retry / new sortie / manual intervention)
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 8 lines):
+- **Error**: <1 sentence>
+- **Root cause**: <1 sentence>
+- **Last Ship actions**: <1-2 sentences summarizing key actions from log>
+- **Recovery recommendation**: <retry / new sortie / manual intervention — 1 sentence>
 
+Do NOT include raw log excerpts, full command outputs, or code snippets.
 Do NOT create issues or make any changes. Only investigate and report.
 \`)
 \`\`\`
