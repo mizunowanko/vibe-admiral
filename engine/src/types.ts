@@ -24,7 +24,7 @@ export type GateTransition =
   | "acceptance-test→merging";
 
 /** Gate type determines which Dispatch sub-agent or mechanism handles the check. */
-export type GateType = "plan-review" | "code-review" | "playwright" | "human";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 
 /** Per-gate configuration: true = default type, string = specific type, false = disabled. */
 export type GateConfig = boolean | GateType;
@@ -37,7 +37,7 @@ export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
   "planning→implementing": "plan-review",
   "testing→reviewing": "code-review",
   "reviewing→acceptance-test": "code-review",
-  "acceptance-test→merging": "human",
+  "acceptance-test→merging": "auto-approve",
 };
 
 /** Status of a pending gate check. */

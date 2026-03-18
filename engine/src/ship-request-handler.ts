@@ -139,13 +139,13 @@ export class ShipRequestHandler {
       }
     }
 
-    // Legacy gate: block advancement past acceptance-test until human approves
+    // Legacy gate: block advancement past acceptance-test until approved
     // (This is now handled by the "acceptance-test→merging" gate, but we keep
-    //  this as a safety check)
+    //  this as a safety check when the gate is disabled)
     const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
     if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
-      const humanGate = resolveGate("acceptance-test", "merging", gateSettings);
-      if (!humanGate) {
+      const acceptanceGate = resolveGate("acceptance-test", "merging", gateSettings);
+      if (!acceptanceGate) {
         return {
           ok: false,
           error: `Cannot advance past acceptance-test: not yet approved`,

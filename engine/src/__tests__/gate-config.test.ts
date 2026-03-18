@@ -72,9 +72,9 @@ describe("resolveGate", () => {
 
   it("respects fleet settings: override gate type", () => {
     const settings: FleetGateSettings = {
-      "reviewing→acceptance-test": "human",
+      "reviewing→acceptance-test": "auto-approve",
     };
-    expect(resolveGate("reviewing", "acceptance-test", settings)).toBe("human");
+    expect(resolveGate("reviewing", "acceptance-test", settings)).toBe("auto-approve");
   });
 
   it("respects fleet settings: true uses default", () => {

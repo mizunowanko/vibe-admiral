@@ -7,7 +7,7 @@ const GATE_TYPE_DESCRIPTIONS: Record<GateType, string> = {
   "plan-review": "Review the Ship's implementation plan for completeness and feasibility",
   "code-review": "Review the PR diff for quality, conventions, and correctness",
   "playwright": "Run Playwright QA checks on the live application",
-  "human": "Human approval via frontend UI",
+  "auto-approve": "Auto-approved (no review needed)",
 };
 
 /**
@@ -151,7 +151,7 @@ When the user asks you to start implementation:
 | \`status/implementing\` | Implementation in progress |
 | \`status/testing\` | Running tests |
 | \`status/reviewing\` | Code review in progress |
-| \`status/acceptance-test\` | Awaiting human approval |
+| \`status/acceptance-test\` | Acceptance testing in progress |
 | \`status/merging\` | Merge in progress |
 | \`status/blocked\` | Blocked by dependencies (Bridge may set this) |
 

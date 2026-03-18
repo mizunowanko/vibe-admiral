@@ -1037,6 +1037,22 @@ export class EngineServer {
 
     const transition = `${from}→${to}` as GateTransition;
 
+    // Auto-approve gates skip Bridge dispatch and resolve immediately
+    if (gateType === "auto-approve") {
+      this.shipManager.setGateCheck(shipId, transition, gateType);
+      this.shipManager.respondToGate(shipId, true).then(() => {
+        this.shipRequestHandler.executeGatedTransition(shipId, to).then((result) => {
+          if (result.ok) {
+            this.onGateApproved(shipId, transition);
+          }
+        }).catch(console.error);
+      }).catch(console.error);
+      console.log(
+        `[ws-server] Ship ${shipId.slice(0, 8)}... auto-approved gate: ${transition}`,
+      );
+      return;
+    }
+
     // Set gate check state on the ship
     this.shipManager.setGateCheck(shipId, transition, gateType);
 
@@ -1115,8 +1131,10 @@ export class EngineServer {
         return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
       case "playwright":
         return `${header}\n${meta}${retryNote}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "human":
-        return `${header}\n${meta}\n\nHuman approval required. The frontend acceptance test banner will handle this gate.`;
+      case "auto-approve":
+        // This case should not be reached — auto-approve gates are handled
+        // before buildGateCheckMessage is called. Included for type exhaustiveness.
+        return `${header}\n${meta}\n\nAuto-approved.`;
     }
   }
 
