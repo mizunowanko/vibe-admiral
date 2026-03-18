@@ -244,7 +244,7 @@ export function FleetSettings() {
                 Max Concurrent Sorties
               </label>
               <p className="text-xs text-muted-foreground mb-2">
-                Maximum number of Ships that can run simultaneously. Automatically reduced during API rate limiting.
+                Maximum number of Ships that can run simultaneously.
               </p>
               <Input
                 type="number"

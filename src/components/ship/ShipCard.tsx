@@ -120,9 +120,7 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
             </span>
             {ship.gateCheck.status === "pending" && (
               <span className="text-[10px] text-sky-400">
-                {ship.gateCheck.dispatchRetryCount
-                  ? `Dispatch retry #${ship.gateCheck.dispatchRetryCount}`
-                  : "Awaiting review"}
+                Awaiting review
               </span>
             )}
             {ship.gateCheck.status === "rejected" && (

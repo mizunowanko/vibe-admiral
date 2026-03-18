@@ -163,23 +163,6 @@ export function useEngine() {
           break;
         }
 
-        case "ship:gate-timeout-extended": {
-          const extData = msg.data as {
-            id: string;
-            transition: GateTransition;
-            dispatchRetryCount: number;
-            reason: string;
-          };
-          // Update gate check to reflect Dispatch retry
-          setGateCheck(extData.id, {
-            transition: extData.transition,
-            gateType: "code-review", // best-effort; actual type preserved on server
-            status: "pending",
-            dispatchRetryCount: extData.dispatchRetryCount,
-          });
-          break;
-        }
-
         case "bridge:stream":
           // Bridge messages are handled by useBridge hook
           break;

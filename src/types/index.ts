@@ -56,8 +56,6 @@ export interface GateCheckState {
   gateType: GateType;
   status: GateStatus;
   feedback?: string;
-  /** Number of times the Dispatch was re-initiated due to rate-limit timeouts. */
-  dispatchRetryCount?: number;
 }
 
 // === Ship ===
@@ -254,15 +252,6 @@ export type ServerMessage =
         gateType: GateType;
         approved: boolean;
         feedback?: string;
-      };
-    }
-  | {
-      type: "ship:gate-timeout-extended";
-      data: {
-        id: string;
-        transition: GateTransition;
-        dispatchRetryCount: number;
-        reason: string;
       };
     }
   | { type: "ship:data"; data: Ship[] }
