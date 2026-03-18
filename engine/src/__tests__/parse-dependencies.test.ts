@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDependencies } from "../github.js";
+import { parseDependencies, parseDependsOnLabels } from "../github.js";
 
 describe("parseDependencies", () => {
   it("returns empty array for empty body", () => {
@@ -91,5 +91,34 @@ describe("parseDependencies", () => {
       "- Depends on #99",
     ].join("\n");
     expect(parseDependencies(body)).toEqual([99]);
+  });
+});
+
+describe("parseDependsOnLabels", () => {
+  it("returns empty array for empty labels", () => {
+    expect(parseDependsOnLabels([])).toEqual([]);
+  });
+
+  it("extracts issue numbers from depends-on/ labels", () => {
+    const labels = ["depends-on/42", "type/feature", "depends-on/99", "status/todo"];
+    expect(parseDependsOnLabels(labels)).toEqual([42, 99]);
+  });
+
+  it("ignores malformed depends-on labels", () => {
+    const labels = [
+      "depends-on/",
+      "depends-on/abc",
+      "depends-on/42",
+      "depends-on/42/extra",
+    ];
+    expect(parseDependsOnLabels(labels)).toEqual([42]);
+  });
+
+  it("handles single depends-on label", () => {
+    expect(parseDependsOnLabels(["depends-on/10"])).toEqual([10]);
+  });
+
+  it("handles labels with no depends-on entries", () => {
+    expect(parseDependsOnLabels(["status/todo", "type/bug"])).toEqual([]);
   });
 });

@@ -479,3 +479,43 @@ export async function getOpenBodyDependencies(
   return results.filter((n): n is number => n !== null);
 }
 
+/**
+ * Extract issue numbers from `depends-on/<N>` labels.
+ * Example: ["depends-on/42", "type/feature", "depends-on/99"] → [42, 99]
+ */
+export function parseDependsOnLabels(labels: string[]): number[] {
+  const nums: number[] = [];
+  for (const label of labels) {
+    const match = label.match(/^depends-on\/(\d+)$/);
+    if (match) {
+      nums.push(Number(match[1]));
+    }
+  }
+  return nums;
+}
+
+/**
+ * Check which `depends-on/<N>` label dependencies are still open.
+ * Returns open dependency issue numbers.
+ */
+export async function getOpenDependsOnDeps(
+  repo: string,
+  labels: string[],
+): Promise<number[]> {
+  const depNums = parseDependsOnLabels(labels);
+  if (depNums.length === 0) return [];
+
+  const results = await Promise.all(
+    depNums.map(async (num) => {
+      try {
+        const issue = await getIssue(repo, num);
+        return issue.state === "open" ? num : null;
+      } catch {
+        // If we can't fetch the issue, assume it's not blocking
+        return null;
+      }
+    }),
+  );
+  return results.filter((n): n is number => n !== null);
+}
+
