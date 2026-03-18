@@ -295,16 +295,20 @@ You are a Dispatch agent performing a plan-review gate check for Ship #<issue>.
 
 Ship ID: <ship-id>
 Repo: <repo>
+Ship log: <worktree>/.claude/ship-log.jsonl
 
 Steps:
-1. Run: gh issue view <issue> --repo <repo> --json title,body,comments
-2. Read ALL comments — check for previous plan review results (APPROVE/REJECT verdicts). If a prior review rejected the plan, note what was flagged
-3. Read the latest implementation plan comment from the Ship
-4. Check if the plan covers all requirements in the issue. If this is a re-review, verify that previous feedback has been addressed
-5. Verify the plan is feasible and well-scoped
-6. IMPORTANT: Record your review on GitHub:
+1. Read the Ship's investigation log to understand what was discovered during research:
+   Run: tail -n 200 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 20
+   This gives you the Ship's thought process and findings from the investigation phase.
+2. Run: gh issue view <issue> --repo <repo> --json title,body,comments
+3. Read ALL comments — check for previous plan review results (APPROVE/REJECT verdicts). If a prior review rejected the plan, note what was flagged
+4. Read the latest implementation plan comment from the Ship
+5. Check if the plan covers all requirements in the issue. Use the Ship's investigation log context to evaluate feasibility. If this is a re-review, verify that previous feedback has been addressed
+6. Verify the plan is feasible and well-scoped
+7. IMPORTANT: Record your review on GitHub:
    gh issue comment <issue> --repo <repo> --body "## Plan Review\\n\\n<your detailed review>\\n\\n**Verdict: APPROVE** (or REJECT)"
-7. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+8. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -326,18 +330,22 @@ You are a Dispatch agent performing a code-review gate check.
 Ship ID: <ship-id>
 Repo: <repo>
 PR: <pr-url>
+Ship log: <worktree>/.claude/ship-log.jsonl
 
 Steps:
 0. If PR is "not yet created", run: gh pr list --head <branch-name> --repo <repo> --json number,url --jq '.[0]'
    If a PR is found, use its number and URL. If not found, reject the gate with feedback "PR not found".
-1. Run: gh pr view <number> --repo <repo> --json title,body,reviews,comments
-2. Check for previous review history — if there are existing reviews with "request-changes", read them to understand what was previously flagged
-3. Run: gh pr diff <number> --repo <repo>
-4. Review against: issue requirements, coding conventions, security, scope, test coverage. If this is a re-review, verify that previous issues have been addressed
-5. IMPORTANT: Record your review on GitHub:
+1. Read the Ship's implementation log to understand the thought process and any issues encountered:
+   Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30
+   This gives you the Ship's reasoning, decisions made, and problems solved during implementation.
+2. Run: gh pr view <number> --repo <repo> --json title,body,reviews,comments
+3. Check for previous review history — if there are existing reviews with "request-changes", read them to understand what was previously flagged
+4. Run: gh pr diff <number> --repo <repo>
+5. Review against: issue requirements, coding conventions, security, scope, test coverage. Use the Ship's log context to understand WHY certain implementation choices were made. If this is a re-review, verify that previous issues have been addressed
+6. IMPORTANT: Record your review on GitHub:
    - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
    - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
-6. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+7. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -428,15 +436,23 @@ You are a Dispatch agent diagnosing a Ship error.
 Repo: <repo>
 Ship issue: #<issue-number>
 Error context: <error details from Ship status>
+Ship log: <worktree>/.claude/ship-log.jsonl
 
 Steps:
-1. Read the Ship's work context (PR diff, commits, error logs)
-2. Identify what went wrong and why
-3. Determine if the issue is recoverable or needs a new sortie
+1. Read the Ship's CLI log to understand what happened before the error:
+   Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30
+   This shows the Ship's last actions and thought process before failure.
+2. Check for error messages in the log:
+   Run: tail -n 100 <worktree>/.claude/ship-log.jsonl | grep -i '"type":"result"'
+   This shows the final result/error output from the CLI.
+3. Read the Ship's work context (PR diff, commits) if available
+4. Identify what went wrong and why, using the log context
+5. Determine if the issue is recoverable or needs a new sortie
 
 Output a clear summary of your findings:
 - **Error**: ...
 - **Root cause**: ...
+- **Last Ship actions**: (from log)
 - **Recovery recommendation**: (retry / new sortie / manual intervention)
 
 Do NOT create issues or make any changes. Only investigate and report.
@@ -494,6 +510,23 @@ When you receive a \`[Gate Result Failed]\` or \`[Request Error]\` response afte
 4. If the Ship has a different pending gate, wait for a new \`[Gate Check Request]\` from the Engine — do NOT proactively submit gate-results for gates you were not asked to check
 
 This prevents cascading errors from stale state (e.g., submitting a gate-result for a Ship that has already timed out and been reset to \`status/todo\`).
+
+## Ship Log Reading Rules
+
+Each Ship persists its Claude Code CLI output to \`<worktree>/.claude/ship-log.jsonl\`. This log contains the Ship's full thought process, tool calls, and results in JSONL format (one JSON object per line).
+
+### When to Read Ship Logs
+
+- **Ship error/stoppage**: ALWAYS read the Ship's log first to understand what happened before diagnosing the error. Use \`ship-status\` to get the worktree path, then dispatch an agent to read the log.
+- **Gate rejection follow-up**: When a gate is rejected and the Ship retries, the Dispatch should read the log to understand what the Ship changed.
+- **Troubleshooting**: When the user reports unexpected Ship behavior, read the log before taking any other action.
+
+### How to Read Ship Logs
+
+The log can be large. Always use \`tail\` to read only the relevant portion:
+- For assistant messages (Ship's reasoning): \`tail -n 300 <path>/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30\`
+- For final result/errors: \`tail -n 100 <path>/ship-log.jsonl | grep '"type":"result"'\`
+- Skip \`system\` type messages (init/hooks) — they are noise
 
 ## Response Style
 

@@ -1211,7 +1211,7 @@ export class EngineServer {
     previousFeedback?: string,
   ): string {
     const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
-    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}`;
+    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}\nWorktree: ${ship.worktreePath}\nShip log: ${ship.worktreePath}/.claude/ship-log.jsonl`;
     const retryNote = previousFeedback
       ? `\n\n⚠️ RETRY: This is a re-review after a previous rejection. The Ship claims to have addressed the following feedback:\n> ${previousFeedback}\nVerify that the previous issues have been fixed. Check GitHub (issue comments or PR reviews) for the full history of prior reviews.`
       : "";
