@@ -185,6 +185,10 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
       return { request: "ship-stop", shipId: r.shipId };
 
+    case "ship-resume":
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      return { request: "ship-resume", shipId: r.shipId };
+
     case "sortie": {
       if (!Array.isArray(r.items) || r.items.length === 0) return null;
       const items: Array<{ repo: string; issueNumber: number; skill?: string }> = [];
