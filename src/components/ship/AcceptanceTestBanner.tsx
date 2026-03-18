@@ -19,11 +19,13 @@ export function AcceptanceTestBanner({ ship }: AcceptanceTestBannerProps) {
 
   if (!ship.acceptanceTest || ship.status !== "acceptance-test") return null;
 
+  const isAutoApprove = ship.acceptanceTest.autoApprove === true;
+
   return (
-    <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
+    <div className={`rounded-lg border p-4 ${isAutoApprove ? "border-green-500/50 bg-green-500/10" : "border-amber-500/50 bg-amber-500/10"}`}>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-amber-400">
-          Acceptance Test Required
+        <h3 className={`text-sm font-semibold ${isAutoApprove ? "text-green-400" : "text-amber-400"}`}>
+          {isAutoApprove ? "Acceptance Test Auto-Approved" : "Acceptance Test Required"}
         </h3>
         {isSafeUrl(ship.acceptanceTest.url) ? (
           <a
@@ -52,8 +54,13 @@ export function AcceptanceTestBanner({ ship }: AcceptanceTestBannerProps) {
         ))}
       </ul>
 
-      {/* Actions */}
-      {isResponding ? (
+      {/* Actions — hidden for auto-approve */}
+      {isAutoApprove ? (
+        <div className="flex items-center gap-2 text-xs text-green-400">
+          <Check className="h-3 w-3" />
+          Auto-approved
+        </div>
+      ) : isResponding ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           Processing...

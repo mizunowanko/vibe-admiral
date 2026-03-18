@@ -110,10 +110,12 @@ export function useEngine() {
             id: string;
             url: string;
             checks: string[];
+            autoApprove?: boolean;
           };
           setAcceptanceTest(atData.id, {
             url: atData.url,
             checks: atData.checks,
+            autoApprove: atData.autoApprove,
           });
           break;
         }

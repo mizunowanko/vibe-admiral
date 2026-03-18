@@ -25,6 +25,7 @@ import {
 } from "./stream-parser.js";
 import { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StatusTransitionResult } from "./ship-request-handler.js";
+import { resolveGate } from "./gate-config.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
@@ -431,21 +432,39 @@ export class EngineServer {
   private setupAcceptanceEvents(): void {
     this.acceptanceWatcher.on(
       "request",
-      (shipId: string, request: { url: string; checks: string[] }) => {
+      async (shipId: string, request: { url: string; checks: string[] }) => {
         const ship = this.shipManager.getShip(shipId);
         if (ship) {
+          // Check if acceptance-test→merging gate is auto-approve
+          const fleets = await this.loadFleets();
+          const fleet = fleets.find((f) => f.id === ship.fleetId);
+          const gateType = resolveGate("acceptance-test", "merging", fleet?.gates);
+          const autoApprove = gateType === "auto-approve";
+
           this.shipManager.setAcceptanceTest(shipId, request);
           this.shipManager.updateStatus(shipId, "acceptance-test");
           this.broadcast({
             type: "ship:acceptance-test",
-            data: { id: shipId, url: request.url, checks: request.checks },
+            data: { id: shipId, url: request.url, checks: request.checks, autoApprove },
           });
+
+          // Auto-approve: write acceptance-test-response.json so Ship can proceed
+          if (autoApprove) {
+            console.log(
+              `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test auto-approved — writing response`,
+            );
+            await this.acceptanceWatcher.respond(ship.worktreePath, {
+              accepted: true,
+            });
+          }
 
           // Also inject into Bridge chat
           const acceptanceMessage = {
             type: "system" as const,
             subtype: "acceptance-test" as const,
-            content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
+            content: autoApprove
+              ? `Ship #${ship.issueNumber} (${ship.issueTitle}) acceptance test auto-approved\nURL: ${request.url}`
+              : `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
             meta: {
               category: "acceptance-test" as const,
               issueNumber: ship.issueNumber,

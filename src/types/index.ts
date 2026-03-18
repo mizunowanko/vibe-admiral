@@ -87,6 +87,7 @@ export interface Ship {
 export interface AcceptanceTestRequest {
   url: string;
   checks: string[];
+  autoApprove?: boolean;
 }
 
 // === Issue ===
@@ -215,7 +216,7 @@ export type ServerMessage =
     }
   | {
       type: "ship:acceptance-test";
-      data: { id: string; url: string; checks: string[] };
+      data: { id: string; url: string; checks: string[]; autoApprove?: boolean };
     }
   | {
       type: "ship:created";
