@@ -46,6 +46,8 @@ export interface GateCheckState {
   requestedAt: string;
   /** ISO timestamp when Bridge acknowledged receipt of the gate check. */
   acknowledgedAt?: string;
+  /** ISO timestamp when the last reminder was sent to Bridge. */
+  lastRemindedAt?: string;
 }
 
 // === Fleet ===
@@ -206,7 +208,7 @@ export type BridgeRequest =
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
-  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string }
+  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string; qaRequired?: boolean }
   | { request: "nothing-to-do"; reason: string };
 
 // === Admiral Request (union of Bridge + Ship requests) ===
@@ -248,6 +250,8 @@ export interface ShipProcess {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  /** Whether this Ship requires QA (Playwright) gate before merging. Determined by Ship during planning. Defaults to true. */
+  qaRequired: boolean;
   errorType: ShipErrorType | null;
   retryCount: number;
   nothingToDo?: boolean;

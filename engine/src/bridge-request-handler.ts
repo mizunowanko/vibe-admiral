@@ -228,9 +228,9 @@ export class BridgeRequestHandler {
 
     ship.gateCheck.acknowledgedAt = new Date().toISOString();
     console.log(
-      `[bridge-request] Gate ACK received for Ship #${ship.issueNumber}: ${request.transition} — timeout window reset`,
+      `[bridge-request] Gate ACK received for Ship #${ship.issueNumber}: ${request.transition} — acknowledged`,
     );
-    return `[Gate ACK] Ship #${ship.issueNumber}: ${request.transition} acknowledged — timeout window reset`;
+    return `[Gate ACK] Ship #${ship.issueNumber}: ${request.transition} acknowledged`;
   }
 
   private async handleGateResult(

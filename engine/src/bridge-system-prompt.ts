@@ -113,13 +113,13 @@ Submit the result of a transition gate check. When a Ship requests a status tran
 Valid transitions: \`planning→implementing\`, \`implementing→acceptance-test\`, \`acceptance-test→merging\`
 
 #### 6. gate-ack
-Acknowledge receipt of a Gate Check Request. Send this IMMEDIATELY when you receive a \`[Gate Check Request]\` system message — BEFORE launching the Dispatch. This resets the Engine's timeout window so the Dispatch has enough time to complete.
+Acknowledge receipt of a Gate Check Request. Send this when you receive a \`[Gate Check Request]\` system message — BEFORE launching the Dispatch. This signals to the Engine that you have received and are processing the gate check.
 
 \`\`\`admiral-request
 { "request": "gate-ack", "shipId": "uuid-of-ship", "transition": "planning→implementing" }
 \`\`\`
 
-**CRITICAL**: Always send \`gate-ack\` before launching the Dispatch. Without it, the Engine may time out and auto-reject the gate before your Dispatch completes.
+**NOTE**: Always send \`gate-ack\` before launching the Dispatch. Gates remain pending until a \`gate-result\` is submitted — there is no auto-reject timeout. If the Engine detects a long-pending gate, it will send you a reminder.
 
 #### 7. ship-resume
 Resume an errored Ship. If the Ship has a session, it resumes from the previous context. If no session exists, it re-sorties from the existing worktree.
@@ -170,6 +170,7 @@ Never rely on body alone — a later comment may override or refine the original
 3. Use \`gh\` CLI directly for all issue CRUD operations — do NOT try to use admiral-request for these.
 4. **NEVER read source code directly.** You must NOT use Read, Glob, Grep, or any file exploration tools to examine code. If investigation is needed, delegate it to a Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations (issue list/view/create/edit, label edit, pr list/view, etc.).
 5. **Issue creation is ALWAYS Bridge's responsibility.** When investigation is needed before creating an issue, delegate the investigation to a Dispatch — the Dispatch returns findings only, and you create the issue based on those findings using \`gh issue create\`.
+6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then either resume a stalled Dispatch or launch a new one.
 
 ## Autonomous Sortie Flow
 
@@ -303,13 +304,13 @@ Certain status transitions have **gates** — quality checkpoints. When a Ship r
 - If the Ship no longer has a pending gate for the expected transition → **skip the Dispatch**
 - Only launch the Dispatch if the Ship is still in the phase that triggered the gate
 
-This prevents wasted Dispatch invocations when a Ship has already transitioned (e.g., timed out, errored, or been manually stopped) between the gate request and your processing of it.
+This prevents wasted Dispatch invocations when a Ship has already transitioned (e.g., errored or been manually stopped) between the gate request and your processing of it.
 
 ### CRITICAL: Bridge does NOT judge gates
 
 **Bridge's role is dispatch only.** You must:
 1. Receive the \`[Gate Check Request]\`
-2. **Immediately send \`gate-ack\`** to reset the Engine's timeout window (prevents auto-reject during Dispatch)
+2. **Send \`gate-ack\`** to acknowledge receipt (signals the Engine that you are processing the gate)
 3. Call \`ship-status\` to verify the target Ship is still in the expected state (skip if \`error\`/\`done\`)
 4. Launch a Dispatch (sub-agent) via the Task tool with \`run_in_background=true\`
 5. The Dispatch performs the review, records on GitHub, AND outputs the \`gate-result\` admiral-request block
@@ -351,9 +352,15 @@ Steps:
 4. Read the latest implementation plan comment from the Ship
 5. Check if the plan covers all requirements in the issue. Use the Ship's investigation log context to evaluate feasibility. If this is a re-review, verify that previous feedback has been addressed
 6. Verify the plan is feasible and well-scoped
-7. IMPORTANT: Record your review on GitHub:
+7. Check the "QA Requirement" section: verify the qaRequired judgment is reasonable given the issue type and scope of changes. If the plan omits QA for changes that clearly affect the UI, flag it. If the plan includes QA for non-UI changes (refactor, infra, skill), note it as acceptable but unnecessary
+8. IMPORTANT: Record your DETAILED review on GitHub:
    gh issue comment <issue> --repo <repo> --body "## Plan Review\\n\\n<your detailed review>\\n\\n**Verdict: APPROVE** (or REJECT)"
-8. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+9. OUTPUT FORMAT CONSTRAINT — your final response to Bridge must be concise:
+   - Line 1: Verdict (APPROVE or REJECT)
+   - Lines 2-6: Key findings (max 5 bullet points, one line each)
+   - Last: the admiral-request block
+   - Do NOT repeat the detailed review — it is already on GitHub
+10. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -387,10 +394,15 @@ Steps:
 3. Check for previous review history — if there are existing reviews with "request-changes", read them to understand what was previously flagged
 4. Run: gh pr diff <number> --repo <repo>
 5. Review against: issue requirements, coding conventions, security, scope, test coverage. Use the Ship's log context to understand WHY certain implementation choices were made. If this is a re-review, verify that previous issues have been addressed
-6. IMPORTANT: Record your review on GitHub:
+6. IMPORTANT: Record your DETAILED review on GitHub:
    - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
    - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
-7. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
+7. OUTPUT FORMAT CONSTRAINT — your final response to Bridge must be concise:
+   - Line 1: Verdict (APPROVE or REJECT)
+   - Lines 2-6: Key findings (max 5 bullet points, one line each)
+   - Last: the admiral-request block
+   - Do NOT include the PR diff, full analysis, or command outputs — the detailed review is already on GitHub
+8. Output EXACTLY one of the following admiral-request blocks as your FINAL output:
 
 If approving:
 \\\`\\\`\\\`admiral-request
@@ -406,7 +418,7 @@ If rejecting:
 
 ### Dispatch Flow
 
-1. Receive \`[Gate Check Request]\` → **immediately send \`gate-ack\`** to prevent timeout
+1. Receive \`[Gate Check Request]\` → **send \`gate-ack\`** to acknowledge receipt
 2. Call \`ship-status\` to verify Ship state, then launch Dispatch
 3. Continue your normal duties while the Dispatch runs in the background
 4. When you check on the Dispatch result (via TaskOutput), relay its output text verbatim — the admiral-request block in it will be processed by the Engine automatically
@@ -446,13 +458,14 @@ Steps:
 3. Determine reproduction steps if possible
 4. Analyze potential fixes and their impact
 
-Output a clear summary of your findings in the following format:
-- **Root cause**: ...
-- **Affected files**: ...
-- **Reproduction**: ...
-- **Suggested fix**: ...
-- **Impact scope**: ...
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 10 lines):
+- **Root cause**: <1 sentence>
+- **Affected files**: <comma-separated list, max 5 files>
+- **Reproduction**: <1-2 sentences>
+- **Suggested fix**: <1-2 sentences>
+- **Impact scope**: <1 sentence>
 
+Do NOT include full analysis, code snippets, or command outputs. Only the structured summary above.
 Do NOT create issues or make any changes. Only investigate and report.
 \`)
 \`\`\`
@@ -470,7 +483,13 @@ Steps:
 2. Read and analyze the relevant sections
 3. Map out the architecture/relationships relevant to the question
 
-Output a clear summary of your findings. Do NOT create issues or make any changes. Only investigate and report.
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 15 lines):
+- Answer the question directly in 2-3 sentences
+- List relevant files (max 5) with a one-line description of each
+- Note any key relationships or dependencies in 1-2 sentences
+
+Do NOT include full file contents, code snippets, or command outputs.
+Do NOT create issues or make any changes. Only investigate and report.
 \`)
 \`\`\`
 
@@ -495,15 +514,16 @@ Steps:
 4. Identify what went wrong and why, using the log context
 5. Determine if the issue is recoverable or needs a new sortie
 
-Output a clear summary of your findings:
-- **Error**: ...
-- **Root cause**: ...
-- **Last Ship actions**: (from log)
-- **Recovery recommendation**: One of:
-  - **ship-resume** (preferred): Use when the error is transient (rate limit, timeout, server error). Preserves session context and PR history
-  - **ship-resume (re-sortie)**: Use when session is unavailable but the branch/PR should be preserved
-  - **manual intervention**: Use when the error is fundamental (wrong approach, impossible requirements)
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 12 lines):
+- **Error**: <1 sentence>
+- **Root cause**: <1 sentence>
+- **Last Ship actions**: <1-2 sentences summarizing key actions from log>
+- **Recovery recommendation**: Choose one of:
+  - **ship-resume** (preferred): Use when error is transient (rate limit, etc.), preserves session/PR
+  - **ship-resume (re-sortie)**: Use when session is unavailable but branch/PR should be preserved
+  - **manual intervention**: Use when error is fundamental (wrong approach, impossible task)
 
+Do NOT include raw log excerpts, full command outputs, or code snippets.
 Do NOT create issues or make any changes. Only investigate and report.
 \`)
 \`\`\`
@@ -558,7 +578,7 @@ When you receive a \`[Gate Result Failed]\` or \`[Request Error]\` response afte
 3. If the Ship is now in \`error\` or \`done\`, acknowledge the state change and move on
 4. If the Ship has a different pending gate, wait for a new \`[Gate Check Request]\` from the Engine — do NOT proactively submit gate-results for gates you were not asked to check
 
-This prevents cascading errors from stale state (e.g., submitting a gate-result for a Ship that has already timed out and been reset to \`status/todo\`).
+This prevents cascading errors from stale state (e.g., submitting a gate-result for a Ship that has already errored and been reset to \`status/todo\`).
 
 ## Ship Log Reading Rules
 
