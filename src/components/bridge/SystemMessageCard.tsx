@@ -34,6 +34,12 @@ const STYLE: Record<
     bg: "bg-amber-500/10",
     text: "text-amber-300",
   },
+  "lookout-alert": {
+    icon: "⚠️",
+    border: "border-orange-500/30",
+    bg: "bg-orange-500/10",
+    text: "text-orange-300",
+  },
   // subtypes not rendered by this component (use existing renderers)
   "ship-status": null,
   "compact-status": null,
@@ -64,6 +70,9 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
       break;
     case "acceptance-test":
       label = `${issueRef} 受け入れテスト依頼`;
+      break;
+    case "lookout-alert":
+      label = `${issueRef} Lookout 異常検知`;
       break;
     default:
       return null;

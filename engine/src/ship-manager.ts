@@ -103,6 +103,7 @@ export class ShipManager {
       errorType: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
+      lastOutputAt: null,
     };
     this.ships.set(shipId, ship);
 
@@ -484,6 +485,7 @@ export class ShipManager {
           errorType: null,
           retryCount: 0,
           createdAt: ps.createdAt,
+          lastOutputAt: null,
         };
         this.ships.set(ps.id, ship);
         restored++;

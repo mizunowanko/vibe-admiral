@@ -26,6 +26,8 @@ import {
 import { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
+import { Lookout } from "./lookout.js";
+import type { LookoutAlert } from "./lookout.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
@@ -42,6 +44,7 @@ export class EngineServer {
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
   private shipRequestHandler: ShipRequestHandler;
+  private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
@@ -94,6 +97,7 @@ export class EngineServer {
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
     this.shipRequestHandler = new ShipRequestHandler(this.shipManager, this.statusManager);
+    this.lookout = new Lookout(this.shipManager, this.processManager);
 
     // Wire up cross-handler references for gate flow
     this.requestHandler.setShipRequestHandler(this.shipRequestHandler);
@@ -111,6 +115,7 @@ export class EngineServer {
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
     this.startGateTimeoutScanner();
+    this.setupLookout();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
 
@@ -225,6 +230,12 @@ export class EngineServer {
           }
         }
       } else {
+        // Update lastOutputAt for Lookout no-output detection
+        {
+          const ship = this.shipManager.getShip(id);
+          if (ship) ship.lastOutputAt = Date.now();
+        }
+
         // Extract sessionId from init messages (before parsing drops them)
         const sessionId = extractSessionId(msg);
         if (sessionId) {
@@ -498,6 +509,46 @@ export class EngineServer {
         });
       }
     });
+  }
+
+  private setupLookout(): void {
+    this.lookout.setAlertHandler((alert: LookoutAlert) => {
+      const ship = this.shipManager.getShip(alert.shipId);
+      if (!ship) return;
+
+      const bridgeId = `bridge-${alert.fleetId}`;
+
+      // Build system message for Bridge chat
+      const alertMessage: StreamMessage = {
+        type: "system",
+        subtype: "lookout-alert",
+        content: `[Lookout Alert] ${alert.message}`,
+        meta: {
+          category: "lookout-alert",
+          issueNumber: alert.issueNumber,
+          issueTitle: alert.issueTitle,
+          alertType: alert.alertType,
+          shipId: alert.shipId,
+        },
+      };
+
+      // Add to Bridge history and broadcast to frontend
+      this.bridgeManager.addToHistory(alert.fleetId, alertMessage);
+      this.broadcast({
+        type: "bridge:stream",
+        data: { fleetId: alert.fleetId, message: alertMessage },
+      });
+
+      // Send to Bridge stdin if Bridge is running
+      if (this.processManager.isRunning(bridgeId)) {
+        this.processManager.sendMessage(
+          bridgeId,
+          `[Lookout Alert] ${alert.message}`,
+        );
+      }
+    });
+
+    this.lookout.start();
   }
 
   private async handleMessage(

@@ -132,7 +132,15 @@ export type StreamMessageSubtype =
   | "acceptance-test"
   | "request-result"
   | "pr-review-request"
-  | "gate-check-request";
+  | "gate-check-request"
+  | "lookout-alert";
+
+// === Lookout ===
+export type LookoutAlertType =
+  | "gate-wait-stall"
+  | "acceptance-test-stall"
+  | "no-output-stall"
+  | "excessive-retries";
 
 export interface SystemMessageMeta {
   category: StreamMessageSubtype;
@@ -144,6 +152,8 @@ export interface SystemMessageMeta {
   prUrl?: string;
   url?: string;
   checks?: string[];
+  alertType?: LookoutAlertType;
+  shipId?: string;
 }
 
 export interface StreamMessage {
@@ -247,6 +257,8 @@ export interface ShipProcess {
   retryCount: number;
   createdAt: string;
   completedAt?: number;
+  /** Timestamp (ms epoch) of last stdout data from Ship process. Used by Lookout. */
+  lastOutputAt: number | null;
 }
 
 // === Persisted Ship (subset for disk persistence across Engine restarts) ===
