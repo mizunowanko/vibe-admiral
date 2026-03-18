@@ -158,7 +158,7 @@ export class BridgeRequestHandler {
     }
     const lines = ships.map(
       (s) =>
-        `  Ship ${s.id} #${s.issueNumber} (${s.issueTitle}): ${s.status}${s.gateCheck ? ` [gate: ${s.gateCheck.transition} ${s.gateCheck.status}]` : ""}`,
+        `  Ship ${s.id} #${s.issueNumber} (${s.issueTitle}): ${s.status}${s.gateCheck ? ` [gate: ${s.gateCheck.transition} ${s.gateCheck.status}]` : ""}\n    Worktree: ${s.worktreePath}\n    Log: ${s.worktreePath}/.claude/ship-log.jsonl`,
     );
     return `[Ship Status]\n${lines.join("\n")}`;
   }
