@@ -53,7 +53,7 @@ export class BridgeRequestHandler {
       case "ship-stop":
         return this.handleShipStop(request);
       case "ship-resume":
-        return this.handleShipResume(request);
+        return this.handleShipResume(request, shipExtraPrompt);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
       case "gate-result":
@@ -174,6 +174,7 @@ export class BridgeRequestHandler {
 
   private handleShipResume(
     request: Extract<BridgeRequest, { request: "ship-resume" }>,
+    shipExtraPrompt?: string,
   ): string {
     const ship = this.shipManager.resolveShip(request.shipId);
     if (!ship) {
@@ -183,7 +184,7 @@ export class BridgeRequestHandler {
       return `[Ship Resume Failed] Ship #${ship.issueNumber} is not in error state (current: ${ship.status})`;
     }
 
-    const result = this.shipManager.retryShip(ship.id);
+    const result = this.shipManager.retryShip(ship.id, shipExtraPrompt);
     if (!result) {
       return `[Ship Resume Failed] Could not resume Ship #${ship.issueNumber}`;
     }
