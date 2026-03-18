@@ -47,6 +47,8 @@ export class EngineServer {
   private bridgeFirstData = new Set<string>();
   private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private rateLimitedShips = new Set<string>();
+  /** Per-ship mutex to serialize executeShipRequests() calls. */
+  private shipRequestLocks = new Map<string, Promise<void>>();
 
   /** Max auto-retry attempts for rate-limited Ships. */
   private static readonly MAX_RATE_LIMIT_RETRIES = 3;
@@ -233,10 +235,24 @@ export class EngineServer {
               });
             }
 
+            // Detect PR URL BEFORE processing admiral-requests so that
+            // ship.prUrl is populated when gate check messages are built.
+            // Fixes #293: code-review gate showing "PR: not yet created"
+            // when PR URL and status-transition appear in the same message.
+            if (cleanContent) {
+              const cleanMsg = { ...parsed, content: cleanContent };
+              this.detectPRCreation(id, cleanMsg);
+              this.detectPushForReReview(id, cleanMsg);
+            }
+
             // Execute Ship requests (only status-transition allowed)
+            // Serialized per-ship to prevent race conditions with duplicate
+            // admiral-request blocks from cumulative stream-json messages.
             const shipRequests = requests.filter(isShipRequest);
             if (shipRequests.length > 0) {
-              this.executeShipRequests(id, shipRequests).catch(console.error);
+              const prev = this.shipRequestLocks.get(id) ?? Promise.resolve();
+              const next = prev.then(() => this.executeShipRequests(id, shipRequests)).catch(console.error);
+              this.shipRequestLocks.set(id, next);
             }
 
             // Reject any Bridge-only requests from Ship
@@ -245,13 +261,6 @@ export class EngineServer {
               console.warn(
                 `[ws-server] Ship ${id} attempted Bridge-only requests: ${bridgeOnly.map((r) => r.request).join(", ")}`,
               );
-            }
-
-            // Detect PR URL and push for re-review in clean content
-            if (cleanContent) {
-              const cleanMsg = { ...parsed, content: cleanContent };
-              this.detectPRCreation(id, cleanMsg);
-              this.detectPushForReReview(id, cleanMsg);
             }
           } else {
             this.logShipMessage(id, parsed);
@@ -289,6 +298,7 @@ export class EngineServer {
         });
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
+        this.shipRequestLocks.delete(id);
         const ship = this.shipManager.getShip(id);
         if (!ship) {
           console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
@@ -998,7 +1008,7 @@ export class EngineServer {
       if (response.gate) {
         // Gate check required — initiate gate flow instead of writing response
         const planCommentUrl = request.request === "status-transition" ? request.planCommentUrl : undefined;
-        this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl, response.gate.previousFeedback);
+        await this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl, response.gate.previousFeedback);
         // Write a "pending" response so Ship knows to wait
         await ShipRequestHandler.writeResponse(ship.worktreePath, {
           ok: false,
@@ -1024,14 +1034,14 @@ export class EngineServer {
     }
   }
 
-  private initiateGateCheck(
+  private async initiateGateCheck(
     shipId: string,
     gateType: GateType,
     from: ShipStatus,
     to: ShipStatus,
     planCommentUrl?: string,
     previousFeedback?: string,
-  ): void {
+  ): Promise<void> {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
@@ -1052,6 +1062,38 @@ export class EngineServer {
       );
       return;
     }
+
+    // Dedup guard: skip if a pending gate already exists for this transition
+    if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
+      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
+      return;
+    }
+
+    // For code-review gates, ensure PR URL is available.
+    // If detectPRCreation() hasn't captured it yet, fall back to `gh pr list`.
+    if (gateType === "code-review" && !ship.prUrl && ship.branchName) {
+      try {
+        const { stdout } = await execFileAsync("gh", [
+          "pr", "list",
+          "--head", ship.branchName,
+          "--repo", ship.repo,
+          "--json", "number,url",
+          "--jq", ".[0]",
+        ]);
+        const trimmed = stdout.trim();
+        if (trimmed) {
+          const pr = JSON.parse(trimmed) as { number: number; url: string };
+          ship.prUrl = pr.url;
+          ship.prReviewStatus = "pending";
+          console.log(
+            `[ws-server] Ship ${shipId.slice(0, 8)}... PR URL resolved via fallback: ${pr.url}`,
+          );
+        }
+      } catch {
+        // gh pr list failed — proceed with "not yet created"
+      }
+    }
+
 
     // Set gate check state on the ship
     this.shipManager.setGateCheck(shipId, transition, gateType);
