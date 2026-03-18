@@ -12,7 +12,7 @@ export interface LookoutAlert {
 }
 
 /** Thresholds (ms) for Lookout anomaly detection. */
-const GATE_WAIT_STALL_MS = 3 * 60 * 1000; // 3 minutes (early warning before 5-min auto-reject)
+const GATE_WAIT_STALL_MS = 3 * 60 * 1000; // 3 minutes (early warning before 5-min reminder)
 const ACCEPTANCE_TEST_STALL_MS = 5 * 60 * 1000; // 5 minutes
 const NO_OUTPUT_STALL_MS = 3 * 60 * 1000; // 3 minutes
 const EXCESSIVE_RETRY_THRESHOLD = 2;
