@@ -61,15 +61,15 @@ STATEEOF
 ## vibe-admiral 連携判定
 
 ```bash
-echo "${VIBE_ADMIRAL:-not_set}"
+if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL` が設定されている場合:
+- 結果が `VIBE_ADMIRAL_ENABLED` の場合（= Admiral モード）:
   - **Worktree 作成/削除**: スキップ（vibe-admiral が実施済み）
   - **ラベル変更**: スキップ（vibe-admiral が実施済み）
   - **受け入れテスト**: ファイル伝言板方式（後述）
   - **Ship 完了後の後処理**: スキップ（vibe-admiral が実施）
-- 設定されていない場合:
+- 結果が `VIBE_ADMIRAL_DISABLED` の場合（= スタンドアロンモード）:
   - **Worktree 作成/削除**: スキル内で実行
   - **ラベル変更**: スキル内で実行
   - **受け入れテスト**: AskUserQuestion + open URL を使用
@@ -142,7 +142,7 @@ echo "$GATE_RESULT"
 |------|-----------|------|
 | `planning → implementing` | plan-review | Bridge が計画の妥当性を検証 |
 | `testing → reviewing` | code-review | Bridge が PR の品質を検証 |
-| `reviewing → acceptance-test` | playwright | Bridge が自動 QA を実施 |
+| `reviewing → acceptance-test` | code-review | Bridge が PR の追加機能の動作を検証 |
 | `acceptance-test → merging` | human | 人間が UI で承認 |
 
 ### ステップ対応表
@@ -358,7 +358,7 @@ Ship は Gate 待機フロー（前述）に従い、`gate-response.json` を待
 
 #### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
 
-まず `acceptance-test` への遷移を表明する。この遷移は `reviewing → acceptance-test` の playwright Gate をトリガーする:
+まず `acceptance-test` への遷移を表明する。この遷移は `reviewing → acceptance-test` の code-review Gate をトリガーする:
 
 ````
 ```admiral-request
