@@ -60,7 +60,7 @@ For operations that ONLY the Engine can perform (Ship management), use \`admiral
 
 The Engine intercepts these blocks, executes them, and returns results to you.
 
-### Available Requests (6 total)
+### Available Requests (7 total)
 
 #### 1. sortie
 Launch Ships (Claude Code implementation sessions) for issues.
@@ -120,6 +120,37 @@ Acknowledge receipt of a Gate Check Request. Send this IMMEDIATELY when you rece
 \`\`\`
 
 **CRITICAL**: Always send \`gate-ack\` before launching the Dispatch. Without it, the Engine may time out and auto-reject the gate before your Dispatch completes.
+
+#### 7. ship-resume
+Resume an errored Ship. If the Ship has a session, it resumes from the previous context. If no session exists, it re-sorties from the existing worktree.
+
+\`\`\`admiral-request
+{ "request": "ship-resume", "shipId": "uuid-of-ship" }
+\`\`\`
+
+- Only works on Ships in \`error\` status
+- **Preferred over re-sortie** because it preserves the Ship's session context, worktree, and PR history
+- Check the Ship error notification for resume eligibility (session availability)
+
+## Ship Error Recovery Flow
+
+When a Ship enters \`error\` status, Bridge receives a system message with resume eligibility information:
+- **Ship ID**: Use this for the \`ship-resume\` request
+- **Resumable: yes (session available)**: The Ship can be resumed with its full context preserved → use \`ship-resume\`
+- **Resumable: no (no session)**: No session to resume → \`ship-resume\` will re-sortie from the existing worktree (preserving branch and PR)
+
+### Recovery Decision Flow
+
+1. Receive Ship error notification (system message with Ship ID and resume info)
+2. Launch a Dispatch to diagnose the error (read Ship log, check for rate limits, etc.)
+3. Based on diagnosis:
+   - **Rate limit / transient error + session available** → \`ship-resume\` (resume from context)
+   - **Rate limit / transient error + no session** → \`ship-resume\` (re-sortie from existing worktree)
+   - **Fundamental error (wrong approach, impossible task)** → \`ship-stop\` if still running, then escalate to human
+   - **Unknown / needs investigation** → Dispatch to read Ship log first, then decide
+
+### IMPORTANT: Resume is the default recovery action
+Do NOT launch a new \`sortie\` for an issue that already has an errored Ship. Use \`ship-resume\` instead — it preserves the worktree, branch, PR, and (when available) the session context.
 
 ## Issue Reading Rules
 
@@ -468,7 +499,10 @@ Output a clear summary of your findings:
 - **Error**: ...
 - **Root cause**: ...
 - **Last Ship actions**: (from log)
-- **Recovery recommendation**: (retry / new sortie / manual intervention)
+- **Recovery recommendation**: One of:
+  - **ship-resume** (preferred): Use when the error is transient (rate limit, timeout, server error). Preserves session context and PR history
+  - **ship-resume (re-sortie)**: Use when session is unavailable but the branch/PR should be preserved
+  - **manual intervention**: Use when the error is fundamental (wrong approach, impossible requirements)
 
 Do NOT create issues or make any changes. Only investigate and report.
 \`)

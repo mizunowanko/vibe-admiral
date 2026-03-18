@@ -40,19 +40,35 @@ export async function create(
 
   await git(["fetch", "origin", baseBranch], repoRoot);
 
-  // Clean up stale worktree/branch from a previous failed sortie
+  // Clean up stale worktree from a previous failed sortie
   if (await exists(worktreePath)) {
     await git(["worktree", "remove", worktreePath, "--force"], repoRoot);
   }
-  // Delete local branch if it already exists
+  // Delete local branch if it already exists (required to avoid worktree conflicts)
   await git(["branch", "-D", branchName], repoRoot).catch(() => {});
-  // Delete remote branch if it already exists
-  await git(["push", "origin", "--delete", branchName], repoRoot).catch(() => {});
+  // NOTE: Remote branch is intentionally preserved to maintain existing PRs.
+  // See #324 — re-sortie should reuse remote branches instead of destroying them.
 
-  await git(
-    ["worktree", "add", "-b", branchName, worktreePath, `origin/${baseBranch}`],
+  // Check if remote branch exists — if so, reuse it (preserves previous commits and PR)
+  await git(["fetch", "origin", branchName], repoRoot).catch(() => {});
+  const remoteBranchExists = await git(
+    ["rev-parse", "--verify", `origin/${branchName}`],
     repoRoot,
-  );
+  ).then(() => true).catch(() => false);
+
+  if (remoteBranchExists) {
+    // Create worktree from existing remote branch (preserves commits)
+    await git(
+      ["worktree", "add", "-b", branchName, worktreePath, `origin/${branchName}`],
+      repoRoot,
+    );
+  } else {
+    // Create worktree from default branch (fresh start)
+    await git(
+      ["worktree", "add", "-b", branchName, worktreePath, `origin/${baseBranch}`],
+      repoRoot,
+    );
+  }
 }
 
 export async function remove(worktreePath: string, knownRepoRoot?: string): Promise<void> {

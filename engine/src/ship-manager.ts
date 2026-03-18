@@ -84,6 +84,28 @@ export class ShipManager {
       await execFileAsync("npm", ["install"], { cwd: worktreePath });
     }
 
+    // 7. Detect existing PR for branch reuse (preserves review history)
+    let existingPrUrl: string | null = null;
+    let existingPrReviewStatus: "pending" | null = null;
+    try {
+      const { stdout } = await execFileAsync("gh", [
+        "pr", "list",
+        "--head", branchName,
+        "--repo", repo,
+        "--json", "number,url",
+        "--jq", ".[0]",
+      ]);
+      const trimmed = stdout.trim();
+      if (trimmed) {
+        const pr = JSON.parse(trimmed) as { number: number; url: string };
+        existingPrUrl = pr.url;
+        existingPrReviewStatus = "pending";
+        console.log(`[ship-manager] Existing PR detected for #${issueNumber}: ${pr.url}`);
+      }
+    } catch {
+      // No existing PR or gh failed — continue without it
+    }
+
     const ship: ShipProcess = {
       id: shipId,
       fleetId,
@@ -95,8 +117,8 @@ export class ShipManager {
       branchName,
       worktreePath,
       sessionId: null,
-      prUrl: null,
-      prReviewStatus: null,
+      prUrl: existingPrUrl,
+      prReviewStatus: existingPrReviewStatus,
       acceptanceTest: null,
       acceptanceTestApproved: false,
       gateCheck: null,
@@ -107,10 +129,18 @@ export class ShipManager {
     };
     this.ships.set(shipId, ship);
 
-    // 7. Launch Claude CLI process
-    this.processManager.sortie(shipId, worktreePath, issueNumber, extraPrompt, skill);
+    // 8. Build extra context for Ship if there's an existing PR
+    const prContext = existingPrUrl
+      ? `\n\n[Prior Work Context] An existing PR was found for this branch: ${existingPrUrl}. The branch contains previous commits from a prior sortie. Check for existing work before starting from scratch. Run \`gh pr view --json number,url,body,reviews,comments\` to review the PR history.`
+      : "";
+    const fullExtraPrompt = extraPrompt
+      ? `${extraPrompt}${prContext}`
+      : prContext || undefined;
 
-    // 8. Start acceptance test watcher
+    // 9. Launch Claude CLI process
+    this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill);
+
+    // 10. Start acceptance test watcher
     this.acceptanceWatcher.watch(worktreePath, shipId);
 
     this.updateStatus(shipId, "planning");

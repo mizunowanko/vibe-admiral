@@ -52,6 +52,8 @@ export class BridgeRequestHandler {
         return this.handleShipStatus(fleetId);
       case "ship-stop":
         return this.handleShipStop(request);
+      case "ship-resume":
+        return this.handleShipResume(request);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
       case "gate-result":
@@ -168,6 +170,26 @@ export class BridgeRequestHandler {
       return `[Ship Stopped] ${ship.id}`;
     }
     return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
+  }
+
+  private handleShipResume(
+    request: Extract<BridgeRequest, { request: "ship-resume" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId);
+    if (!ship) {
+      return `[Ship Resume Failed] Ship ${request.shipId} not found`;
+    }
+    if (ship.status !== "error") {
+      return `[Ship Resume Failed] Ship #${ship.issueNumber} is not in error state (current: ${ship.status})`;
+    }
+
+    const result = this.shipManager.retryShip(ship.id);
+    if (!result) {
+      return `[Ship Resume Failed] Could not resume Ship #${ship.issueNumber}`;
+    }
+
+    const method = ship.sessionId ? "session resume" : "re-sortie";
+    return `[Ship Resumed] Ship #${ship.issueNumber} (${ship.issueTitle}) resumed via ${method}`;
   }
 
   private handlePRReviewResult(

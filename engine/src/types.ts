@@ -199,6 +199,7 @@ export type BridgeRequest =
   | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
+  | { request: "ship-resume"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
   | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
   | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number };
