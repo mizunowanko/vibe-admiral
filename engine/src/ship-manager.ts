@@ -215,6 +215,14 @@ export class ShipManager {
     }
   }
 
+  setNothingToDo(id: string, reason: string): void {
+    const ship = this.ships.get(id);
+    if (ship) {
+      ship.nothingToDo = true;
+      ship.nothingToDoReason = reason;
+    }
+  }
+
   async respondToPRReview(
     shipId: string,
     response: PRReviewResponse,

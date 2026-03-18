@@ -13,7 +13,9 @@ interface ShipCardProps {
 }
 
 export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
-  const config = STATUS_CONFIG[ship.status];
+  const config = ship.nothingToDo
+    ? { label: "Nothing to do", color: "bg-slate-500/20 text-slate-400", textColor: "text-slate-400" }
+    : STATUS_CONFIG[ship.status];
   const isActive = ship.status !== "done" && ship.status !== "error";
 
   return (
@@ -132,6 +134,15 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
               {ship.gateCheck.feedback}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Nothing to do reason */}
+      {ship.nothingToDo && ship.nothingToDoReason && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <p className="text-[10px] text-muted-foreground truncate">
+            {ship.nothingToDoReason}
+          </p>
         </div>
       )}
 

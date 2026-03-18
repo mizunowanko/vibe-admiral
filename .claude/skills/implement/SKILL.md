@@ -239,6 +239,40 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 - Task ツールで並列調査する（影響範囲の特定）
 - CLAUDE.md の Conflict Risk Areas を参照する
 
+#### Nothing-to-do 判定
+
+調査の結果、以下のいずれかに該当する場合は「何もすることがない」と判定する:
+
+- Issue で報告された問題が既に修正済み（デフォルトブランチに含まれている）
+- 変更差分がゼロ（テスト全パス、コード変更不要）
+- Issue のコメントで指摘された内容が既に解決済み
+
+**`VIBE_ADMIRAL` 設定時**: admiral-request で `nothing-to-do` を送信する:
+
+````
+```admiral-request
+{ "request": "nothing-to-do", "reason": "<何もする必要がない理由>" }
+```
+````
+
+```bash
+while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
+RESPONSE=$(cat .claude/admiral-request-response.json)
+rm -f .claude/admiral-request-response.json
+echo "$RESPONSE"
+```
+
+レスポンスが `ok: true` なら、workflow-state.json を削除して終了する:
+```bash
+rm -f .claude/workflow-state.json
+```
+
+**`VIBE_ADMIRAL` 未設定時**: Issue にコメントを投稿して close する:
+```bash
+gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "Nothing to do: <理由>"
+gh issue close <ISSUE_NUMBER> --repo "$REPO"
+```
+
 ### Step 4: 計画
 
 **`VIBE_ADMIRAL` 設定時**: EnterPlanMode は使わない（`-p` モードでは ExitPlanMode の承認ができずプロセスが停止するため）。代わりに:

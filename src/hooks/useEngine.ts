@@ -73,12 +73,16 @@ export function useEngine() {
             repo?: string;
             issueNumber?: number;
             issueTitle?: string;
+            nothingToDo?: boolean;
+            nothingToDoReason?: string;
           };
           setShipStatus(statusData.id, statusData.status, {
             fleetId: statusData.fleetId,
             repo: statusData.repo,
             issueNumber: statusData.issueNumber,
             issueTitle: statusData.issueTitle,
+            nothingToDo: statusData.nothingToDo,
+            nothingToDoReason: statusData.nothingToDoReason,
           });
           break;
         }

@@ -79,6 +79,8 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   errorType: ShipErrorType | null;
   retryCount: number;
+  nothingToDo?: boolean;
+  nothingToDoReason?: string;
   createdAt: string;
 }
 
@@ -205,7 +207,7 @@ export type ServerMessage =
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
       type: "ship:status";
-      data: { id: string; status: ShipStatus; detail?: string };
+      data: { id: string; status: ShipStatus; detail?: string; nothingToDo?: boolean; nothingToDoReason?: string };
     }
   | {
       type: "ship:compacting";
