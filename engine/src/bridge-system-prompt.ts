@@ -113,13 +113,13 @@ Submit the result of a transition gate check. When a Ship requests a status tran
 Valid transitions: \`planning→implementing\`, \`implementing→acceptance-test\`, \`acceptance-test→merging\`
 
 #### 6. gate-ack
-Acknowledge receipt of a Gate Check Request. Send this IMMEDIATELY when you receive a \`[Gate Check Request]\` system message — BEFORE launching the Dispatch. This resets the Engine's timeout window so the Dispatch has enough time to complete.
+Acknowledge receipt of a Gate Check Request. Send this when you receive a \`[Gate Check Request]\` system message — BEFORE launching the Dispatch. This signals to the Engine that you have received and are processing the gate check.
 
 \`\`\`admiral-request
 { "request": "gate-ack", "shipId": "uuid-of-ship", "transition": "planning→implementing" }
 \`\`\`
 
-**CRITICAL**: Always send \`gate-ack\` before launching the Dispatch. Without it, the Engine may time out and auto-reject the gate before your Dispatch completes.
+**NOTE**: Always send \`gate-ack\` before launching the Dispatch. Gates remain pending until a \`gate-result\` is submitted — there is no auto-reject timeout. If the Engine detects a long-pending gate, it will send you a reminder.
 
 ## Issue Reading Rules
 
@@ -139,6 +139,7 @@ Never rely on body alone — a later comment may override or refine the original
 3. Use \`gh\` CLI directly for all issue CRUD operations — do NOT try to use admiral-request for these.
 4. **NEVER read source code directly.** You must NOT use Read, Glob, Grep, or any file exploration tools to examine code. If investigation is needed, delegate it to a Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations (issue list/view/create/edit, label edit, pr list/view, etc.).
 5. **Issue creation is ALWAYS Bridge's responsibility.** When investigation is needed before creating an issue, delegate the investigation to a Dispatch — the Dispatch returns findings only, and you create the issue based on those findings using \`gh issue create\`.
+6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then either resume a stalled Dispatch or launch a new one.
 
 ## Autonomous Sortie Flow
 
@@ -272,13 +273,13 @@ Certain status transitions have **gates** — quality checkpoints. When a Ship r
 - If the Ship no longer has a pending gate for the expected transition → **skip the Dispatch**
 - Only launch the Dispatch if the Ship is still in the phase that triggered the gate
 
-This prevents wasted Dispatch invocations when a Ship has already transitioned (e.g., timed out, errored, or been manually stopped) between the gate request and your processing of it.
+This prevents wasted Dispatch invocations when a Ship has already transitioned (e.g., errored or been manually stopped) between the gate request and your processing of it.
 
 ### CRITICAL: Bridge does NOT judge gates
 
 **Bridge's role is dispatch only.** You must:
 1. Receive the \`[Gate Check Request]\`
-2. **Immediately send \`gate-ack\`** to reset the Engine's timeout window (prevents auto-reject during Dispatch)
+2. **Send \`gate-ack\`** to acknowledge receipt (signals the Engine that you are processing the gate)
 3. Call \`ship-status\` to verify the target Ship is still in the expected state (skip if \`error\`/\`done\`)
 4. Launch a Dispatch (sub-agent) via the Task tool with \`run_in_background=true\`
 5. The Dispatch performs the review, records on GitHub, AND outputs the \`gate-result\` admiral-request block
@@ -375,7 +376,7 @@ If rejecting:
 
 ### Dispatch Flow
 
-1. Receive \`[Gate Check Request]\` → **immediately send \`gate-ack\`** to prevent timeout
+1. Receive \`[Gate Check Request]\` → **send \`gate-ack\`** to acknowledge receipt
 2. Call \`ship-status\` to verify Ship state, then launch Dispatch
 3. Continue your normal duties while the Dispatch runs in the background
 4. When you check on the Dispatch result (via TaskOutput), relay its output text verbatim — the admiral-request block in it will be processed by the Engine automatically
@@ -524,7 +525,7 @@ When you receive a \`[Gate Result Failed]\` or \`[Request Error]\` response afte
 3. If the Ship is now in \`error\` or \`done\`, acknowledge the state change and move on
 4. If the Ship has a different pending gate, wait for a new \`[Gate Check Request]\` from the Engine — do NOT proactively submit gate-results for gates you were not asked to check
 
-This prevents cascading errors from stale state (e.g., submitting a gate-result for a Ship that has already timed out and been reset to \`status/todo\`).
+This prevents cascading errors from stale state (e.g., submitting a gate-result for a Ship that has already errored and been reset to \`status/todo\`).
 
 ## Ship Log Reading Rules
 

@@ -46,6 +46,8 @@ export interface GateCheckState {
   requestedAt: string;
   /** ISO timestamp when Bridge acknowledged receipt of the gate check. */
   acknowledgedAt?: string;
+  /** ISO timestamp when the last reminder was sent to Bridge. */
+  lastRemindedAt?: string;
 }
 
 // === Fleet ===
