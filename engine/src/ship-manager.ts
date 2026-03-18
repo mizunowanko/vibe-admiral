@@ -100,6 +100,7 @@ export class ShipManager {
       acceptanceTest: null,
       acceptanceTestApproved: false,
       gateCheck: null,
+      qaRequired: true,
       errorType: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
@@ -212,6 +213,13 @@ export class ShipManager {
       // This method only updates in-memory state and notifies the frontend.
       this.onStatusChange?.(id, status, detail);
       this.persistToDisk();
+    }
+  }
+
+  setQaRequired(id: string, qaRequired: boolean): void {
+    const ship = this.ships.get(id);
+    if (ship) {
+      ship.qaRequired = qaRequired;
     }
   }
 
@@ -500,6 +508,7 @@ export class ShipManager {
           acceptanceTest: null,
           acceptanceTestApproved: false,
           gateCheck: null,
+          qaRequired: true,
           errorType: null,
           retryCount: 0,
           createdAt: ps.createdAt,
