@@ -26,6 +26,7 @@ const GATE_TYPE_DESCRIPTIONS: Record<GateType, string> = {
 export function buildBridgeSystemPrompt(
   fleetName: string,
   repos: string[],
+  maxConcurrentSorties: number = 6,
 ): string {
   const repoList = repos.map((r) => `- ${r}`).join("\n");
   const exampleRepo = repos[0] ?? "owner/repo";
@@ -34,6 +35,7 @@ export function buildBridgeSystemPrompt(
 
 ## Your Fleet
 - **Fleet name**: ${fleetName}
+- **Max concurrent sorties**: ${maxConcurrentSorties}
 - **Repositories**:
 ${repoList}
 

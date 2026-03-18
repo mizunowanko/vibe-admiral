@@ -77,7 +77,7 @@ export class BridgeRequestHandler {
     }
 
     // Determine concurrent sortie limit
-    const configuredMax = rateLimitContext?.maxConcurrentSorties ?? 5;
+    const configuredMax = rateLimitContext?.maxConcurrentSorties ?? 6;
     const effectiveMax = rateLimitContext?.effectiveMaxSorties ?? configuredMax;
     const activeShips = this.shipManager.getShipsByFleet(fleetId)
       .filter((s: ShipProcess) => s.status !== "done" && s.status !== "error");

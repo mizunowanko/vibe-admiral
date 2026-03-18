@@ -17,6 +17,7 @@ interface FleetState {
     sharedRulePaths?: string[];
     bridgeRulePaths?: string[];
     shipRulePaths?: string[];
+    maxConcurrentSorties?: number;
   }) => void;
   deleteFleet: (id: string) => void;
   fetchFleets: () => void;
