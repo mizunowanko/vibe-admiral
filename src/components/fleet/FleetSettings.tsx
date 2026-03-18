@@ -82,6 +82,9 @@ export function FleetSettings() {
   const [skillSources, setSkillSources] = useState<FleetSkillSources>(
     selectedFleet?.skillSources ?? {},
   );
+  const [maxConcurrentSorties, setMaxConcurrentSorties] = useState<number>(
+    selectedFleet?.maxConcurrentSorties ?? 6,
+  );
   const [sharedRulePaths, setSharedRulePaths] = useState<string[]>(
     selectedFleet?.sharedRulePaths ?? [],
   );
@@ -99,6 +102,7 @@ export function FleetSettings() {
     setRepos(selectedFleet?.repos ?? []);
     setNewRepoPath("");
     setSkillSources(selectedFleet?.skillSources ?? {});
+    setMaxConcurrentSorties(selectedFleet?.maxConcurrentSorties ?? 6);
     setSharedRulePaths(selectedFleet?.sharedRulePaths ?? []);
     setBridgeRulePaths(selectedFleet?.bridgeRulePaths ?? []);
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
@@ -121,6 +125,7 @@ export function FleetSettings() {
       name: name.trim(),
       repos,
       skillSources,
+      maxConcurrentSorties,
       sharedRulePaths,
       bridgeRulePaths,
       shipRulePaths,
@@ -231,6 +236,31 @@ export function FleetSettings() {
               />
             </div>
           </div>
+
+          {/* Max Concurrent Sorties — only shown when editing */}
+          {!isNew && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Max Concurrent Sorties
+              </label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Maximum number of Ships that can run simultaneously. Automatically reduced during API rate limiting.
+              </p>
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                value={maxConcurrentSorties}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (!isNaN(val) && val >= 1 && val <= 20) {
+                    setMaxConcurrentSorties(val);
+                  }
+                }}
+                className="w-24"
+              />
+            </div>
+          )}
 
           {/* Skill Sources — only shown when editing */}
           {!isNew && (

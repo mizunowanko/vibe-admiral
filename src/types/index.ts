@@ -33,7 +33,7 @@ export interface Fleet {
   sharedRulePaths?: string[];
   bridgeRulePaths?: string[];
   shipRulePaths?: string[];
-  /** Maximum number of concurrent Ship sorties per fleet (default: 5). */
+  /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
 }
@@ -173,6 +173,7 @@ export type ClientMessage =
         sharedRulePaths?: string[];
         bridgeRulePaths?: string[];
         shipRulePaths?: string[];
+        maxConcurrentSorties?: number;
       };
     }
   | { type: "fleet:delete"; data: { id: string } }

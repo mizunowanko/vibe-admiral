@@ -80,7 +80,7 @@ export interface Fleet {
   shipRulePaths?: string[];
   /** Gate settings: which transition gates are enabled and their types. */
   gates?: FleetGateSettings;
-  /** Maximum number of concurrent Ship sorties per fleet (default: 5). */
+  /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
 }

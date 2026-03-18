@@ -628,6 +628,7 @@ export class EngineServer {
               let prompt = buildBridgeSystemPrompt(
                 fleet.name,
                 remoteNames,
+                fleet.maxConcurrentSorties ?? 6,
               );
 
               // Load and append shared + bridge rules
@@ -1553,7 +1554,7 @@ export class EngineServer {
         this.loadFleets()
           .then((fleets) => {
             // Use the max configured across all fleets (or default 5)
-            const fleetMax = Math.max(5, ...fleets.map((f) => f.maxConcurrentSorties ?? 5));
+            const fleetMax = Math.max(6, ...fleets.map((f) => f.maxConcurrentSorties ?? 6));
             this.restoreEffectiveMaxSorties(fleetMax);
           })
           .catch(() => { /* best-effort */ });
@@ -1642,7 +1643,7 @@ export class EngineServer {
 
   /** Halve the effective max sorties on rate limit (floor: MIN_EFFECTIVE_SORTIES). */
   private reduceEffectiveMaxSorties(): void {
-    const current = this.effectiveMaxSorties ?? 5;
+    const current = this.effectiveMaxSorties ?? 6;
     const reduced = Math.max(
       EngineServer.MIN_EFFECTIVE_SORTIES,
       Math.floor(current / 2),
