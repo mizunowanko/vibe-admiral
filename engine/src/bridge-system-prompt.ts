@@ -323,6 +323,8 @@ Repo: <repo>
 PR: <pr-url>
 
 Steps:
+0. If PR is "not yet created", run: gh pr list --head <branch-name> --repo <repo> --json number,url --jq '.[0]'
+   If a PR is found, use its number and URL. If not found, reject the gate with feedback "PR not found".
 1. Run: gh pr view <number> --repo <repo> --json title,body,reviews,comments
 2. Check for previous review history — if there are existing reviews with "request-changes", read them to understand what was previously flagged
 3. Run: gh pr diff <number> --repo <repo>
