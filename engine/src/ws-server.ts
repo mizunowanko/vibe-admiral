@@ -255,7 +255,6 @@ export class EngineServer {
             if (cleanContent) {
               const cleanMsg = { ...parsed, content: cleanContent };
               this.detectPRCreation(id, cleanMsg);
-              this.detectPushForReReview(id, cleanMsg);
             }
 
             // Execute Ship requests (only status-transition allowed)
@@ -284,8 +283,6 @@ export class EngineServer {
 
             // Detect PR URL in result messages and notify Bridge
             this.detectPRCreation(id, parsed);
-            // Detect git push after request-changes for re-review
-            this.detectPushForReReview(id, parsed);
           }
         }
       }
@@ -1295,12 +1292,9 @@ export class EngineServer {
     if (!ship || ship.prUrl) return; // Already detected
 
     const prUrl = prUrlMatch[0];
-    const repo = prUrlMatch[1]!;
-    const prNumber = parseInt(prUrlMatch[2]!, 10);
 
     // Store PR URL on ship
     ship.prUrl = prUrl;
-    ship.prReviewStatus = "pending";
 
     // Broadcast PR creation to frontend
     this.broadcast({
@@ -1315,32 +1309,6 @@ export class EngineServer {
         issueTitle: ship.issueTitle,
       },
     });
-
-    // Notify Bridge for code review
-    const reviewMessage = {
-      type: "system" as const,
-      subtype: "pr-review-request" as const,
-      content: `Ship #${ship.issueNumber} (${ship.issueTitle}) created PR #${prNumber}: ${prUrl}\nRepo: ${repo}\nShip ID: ${ship.id}\n\nPlease review the PR using \`gh pr diff ${prNumber} --repo ${repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
-      meta: {
-        category: "pr-review-request" as const,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-        prNumber,
-        prUrl,
-      },
-    };
-    this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
-    this.broadcast({
-      type: "bridge:stream",
-      data: { fleetId: ship.fleetId, message: reviewMessage },
-    });
-
-    // Send the review request to Bridge's stdin so it processes it
-    const bridgeId = `bridge-${ship.fleetId}`;
-    this.processManager.sendMessage(
-      bridgeId,
-      `[PR Review Request] Ship #${ship.issueNumber} created PR #${prNumber}: ${prUrl} (repo: ${repo}, shipId: ${ship.id}). Please review the diff and submit your verdict.`,
-    );
   }
 
   private detectCompactStatus(
@@ -1376,46 +1344,6 @@ export class EngineServer {
         data: { fleetId: ship.fleetId, message: compactMsg },
       });
     }
-  }
-
-  private detectPushForReReview(
-    id: string,
-    msg: StreamMessage,
-  ): void {
-    // Only care about tool_use Bash commands
-    if (msg.type !== "tool_use" || msg.tool !== "Bash") return;
-    const inputStr = msg.toolInput ? JSON.stringify(msg.toolInput) : "";
-    if (!inputStr.includes("git push")) return;
-
-    const ship = this.shipManager.getShip(id);
-    if (!ship || !ship.prUrl || ship.prReviewStatus !== "changes-requested") return;
-
-    // Extract PR number from stored URL
-    const prMatch = ship.prUrl.match(/\/pull\/(\d+)/);
-    if (!prMatch) return;
-    const prNumber = parseInt(prMatch[1]!, 10);
-
-    // Reset review status to pending
-    ship.prReviewStatus = "pending";
-
-    // Notify Bridge for re-review
-    const reviewMessage = {
-      type: "system" as const,
-      subtype: "pr-review-request" as const,
-      content: `Ship #${ship.issueNumber} (${ship.issueTitle}) pushed fixes to PR #${prNumber}: ${ship.prUrl}\nRepo: ${ship.repo}\nShip ID: ${ship.id}\n\nThe Ship has addressed the requested changes. Please re-review using \`gh pr diff ${prNumber} --repo ${ship.repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
-    };
-    this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
-    this.broadcast({
-      type: "bridge:stream",
-      data: { fleetId: ship.fleetId, message: reviewMessage },
-    });
-
-    // Send re-review request to Bridge stdin
-    const bridgeId = `bridge-${ship.fleetId}`;
-    this.processManager.sendMessage(
-      bridgeId,
-      `[PR Re-Review Request] Ship #${ship.issueNumber} pushed fixes to PR #${prNumber}: ${ship.prUrl} (repo: ${ship.repo}, shipId: ${ship.id}). Previous review requested changes. Please re-review the diff and submit your verdict.`,
-    );
   }
 
   private logShipMessage(

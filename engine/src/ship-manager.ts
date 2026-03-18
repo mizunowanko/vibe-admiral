@@ -9,7 +9,7 @@ import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, ShipStatus, FleetSkillSources, PRReviewResponse, GateTransition, GateType, GateFileResponse, PersistedShip } from "./types.js";
+import type { ShipProcess, ShipStatus, FleetSkillSources, GateTransition, GateType, GateFileResponse, PersistedShip } from "./types.js";
 
 const SHIPS_FILE = join(homedir(), ".vibe-admiral", "ships.json");
 
@@ -231,27 +231,6 @@ export class ShipManager {
     }
   }
 
-  async respondToPRReview(
-    shipId: string,
-    response: PRReviewResponse,
-  ): Promise<void> {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-
-    ship.prReviewStatus = response.verdict === "approve" ? "approved" : "changes-requested";
-
-    // On request-changes, revert phase to implementing so Ship can fix
-    if (response.verdict === "request-changes") {
-      this.updateStatus(shipId, "implementing");
-    }
-
-    // Ensure .claude directory exists and write response file for Ship CLI
-    const claudeDir = join(ship.worktreePath, ".claude");
-    await mkdir(claudeDir, { recursive: true });
-    const responseFile = join(claudeDir, "pr-review-response.json");
-    await writeFile(responseFile, JSON.stringify(response, null, 2));
-  }
-
   setAcceptanceTest(
     shipId: string,
     request: { url: string; checks: string[] },
@@ -336,8 +315,8 @@ export class ShipManager {
     worktreePath: string,
     skillSources?: FleetSkillSources,
   ): Promise<void> {
-    // Copy /implement skill from the main repo's skills/ (or custom path)
-    // This is essential for Ship operation — failure is fatal.
+    // Copy /implement orchestrator + sub-skills from the main repo's skills/
+    // The orchestrator is essential for Ship operation — failure is fatal.
     const implementSrc = skillSources?.implement
       ? join(skillSources.implement, "SKILL.md")
       : join(repoRoot, "skills", "implement", "SKILL.md");
@@ -345,14 +324,29 @@ export class ShipManager {
     await mkdir(implementDestDir, { recursive: true });
     await copyFile(implementSrc, join(implementDestDir, "SKILL.md"));
 
-    // Copy /adr skill from the main repo's skills/ (non-fatal)
-    const adrSrc = join(repoRoot, "skills", "adr", "SKILL.md");
-    const adrDestDir = join(worktreePath, ".claude", "skills", "adr");
-    try {
-      await mkdir(adrDestDir, { recursive: true });
-      await copyFile(adrSrc, join(adrDestDir, "SKILL.md"));
-    } catch {
-      console.warn("[ship-manager] Failed to deploy /adr skill");
+    // Deploy Ship sub-skills and shared skills from repo's skills/ (non-fatal individually)
+    const repoSkills = [
+      // Ship sub-skills
+      "implement-setup",
+      "implement-plan",
+      "implement-code",
+      "implement-review",
+      "implement-merge",
+      // Shared skills (Bridge/Ship common)
+      "admiral-protocol",
+      "read-issue",
+      // Other repo skills
+      "adr",
+    ];
+    for (const skillName of repoSkills) {
+      const src = join(repoRoot, "skills", skillName, "SKILL.md");
+      const destDir = join(worktreePath, ".claude", "skills", skillName);
+      try {
+        await mkdir(destDir, { recursive: true });
+        await copyFile(src, join(destDir, "SKILL.md"));
+      } catch {
+        console.warn(`[ship-manager] Failed to deploy /${skillName} skill`);
+      }
     }
 
     // Copy dev-shared skills if devSharedDir is configured

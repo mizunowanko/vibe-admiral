@@ -201,7 +201,6 @@ export type BridgeRequest =
   | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
-  | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
   | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
   | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number };
 
@@ -217,19 +216,6 @@ export type AdmiralRequest = BridgeRequest | ShipRequest;
 export interface AdmiralRequestResponse {
   ok: boolean;
   error?: string;
-}
-
-// === PR Review Request (file-based IPC) ===
-export interface PRReviewRequest {
-  prNumber: number;
-  prUrl: string;
-  repo: string;
-}
-
-// === PR Review Response (file-based IPC) ===
-export interface PRReviewResponse {
-  verdict: "approve" | "request-changes";
-  comments?: string;
 }
 
 // === Ship Process Info ===

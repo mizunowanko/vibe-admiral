@@ -203,20 +203,6 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return { request: "sortie", items };
     }
 
-    case "pr-review-result": {
-      if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.prNumber !== "number" || !Number.isInteger(r.prNumber) || r.prNumber <= 0) return null;
-      if (r.verdict !== "approve" && r.verdict !== "request-changes") return null;
-      const result: { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string } = {
-        request: "pr-review-result",
-        shipId: r.shipId,
-        prNumber: r.prNumber,
-        verdict: r.verdict,
-      };
-      if (typeof r.comments === "string") result.comments = r.comments;
-      return result;
-    }
-
     case "gate-result": {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
       if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;

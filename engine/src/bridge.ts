@@ -1,4 +1,4 @@
-import { appendFile, readFile, writeFile, mkdir, stat, rename } from "node:fs/promises";
+import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { ProcessManager } from "./process-manager.js";
@@ -45,6 +45,9 @@ export class BridgeManager {
     // Load persisted history and session info
     const restoredHistory = await this.loadHistory(fleetId);
     const persisted = await this.loadSession(fleetId);
+
+    // Deploy Bridge skills to fleetPath/.claude/skills/
+    await this.deployBridgeSkills(fleetPath);
 
     const session: BridgeSession = {
       id: bridgeId,
@@ -194,6 +197,32 @@ export class BridgeManager {
   stopAll(): void {
     for (const [fleetId] of this.sessions) {
       this.stop(fleetId);
+    }
+  }
+
+  /**
+   * Deploy Bridge-specific skills from the repo's skills/ directory to
+   * fleetPath/.claude/skills/ so that Claude Code can discover them.
+   */
+  private async deployBridgeSkills(fleetPath: string): Promise<void> {
+    const bridgeSkills = [
+      "admiral-protocol",
+      "gate-plan-review",
+      "gate-code-review",
+      "sortie",
+      "issue-manage",
+      "investigate",
+      "read-issue",
+    ];
+    for (const skillName of bridgeSkills) {
+      const src = join(fleetPath, "skills", skillName, "SKILL.md");
+      const destDir = join(fleetPath, ".claude", "skills", skillName);
+      try {
+        await mkdir(destDir, { recursive: true });
+        await copyFile(src, join(destDir, "SKILL.md"));
+      } catch {
+        // Non-fatal: skill may not exist in this repo
+      }
     }
   }
 

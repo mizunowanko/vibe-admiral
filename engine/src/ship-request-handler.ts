@@ -138,32 +138,6 @@ export class ShipRequestHandler {
       }
     }
 
-    // Legacy gate: block advancement to merging until code-review gate approves
-    // (safety check when the implementing→acceptance-test gate is disabled)
-    const mergingIdx = phaseOrder.indexOf("merging");
-    if (targetIdx >= mergingIdx && ship.prReviewStatus !== "approved") {
-      const codeReviewGate = resolveGate("implementing", "acceptance-test", gateSettings);
-      if (!codeReviewGate) {
-        return {
-          ok: false,
-          error: `Cannot advance to ${targetStatus}: PR review not approved (current: ${ship.prReviewStatus ?? "none"})`,
-        };
-      }
-    }
-
-    // Legacy gate: block advancement past acceptance-test until QA approved
-    // (safety check when the acceptance-test→merging gate is disabled)
-    const acceptanceIdx = phaseOrder.indexOf("acceptance-test");
-    if (targetIdx > acceptanceIdx && !ship.acceptanceTestApproved) {
-      const acceptanceGate = resolveGate("acceptance-test", "merging", gateSettings);
-      if (!acceptanceGate) {
-        return {
-          ok: false,
-          error: `Cannot advance past acceptance-test: not yet approved`,
-        };
-      }
-    }
-
     // Transactional: sync GitHub label FIRST, then update internal state
     try {
       await this.statusManager.syncPhaseLabel(

@@ -1,0 +1,5 @@
+{
+  "transition": "implementing→acceptance-test",
+  "gateType": "code-review",
+  "message": "Gate check required: implementing→acceptance-test (code-review)"
+}
