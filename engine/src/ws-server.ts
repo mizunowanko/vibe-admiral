@@ -48,13 +48,36 @@ export class EngineServer {
   private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private rateLimitedShips = new Set<string>();
 
+  /** Timestamp of the last Bridge rate-limit event (ms epoch), or null. */
+  private bridgeRateLimitedAt: number | null = null;
+
+  /** Sortie cooldown: no new sorties until this timestamp (ms epoch). */
+  private rateLimitCooldownUntil: number | null = null;
+
+  /** Effective max concurrent sorties per fleet (auto-adjusted on rate limit). */
+  private effectiveMaxSorties: number | null = null;
+  /** Timestamp of last rate-limit-driven reduction (for gradual restore). */
+  private maxSortiesReducedAt: number | null = null;
+
   /** Max auto-retry attempts for rate-limited Ships. */
   private static readonly MAX_RATE_LIMIT_RETRIES = 3;
   /** Base delay for exponential backoff (ms). */
-  private static readonly RATE_LIMIT_BASE_DELAY_MS = 2_000;
+  private static readonly RATE_LIMIT_BASE_DELAY_MS = 10_000;
+  /** Max Dispatch retry attempts when gate times out due to rate limit. */
+  private static readonly MAX_DISPATCH_RETRIES = 2;
 
   /** Gate checks pending longer than this are auto-rejected (ms). */
   private static readonly GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  /** Extended gate timeout when Bridge is rate-limited (ms). */
+  private static readonly GATE_TIMEOUT_EXTENDED_MS = 10 * 60 * 1000; // 10 minutes
+  /** Window within which Bridge rate-limit is considered "recent" (ms). */
+  private static readonly RATE_LIMIT_RECENCY_MS = 2 * 60 * 1000; // 2 minutes
+  /** Sortie cooldown duration after rate-limit detection (ms). */
+  private static readonly SORTIE_COOLDOWN_MS = 30_000;
+  /** Interval for gradually restoring max sortie count (ms). */
+  private static readonly SORTIE_RESTORE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  /** Minimum effective max sorties (floor for auto-reduction). */
+  private static readonly MIN_EFFECTIVE_SORTIES = 2;
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -302,16 +325,20 @@ export class EngineServer {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else if (
           ship &&
-          this.rateLimitedShips.has(id) &&
+          (this.rateLimitedShips.has(id) || ship.errorType === "rate_limit") &&
           ship.sessionId &&
           ship.retryCount < EngineServer.MAX_RATE_LIMIT_RETRIES
         ) {
-          // Rate-limited Ship with sessionId — auto-retry with backoff
+          // Rate-limited Ship with sessionId — auto-retry with backoff.
+          // Check both rateLimitedShips Set AND ship.errorType to handle the
+          // race condition where stderr "rate-limit" event fires after process
+          // exit or the Set entry was already cleaned up.
           this.rateLimitedShips.delete(id);
           ship.retryCount++;
+          const preRetryStatus = ship.status;
           const delay = EngineServer.RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, ship.retryCount - 1);
           console.log(
-            `[ws-server] Ship ${id.slice(0, 8)}... scheduling rate-limit retry #${ship.retryCount} in ${delay}ms`,
+            `[ws-server] Ship ${id.slice(0, 8)}... scheduling rate-limit retry #${ship.retryCount} in ${delay}ms (was in phase: ${preRetryStatus})`,
           );
           this.shipManager.updateStatus(id, ship.status, `Rate limited — retrying in ${Math.round(delay / 1000)}s (attempt ${ship.retryCount}/${EngineServer.MAX_RATE_LIMIT_RETRIES})`);
           setTimeout(() => {
@@ -322,7 +349,7 @@ export class EngineServer {
               ship.worktreePath,
             );
             console.log(
-              `[ws-server] Ship ${id.slice(0, 8)}... resumed after rate-limit (attempt ${ship.retryCount})`,
+              `[ws-server] Ship ${id.slice(0, 8)}... resumed after rate-limit retry #${ship.retryCount} (resuming from phase: ${preRetryStatus})`,
             );
           }, delay);
         } else {
@@ -334,7 +361,16 @@ export class EngineServer {
     });
 
     this.processManager.on("rate-limit", (id: string) => {
-      if (id.startsWith("bridge-")) return;
+      if (id.startsWith("bridge-")) {
+        // Track Bridge rate-limit for Dispatch retry and sortie throttling
+        this.bridgeRateLimitedAt = Date.now();
+        this.rateLimitCooldownUntil = Date.now() + EngineServer.SORTIE_COOLDOWN_MS;
+        this.reduceEffectiveMaxSorties();
+        console.warn(
+          `[ws-server] Bridge ${id} hit rate limit — sortie cooldown until ${new Date(this.rateLimitCooldownUntil).toISOString()}`,
+        );
+        return;
+      }
       const ship = this.shipManager.getShip(id);
       if (!ship) return;
       ship.errorType = "rate_limit";
@@ -410,6 +446,16 @@ export class EngineServer {
   private setupShipStatusHandler(): void {
     this.shipManager.setStatusChangeHandler((id, status, detail) => {
       const ship = this.shipManager.getShip(id);
+
+      // Retry success logging: if ship had retries and is now progressing
+      if (ship && ship.retryCount > 0 && ship.errorType === "rate_limit" && status !== "error") {
+        console.log(
+          `[ws-server] Ship ${id.slice(0, 8)}... successfully recovered after retry #${ship.retryCount} — now in phase: ${status}`,
+        );
+        // Clear errorType once the ship has successfully progressed
+        ship.errorType = null;
+      }
+
       this.broadcast({
         type: "ship:status",
         data: {
@@ -893,6 +939,7 @@ export class EngineServer {
     if (updates.bridgeRulePaths !== undefined) fleet.bridgeRulePaths = updates.bridgeRulePaths as string[];
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
     if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
+    if (updates.maxConcurrentSorties !== undefined) fleet.maxConcurrentSorties = updates.maxConcurrentSorties as number;
     await this.saveFleets(fleets);
   }
 
@@ -938,6 +985,12 @@ export class EngineServer {
 
     const results: string[] = [];
 
+    const rateLimitContext = {
+      cooldownUntil: this.rateLimitCooldownUntil,
+      effectiveMaxSorties: this.effectiveMaxSorties,
+      maxConcurrentSorties: fleet?.maxConcurrentSorties,
+    };
+
     for (const request of requests) {
       try {
         const result = await this.requestHandler.handle(
@@ -947,6 +1000,7 @@ export class EngineServer {
           repoRemotes,
           fleet?.skillSources,
           shipExtraPrompt,
+          rateLimitContext,
         );
         results.push(result);
 
@@ -1375,9 +1429,19 @@ export class EngineServer {
   }
 
   private startGateTimeoutScanner(): void {
-    // Scan every 30 seconds for stale gate checks
+    // Scan every 30 seconds for stale gate checks and sortie limit restoration
     this.gateTimeoutTimer = setInterval(() => {
       this.scanGateTimeouts();
+      // Gradually restore effective max sorties when rate limit clears
+      if (this.effectiveMaxSorties !== null) {
+        this.loadFleets()
+          .then((fleets) => {
+            // Use the max configured across all fleets (or default 5)
+            const fleetMax = Math.max(5, ...fleets.map((f) => f.maxConcurrentSorties ?? 5));
+            this.restoreEffectiveMaxSorties(fleetMax);
+          })
+          .catch(() => { /* best-effort */ });
+      }
     }, 30_000);
     // Allow Node to exit even if the timer is still running
     this.gateTimeoutTimer.unref();
@@ -1385,26 +1449,111 @@ export class EngineServer {
 
   private scanGateTimeouts(): void {
     const now = Date.now();
+    const bridgeRecentlyRateLimited = this.bridgeRateLimitedAt !== null &&
+      now - this.bridgeRateLimitedAt < EngineServer.RATE_LIMIT_RECENCY_MS;
+
+    // Use extended timeout if Bridge recently hit rate limit
+    const effectiveTimeout = bridgeRecentlyRateLimited
+      ? EngineServer.GATE_TIMEOUT_EXTENDED_MS
+      : EngineServer.GATE_TIMEOUT_MS;
+
     for (const ship of this.shipManager.getAllShips()) {
       if (
         ship.gateCheck &&
         ship.gateCheck.status === "pending" &&
-        now - new Date(ship.gateCheck.requestedAt).getTime() > EngineServer.GATE_TIMEOUT_MS
+        now - new Date(ship.gateCheck.requestedAt).getTime() > effectiveTimeout
       ) {
         const transition = ship.gateCheck.transition;
+        const dispatchRetryCount = ship.gateCheck.dispatchRetryCount ?? 0;
+
+        // If Bridge was recently rate-limited and we haven't exhausted retries,
+        // re-initiate the gate check instead of auto-rejecting
+        if (
+          bridgeRecentlyRateLimited &&
+          dispatchRetryCount < EngineServer.MAX_DISPATCH_RETRIES
+        ) {
+          ship.gateCheck.dispatchRetryCount = dispatchRetryCount + 1;
+          ship.gateCheck.requestedAt = new Date().toISOString();
+          console.log(
+            `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out during rate limit — re-initiating Dispatch retry #${ship.gateCheck.dispatchRetryCount} (${transition})`,
+          );
+
+          // Re-send gate check message to Bridge
+          const gateMessage = this.buildGateCheckMessage(
+            ship,
+            transition,
+            ship.gateCheck.gateType,
+            undefined,
+            ship.gateCheck.feedback,
+          );
+          const bridgeId = `bridge-${ship.fleetId}`;
+          this.processManager.sendMessage(bridgeId, gateMessage);
+
+          // Notify frontend of the retry
+          this.broadcast({
+            type: "ship:gate-timeout-extended",
+            data: {
+              id: ship.id,
+              transition,
+              dispatchRetryCount: ship.gateCheck.dispatchRetryCount,
+              reason: "Bridge rate-limited — retrying Dispatch",
+            },
+          });
+          continue;
+        }
+
+        const timeoutLabel = bridgeRecentlyRateLimited ? "extended " : "";
         console.warn(
-          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out (${transition}). Auto-rejecting.`,
+          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... ${timeoutLabel}timed out (${transition}). Auto-rejecting.`,
         );
         this.shipManager.respondToGate(
           ship.id,
           false,
-          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
+          `Gate check timed out after ${effectiveTimeout / 1000}s${dispatchRetryCount > 0 ? ` (after ${dispatchRetryCount} Dispatch retries)` : ""}`,
         ).catch(console.error);
         this.onGateRejected(
           ship.id,
           transition,
-          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
+          `Gate check timed out after ${effectiveTimeout / 1000}s${dispatchRetryCount > 0 ? ` (after ${dispatchRetryCount} Dispatch retries)` : ""}`,
         );
+      }
+    }
+  }
+
+  /** Halve the effective max sorties on rate limit (floor: MIN_EFFECTIVE_SORTIES). */
+  private reduceEffectiveMaxSorties(): void {
+    const current = this.effectiveMaxSorties ?? 5;
+    const reduced = Math.max(
+      EngineServer.MIN_EFFECTIVE_SORTIES,
+      Math.floor(current / 2),
+    );
+    if (reduced !== this.effectiveMaxSorties) {
+      this.effectiveMaxSorties = reduced;
+      this.maxSortiesReducedAt = Date.now();
+      console.log(
+        `[ws-server] Effective max sorties reduced: ${current} → ${reduced}`,
+      );
+    }
+  }
+
+  /** Gradually restore effective max sorties toward fleet configured max. */
+  private restoreEffectiveMaxSorties(fleetMax: number): void {
+    if (this.effectiveMaxSorties === null || this.maxSortiesReducedAt === null) return;
+    if (this.effectiveMaxSorties >= fleetMax) {
+      this.effectiveMaxSorties = null;
+      this.maxSortiesReducedAt = null;
+      return;
+    }
+    const elapsed = Date.now() - this.maxSortiesReducedAt;
+    if (elapsed >= EngineServer.SORTIE_RESTORE_INTERVAL_MS) {
+      this.effectiveMaxSorties = Math.min(fleetMax, this.effectiveMaxSorties + 1);
+      this.maxSortiesReducedAt = Date.now();
+      console.log(
+        `[ws-server] Effective max sorties restored to ${this.effectiveMaxSorties}/${fleetMax}`,
+      );
+      if (this.effectiveMaxSorties >= fleetMax) {
+        this.effectiveMaxSorties = null;
+        this.maxSortiesReducedAt = null;
       }
     }
   }

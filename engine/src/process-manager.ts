@@ -3,19 +3,29 @@ import { EventEmitter } from "node:events";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** Rate limit patterns in stderr / error output from Claude CLI. */
-const RATE_LIMIT_PATTERNS = [
+/** Retryable error patterns in stderr / error output from Claude CLI.
+ *  Covers rate limits (429), overload (529), server errors (500),
+ *  and transient auth failures (401). */
+const RETRYABLE_ERROR_PATTERNS = [
   /rate.?limit/i,
-  /429/,
+  /\b429\b/,
   /too many requests/i,
   /overloaded/i,
   /rate_limit_error/i,
   /APIError.*429/i,
+  /\b529\b/,
+  /\b500\b/,
+  /\b401\b/,
+  /internal.?server.?error/i,
+  /service.?unavailable/i,
 ];
 
-export function isRateLimitError(text: string): boolean {
-  return RATE_LIMIT_PATTERNS.some((p) => p.test(text));
+export function isRetryableError(text: string): boolean {
+  return RETRYABLE_ERROR_PATTERNS.some((p) => p.test(text));
 }
+
+/** @deprecated Use isRetryableError instead. Kept for backward compatibility. */
+export const isRateLimitError = isRetryableError;
 
 export interface ProcessEvents {
   data: (id: string, message: Record<string, unknown>) => void;
@@ -324,7 +334,7 @@ export class ProcessManager extends EventEmitter {
       const text = stderrBuffer.trim();
       if (text) {
         console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
-        if (isRateLimitError(text)) {
+        if (isRetryableError(text)) {
           this.emit("rate-limit", id);
         }
         this.emit("error", id, new Error(text));

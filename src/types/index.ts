@@ -33,6 +33,8 @@ export interface Fleet {
   sharedRulePaths?: string[];
   bridgeRulePaths?: string[];
   shipRulePaths?: string[];
+  /** Maximum number of concurrent Ship sorties per fleet (default: 5). */
+  maxConcurrentSorties?: number;
   createdAt: string;
 }
 
@@ -54,6 +56,8 @@ export interface GateCheckState {
   gateType: GateType;
   status: GateStatus;
   feedback?: string;
+  /** Number of times the Dispatch was re-initiated due to rate-limit timeouts. */
+  dispatchRetryCount?: number;
 }
 
 // === Ship ===
@@ -236,6 +240,15 @@ export type ServerMessage =
         gateType: GateType;
         approved: boolean;
         feedback?: string;
+      };
+    }
+  | {
+      type: "ship:gate-timeout-extended";
+      data: {
+        id: string;
+        transition: GateTransition;
+        dispatchRetryCount: number;
+        reason: string;
       };
     }
   | { type: "ship:data"; data: Ship[] }
