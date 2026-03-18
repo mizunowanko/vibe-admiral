@@ -86,9 +86,20 @@ export function parseStreamMessage(
 
     case "system": {
       const subtype = raw.subtype as string | undefined;
-      // Skip hooks and init — not useful for the user
+      // Skip hooks, init, and task_notification — not useful for the user.
+      // Task results are already shown via TaskOutput tool_result messages.
+      // If a task_notification contains a description, surface it as a compact card.
       if (subtype === "init" || subtype?.startsWith("hook")) {
         return null;
+      }
+      if (subtype === "task_notification") {
+        const desc = (raw.description as string | undefined) ?? (raw.content as string | undefined);
+        if (!desc) return null;
+        return {
+          type: "system",
+          subtype: "task-notification" as StreamMessageSubtype,
+          content: desc,
+        };
       }
       // Compact status: { type: "system", subtype: "status", status: "compacting" | null }
       if (subtype === "status") {

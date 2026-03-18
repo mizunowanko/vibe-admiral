@@ -166,6 +166,23 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     );
   }
 
+  // Task notification — compact muted pill
+  if (isSystem && message.subtype === "task-notification") {
+    return (
+      <div className="flex w-full justify-start">
+        <div
+          className={cn(
+            "flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-mono",
+            "border-slate-500/30 bg-slate-500/10 text-slate-400",
+          )}
+        >
+          <span>📋</span>
+          <span>{message.content}</span>
+        </div>
+      </div>
+    );
+  }
+
   // Request result — collapsible when long
   if (isSystem && message.subtype === "request-result") {
     const content = message.content ?? "";
