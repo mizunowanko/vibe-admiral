@@ -235,6 +235,11 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return transition;
     }
 
+    case "nothing-to-do": {
+      if (typeof r.reason !== "string" || !r.reason) return null;
+      return { request: "nothing-to-do", reason: r.reason };
+    }
+
     default:
       return null;
   }
@@ -260,14 +265,16 @@ export function extractRequests(text: string): AdmiralRequest[] {
   return requests;
 }
 
+const SHIP_REQUEST_TYPES = new Set(["status-transition", "nothing-to-do"]);
+
 /** Type guard: check if a request is a Bridge-only request. */
 export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
-  return req.request !== "status-transition";
+  return !SHIP_REQUEST_TYPES.has(req.request);
 }
 
 /** Type guard: check if a request is a Ship request. */
 export function isShipRequest(req: AdmiralRequest): req is ShipRequest {
-  return req.request === "status-transition";
+  return SHIP_REQUEST_TYPES.has(req.request);
 }
 
 /**

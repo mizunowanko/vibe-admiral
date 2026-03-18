@@ -476,15 +476,20 @@ export class EngineServer {
           repo: ship?.repo,
           issueNumber: ship?.issueNumber,
           issueTitle: ship?.issueTitle,
+          ...(ship?.nothingToDo && {
+            nothingToDo: true,
+            nothingToDoReason: ship.nothingToDoReason,
+          }),
         },
       });
 
       // Also inject into Bridge chat for the ship's fleet
       if (ship) {
+        const nothingToDoSuffix = ship.nothingToDo && status === "done" ? " (nothing to do)" : "";
         const statusMessage = {
           type: "system" as const,
           subtype: "ship-status" as const,
-          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${detail ? ` — ${detail}` : ""}`,
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${nothingToDoSuffix}${detail ? ` — ${detail}` : ""}`,
           meta: {
             category: "ship-status" as const,
             issueNumber: ship.issueNumber,
