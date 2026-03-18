@@ -95,8 +95,8 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
         </div>
       )}
 
-      {/* Acceptance Test Banner */}
-      {ship.status === "acceptance-test" && (
+      {/* Acceptance Test Banner — hidden when gate is auto-approve */}
+      {ship.status === "acceptance-test" && ship.gateCheck?.gateType !== "auto-approve" && (
         <div className="p-3">
           <AcceptanceTestBanner ship={ship} />
         </div>
