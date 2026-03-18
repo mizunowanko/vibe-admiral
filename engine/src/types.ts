@@ -50,6 +50,8 @@ export interface GateCheckState {
   status: GateStatus;
   feedback?: string;
   requestedAt: string;
+  /** Number of times the Dispatch was re-initiated due to rate-limit timeouts. */
+  dispatchRetryCount?: number;
 }
 
 // === Fleet ===
@@ -76,6 +78,8 @@ export interface Fleet {
   shipRulePaths?: string[];
   /** Gate settings: which transition gates are enabled and their types. */
   gates?: FleetGateSettings;
+  /** Maximum number of concurrent Ship sorties per fleet (default: 5). */
+  maxConcurrentSorties?: number;
   createdAt: string;
 }
 

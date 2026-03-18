@@ -1,7 +1,7 @@
 import type { ShipManager } from "./ship-manager.js";
 import type { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StateSync } from "./state-sync.js";
-import type { BridgeRequest, FleetRepo, FleetSkillSources, GateTransition } from "./types.js";
+import type { BridgeRequest, FleetRepo, FleetSkillSources, GateTransition, ShipProcess } from "./types.js";
 import { parseTransition } from "./gate-config.js";
 
 export class BridgeRequestHandler {
@@ -43,10 +43,11 @@ export class BridgeRequestHandler {
     repoRemotes: string[],
     skillSources?: FleetSkillSources,
     shipExtraPrompt?: string,
+    rateLimitContext?: { cooldownUntil: number | null; effectiveMaxSorties: number | null; maxConcurrentSorties?: number },
   ): Promise<string> {
     switch (request.request) {
       case "sortie":
-        return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt);
+        return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt, rateLimitContext);
       case "ship-status":
         return this.handleShipStatus(fleetId);
       case "ship-stop":
@@ -65,11 +66,37 @@ export class BridgeRequestHandler {
     repoRemotes: string[],
     skillSources?: FleetSkillSources,
     shipExtraPrompt?: string,
+    rateLimitContext?: { cooldownUntil: number | null; effectiveMaxSorties: number | null; maxConcurrentSorties?: number },
   ): Promise<string> {
+    // Check rate-limit cooldown
+    if (rateLimitContext?.cooldownUntil && Date.now() < rateLimitContext.cooldownUntil) {
+      const remaining = Math.ceil((rateLimitContext.cooldownUntil - Date.now()) / 1000);
+      return `[Sortie Throttled] Rate limited — sorties paused for ${remaining}s. Try again later.`;
+    }
+
+    // Determine concurrent sortie limit
+    const configuredMax = rateLimitContext?.maxConcurrentSorties ?? 5;
+    const effectiveMax = rateLimitContext?.effectiveMaxSorties ?? configuredMax;
+    const activeShips = this.shipManager.getShipsByFleet(fleetId)
+      .filter((s: ShipProcess) => s.status !== "done" && s.status !== "error");
+    const availableSlots = Math.max(0, effectiveMax - activeShips.length);
+
+    if (availableSlots === 0) {
+      return `[Sortie Throttled] Concurrent limit reached (${activeShips.length}/${effectiveMax} active). Wait for Ships to complete.`;
+    }
+
     const repoSet = new Set(repoRemotes);
     const results: string[] = [];
+    let launched = 0;
 
     for (const item of request.items) {
+      // Check per-item concurrent limit
+      if (launched >= availableSlots) {
+        results.push(
+          `Deferred ${item.repo}#${item.issueNumber}: concurrent limit reached (${effectiveMax})`,
+        );
+        continue;
+      }
       // Validate repo is in fleet whitelist
       if (!repoSet.has(item.repo)) {
         results.push(
@@ -108,6 +135,7 @@ export class BridgeRequestHandler {
           shipExtraPrompt,
           item.skill,
         );
+        launched++;
         results.push(
           `Ship ${ship.id} launched for ${item.repo}#${item.issueNumber} (${ship.issueTitle})`,
         );
