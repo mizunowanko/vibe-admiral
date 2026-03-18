@@ -47,6 +47,8 @@ export class EngineServer {
   private bridgeFirstData = new Set<string>();
   private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private rateLimitedShips = new Set<string>();
+  /** Per-ship mutex to serialize executeShipRequests() calls. */
+  private shipRequestLocks = new Map<string, Promise<void>>();
 
   /** Max auto-retry attempts for rate-limited Ships. */
   private static readonly MAX_RATE_LIMIT_RETRIES = 3;
@@ -234,9 +236,13 @@ export class EngineServer {
             }
 
             // Execute Ship requests (only status-transition allowed)
+            // Serialized per-ship to prevent race conditions with duplicate
+            // admiral-request blocks from cumulative stream-json messages.
             const shipRequests = requests.filter(isShipRequest);
             if (shipRequests.length > 0) {
-              this.executeShipRequests(id, shipRequests).catch(console.error);
+              const prev = this.shipRequestLocks.get(id) ?? Promise.resolve();
+              const next = prev.then(() => this.executeShipRequests(id, shipRequests)).catch(console.error);
+              this.shipRequestLocks.set(id, next);
             }
 
             // Reject any Bridge-only requests from Ship
@@ -289,6 +295,7 @@ export class EngineServer {
         });
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
+        this.shipRequestLocks.delete(id);
         const ship = this.shipManager.getShip(id);
         if (!ship) {
           console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
@@ -1036,6 +1043,12 @@ export class EngineServer {
     if (!ship) return;
 
     const transition = `${from}→${to}` as GateTransition;
+
+    // Dedup guard: skip if a pending gate already exists for this transition
+    if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
+      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
+      return;
+    }
 
     // Set gate check state on the ship
     this.shipManager.setGateCheck(shipId, transition, gateType);
