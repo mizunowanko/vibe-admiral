@@ -448,8 +448,10 @@ export class EngineServer {
 
             if (isAutoApprove) {
               console.log(
-                `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test gate is auto-approve — skipping UI broadcast`,
+                `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test gate is auto-approve — skipping UI broadcast, auto-accepting`,
               );
+              // Write acceptance-test-response.json so Ship CLI doesn't hang
+              this.shipManager.respondToAcceptanceTest(shipId, true);
               return;
             }
 
