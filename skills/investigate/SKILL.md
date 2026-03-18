@@ -74,15 +74,25 @@ Steps:
 3. Read work context (PR diff, commits) if available
 4. Identify what went wrong and why
 
-Output:
-- **Error**: ...
-- **Root cause**: ...
-- **Last Ship actions**: (from log)
-- **Recovery recommendation**: (retry / new sortie / manual intervention)
+OUTPUT FORMAT CONSTRAINT — keep your response concise (max 12 lines):
+- **Error**: <1 sentence>
+- **Root cause**: <1 sentence>
+- **Last Ship actions**: <1-2 sentences summarizing key actions from log>
+- **Recovery recommendation**: Choose one of:
+  - **ship-resume** (preferred): Use when error is transient (rate limit, etc.), preserves session/PR
+  - **ship-resume (re-sortie)**: Use when session is unavailable but branch/PR should be preserved
+  - **manual intervention**: Use when error is fundamental (wrong approach, impossible task)
 
 Do NOT create issues or make any changes. Only investigate and report.
 `)
 ```
+
+## Ship Error Recovery Flow
+
+When a Ship enters `error` status, Bridge receives a system message with resume eligibility:
+1. Receive Ship error notification (Ship ID + resume info)
+2. Launch a Dispatch (using diagnosis template above)
+3. Based on diagnosis, use `ship-resume` (Request #7) if recoverable.
 
 ## Investigation Flow
 

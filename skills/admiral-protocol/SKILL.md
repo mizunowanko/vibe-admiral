@@ -13,7 +13,7 @@ For operations that ONLY the Engine can perform (Ship management), use `admiral-
 
 The Engine intercepts these blocks, executes them, and returns results to you.
 
-## Bridge Requests (6 total)
+## Bridge Requests (7 total)
 
 ### 1. sortie
 Launch Ships (Claude Code implementation sessions) for issues.
@@ -40,54 +40,65 @@ Stop a running Ship by its ID.
 { "request": "ship-stop", "shipId": "uuid-of-ship" }
 ```
 
-### 4. gate-result
+### 4. pr-review-result
+Submit the result of a PR code review.
+
+```admiral-request
+{ "request": "pr-review-result", "shipId": "uuid-of-ship", "prNumber": 42, "verdict": "approve" }
+```
+
+### 5. gate-result
 Submit the result of a transition gate check.
 
 ```admiral-request
 { "request": "gate-result", "shipId": "uuid", "transition": "planning→implementing", "verdict": "approve" }
 ```
 
-```admiral-request
-{ "request": "gate-result", "shipId": "uuid", "transition": "implementing→acceptance-test", "verdict": "reject", "feedback": "Description of what needs fixing" }
-```
-
 Valid transitions: `planning→implementing`, `implementing→acceptance-test`, `acceptance-test→merging`
 
-### 5. gate-ack
-Acknowledge receipt of a Gate Check Request. Send IMMEDIATELY when you receive a `[Gate Check Request]` — BEFORE launching Dispatch. This resets the Engine's timeout window.
+### 6. gate-ack
+Acknowledge receipt of a Gate Check Request. Send IMMEDIATELY when you receive a `[Gate Check Request]` — BEFORE launching Dispatch.
 
 ```admiral-request
 { "request": "gate-ack", "shipId": "uuid", "transition": "planning→implementing" }
 ```
 
-**CRITICAL**: Always send `gate-ack` before launching the Dispatch. Without it, the Engine may time out and auto-reject.
+**CRITICAL**: Always send `gate-ack` before launching the Dispatch.
+
+### 7. ship-resume
+Resume an errored Ship.
+
+```admiral-request
+{ "request": "ship-resume", "shipId": "uuid-of-ship" }
+```
+
+- Only works on Ships in `error` status.
+- Preferred over re-sortie because it preserves context.
 
 ## Ship Requests (2 total)
 
 ### 1. status-transition
-Request a phase transition. The Engine validates and may trigger a gate check.
+Request a phase transition.
 
 ```admiral-request
 { "request": "status-transition", "status": "implementing", "planCommentUrl": "https://..." }
 ```
 
-`planCommentUrl` is only required for `implementing` transitions.
-
 ### 2. nothing-to-do
-Signal that no actionable work was found for the assigned issue.
+Signal that no actionable work was found.
 
 ```admiral-request
-{ "request": "nothing-to-do", "reason": "Issue requirements are already satisfied" }
+{ "request": "nothing-to-do", "reason": "..." }
 ```
 
-## Handling Results
+## Gate Reminders
+If you receive a `[REMINDER] [Gate Check Request]`, it means a gate check is still pending. Check `ship-status` and either resume a stalled Dispatch or launch a new one.
 
-When the Engine returns results for admiral-request blocks, **summarize** in natural language — do NOT relay raw JSON to the user. Omit internal Ship UUIDs and gate metadata.
+## Handling Results
+When the Engine returns results, **summarize** in natural language. Omit internal Ship UUIDs and gate metadata.
 
 ## Handling Gate-Result Errors
-
 When you receive a `[Gate Result Failed]` or `[Request Error]`:
 1. Do NOT retry the same gate-result
-2. Call `ship-status` to refresh understanding of all Ship states
+2. Call `ship-status` to refresh understanding
 3. If the Ship is in `error` or `done`, acknowledge and move on
-4. If the Ship has a different pending gate, wait for a new `[Gate Check Request]`

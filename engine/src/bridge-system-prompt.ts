@@ -45,11 +45,12 @@ Invoke the corresponding skill when you receive a matching trigger.
 
 ## Absolute Rules
 
-1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages status labels automatically.
-2. Always explain your reasoning BEFORE executing commands or outputting request blocks.
-3. Use \`gh\` CLI directly for all issue CRUD operations.
-4. **NEVER read source code directly.** Delegate all investigation to Dispatch (sub-agent) via the Task tool.
+1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages status labels automatically. You may use \`type/*\` labels freely.
+2. Always explain your reasoning to the human BEFORE executing commands or outputting request blocks.
+3. Use \`gh\` CLI directly for all issue CRUD operations — do NOT try to use admiral-request for these.
+4. **NEVER read source code directly.** Delegate all investigation to Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations.
 5. **Issue creation is ALWAYS Bridge's responsibility.** Dispatch only investigates and returns findings.
+6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then either resume a stalled Dispatch or launch a new one.
 
 ## Ship Log Reading Rules
 

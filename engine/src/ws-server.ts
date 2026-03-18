@@ -48,13 +48,13 @@ export class EngineServer {
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
-  private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+  private gateReminderTimer: ReturnType<typeof setInterval> | null = null;
   private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   /** Per-ship mutex to serialize executeShipRequests() calls. */
   private shipRequestLocks = new Map<string, Promise<void>>();
 
-  /** Gate checks pending longer than this are auto-rejected (ms). */
-  private static readonly GATE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  /** Interval after which a pending gate check triggers a reminder to Bridge (ms). */
+  private static readonly GATE_REMINDER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   /** Unanswered Bridge questions auto-answered after this duration (ms). */
   private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -88,7 +88,7 @@ export class EngineServer {
     this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
-    this.startGateTimeoutScanner();
+    this.startGateReminderScanner();
     this.startQuestionTimeoutScanner();
     this.setupLookout();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
@@ -1406,13 +1406,13 @@ export class EngineServer {
     return parts.join("\n\n");
   }
 
-  private startGateTimeoutScanner(): void {
-    // Scan every 30 seconds for stale gate checks
-    this.gateTimeoutTimer = setInterval(() => {
-      this.scanGateTimeouts();
+  private startGateReminderScanner(): void {
+    // Scan every 30 seconds for gate checks needing a reminder
+    this.gateReminderTimer = setInterval(() => {
+      this.scanGateReminders();
     }, 30_000);
     // Allow Node to exit even if the timer is still running
-    this.gateTimeoutTimer.unref();
+    this.gateReminderTimer.unref();
   }
 
   private startQuestionTimeoutScanner(): void {
@@ -1474,7 +1474,7 @@ export class EngineServer {
     }
   }
 
-  private scanGateTimeouts(): void {
+  private scanGateReminders(): void {
     const now = Date.now();
 
     for (const ship of this.shipManager.getAllShips()) {
@@ -1482,33 +1482,39 @@ export class EngineServer {
         ship.gateCheck &&
         ship.gateCheck.status === "pending"
       ) {
-        // Use acknowledgedAt (when Bridge ACK'd) as the timeout base if available,
-        // otherwise fall back to requestedAt (when Engine sent the request)
-        const timeoutBase = ship.gateCheck.acknowledgedAt ?? ship.gateCheck.requestedAt;
-        if (now - new Date(timeoutBase).getTime() <= EngineServer.GATE_TIMEOUT_MS) continue;
-        const transition = ship.gateCheck.transition;
+        // Use the later of acknowledgedAt or lastRemindedAt as the base,
+        // falling back to requestedAt for brand-new gates
+        const reminderBase = ship.gateCheck.lastRemindedAt
+          ?? ship.gateCheck.acknowledgedAt
+          ?? ship.gateCheck.requestedAt;
+        if (now - new Date(reminderBase).getTime() <= EngineServer.GATE_REMINDER_INTERVAL_MS) continue;
 
-        console.warn(
-          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out (${transition}). Auto-rejecting.`,
+        const transition = ship.gateCheck.transition;
+        console.log(
+          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... pending (${transition}). Sending reminder to Bridge.`,
         );
-        this.shipManager.respondToGate(
-          ship.id,
-          false,
-          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
-        ).catch(console.error);
-        this.onGateRejected(
-          ship.id,
+
+        // Update lastRemindedAt to avoid spamming
+        ship.gateCheck.lastRemindedAt = new Date().toISOString();
+
+        // Re-send the gate check message to Bridge as a reminder
+        const gateMessage = this.buildGateCheckMessage(
+          ship,
           transition,
-          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
+          ship.gateCheck.gateType,
+          undefined,
+          ship.gateCheck.feedback,
         );
+        const bridgeId = `bridge-${ship.fleetId}`;
+        this.processManager.sendMessage(bridgeId, `[REMINDER] ${gateMessage}`);
       }
     }
   }
 
   shutdown(): void {
-    if (this.gateTimeoutTimer) {
-      clearInterval(this.gateTimeoutTimer);
-      this.gateTimeoutTimer = null;
+    if (this.gateReminderTimer) {
+      clearInterval(this.gateReminderTimer);
+      this.gateReminderTimer = null;
     }
     if (this.questionTimeoutTimer) {
       clearInterval(this.questionTimeoutTimer);

@@ -1,12 +1,12 @@
 ---
 name: implement
-description: Issue ベースの機能実装ワークフロー。計画→実装→受け入れテスト→マージまで一気通貫で実行する。"/implement", "実装して" などで起動。
+description: Issue ベースの機能実装ワークフロー。計画→実装→受け入れテ スト→マージまで一気通貫で実行する。"/implement", "実装して" などで起動。
 user-invocable: true
 ---
 
 # /implement — 統合実装スキル（オーケストレータ）
 
-GitHub Issues をベースに、計画→実装→受け入れテスト→マージまでを一気通貫で行う。
+GitHub Issues をベースに、計画→実装→受け入れテスト→マージまでを一気通 貫で行う。
 実際の処理は 5 つの sub-skill に委譲する。
 
 ## 引数
@@ -58,7 +58,7 @@ STATEEOF
 if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキップ、ファイル伝言板方式
+- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキッ プ、ファイル伝言板方式
 - `VIBE_ADMIRAL_DISABLED`（スタンドアロン）: Worktree/ラベル管理をスキル内で実行
 
 ## ステータス遷移（admiral-request プロトコル）
@@ -104,9 +104,9 @@ echo "$GATE_RESULT"
 
 | 遷移 | Gate タイプ | 内容 |
 |------|-----------|------|
-| `planning → implementing` | plan-review | 計画の妥当性検証 |
-| `implementing → acceptance-test` | code-review | PR の品質検証 |
-| `acceptance-test → merging` | playwright | E2E テストで品質検証 |
+| `planning → implementing` | plan-review | Bridge が計画の妥当性を検 証 |
+| `implementing → acceptance-test` | code-review | Bridge が PR の品質を検証 |
+| `acceptance-test → merging` | playwright | Bridge が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
 
 ## Sub-Skill ルーティング
 
@@ -120,7 +120,22 @@ echo "$GATE_RESULT"
 | 9-11 | `/implement-review` | コミット、PR、code-review、受入テスト |
 | 12-16 | `/implement-merge` | CI、マージ、done 遷移、クリーンアップ |
 
-state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する。
+state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する 。
+
+**`VIBE_ADMIRAL` 未設定時**:
+admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。
+ワークフローの詳細は各 sub-skill を参照。
+
+## CI 失敗ログの取得方法
+
+```bash
+gh run list --limit=3
+gh run view <run-id> --log-failed
+```
+
+## 競合リスク
+
+CLAUDE.md の Conflict Risk Areas を参照すること。
 
 ## 注意事項
 

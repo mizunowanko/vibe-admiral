@@ -3,6 +3,17 @@
 Bridge/Ship 共通の Issue 全コンテキスト取得スキル。
 トリガー: Issue の要件を完全に把握する必要があるとき。
 
+## Issue Reading Rules
+
+When viewing or analyzing any issue, you MUST read both the body AND comments. Comments contain critical context including requirement changes, priority overrides, dependency updates, and human decisions.
+
+Always use:
+```bash
+gh issue view <number> --repo <repo> --json number,title,body,labels,state,comments
+```
+
+Never rely on body alone — a later comment may override or refine the original requirements.
+
 ## 引数
 
 - Issue 番号（必須）
@@ -49,5 +60,5 @@ gh pr list --search "<issue-number>" --repo "$REPO" --json number,title,state,ur
 
 ## 重要
 
-- **body だけで判断しない**。後のコメントが要件を上書き・修正している可能性がある
+- **body だけで判断しない**。後のコメントが要件を上書き・修正している 可能性がある
 - 特に plan-review や code-review で reject された場合、その feedback は最新コメントに含まれている

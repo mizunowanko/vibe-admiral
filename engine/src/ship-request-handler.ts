@@ -52,6 +52,10 @@ export class ShipRequestHandler {
   ): Promise<StatusTransitionResult> {
     switch (request.request) {
       case "status-transition":
+        // Store qaRequired on Ship when transitioning to implementing
+        if (request.status === "implementing" && request.qaRequired !== undefined) {
+          this.shipManager.setQaRequired(shipId, request.qaRequired);
+        }
         return this.handleStatusTransition(shipId, request.status, gateSettings);
       case "nothing-to-do":
         return this.handleNothingToDo(shipId, request.reason);
@@ -92,7 +96,13 @@ export class ShipRequestHandler {
     }
 
     // Check for gate on direct transition (from current → target)
-    const gateType = resolveGate(ship.status, targetStatus, gateSettings);
+    let gateType = resolveGate(ship.status, targetStatus, gateSettings);
+
+    // Skip playwright gate when Ship determined QA is not required
+    if (gateType === "playwright" && ship.qaRequired === false) {
+      gateType = null;
+    }
+
     if (gateType) {
       // If there's already a pending/approved gate for this exact transition, check it
       if (ship.gateCheck?.transition === `${ship.status}→${targetStatus}`) {
