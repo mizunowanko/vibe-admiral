@@ -28,6 +28,7 @@ import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
+import { resolveGate } from "./gate-config.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
@@ -372,28 +373,54 @@ export class EngineServer {
         if (ship) {
           this.shipManager.setAcceptanceTest(shipId, request);
           this.shipManager.updateStatus(shipId, "acceptance-test");
-          this.broadcast({
-            type: "ship:acceptance-test",
-            data: { id: shipId, url: request.url, checks: request.checks },
-          });
 
-          // Also inject into Bridge chat
-          const acceptanceMessage = {
-            type: "system" as const,
-            subtype: "acceptance-test" as const,
-            content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
-            meta: {
-              category: "acceptance-test" as const,
-              issueNumber: ship.issueNumber,
-              issueTitle: ship.issueTitle,
-              url: request.url,
-              checks: request.checks,
-            },
-          };
-          this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
-          this.broadcast({
-            type: "bridge:stream",
-            data: { fleetId: ship.fleetId, message: acceptanceMessage },
+          // Check if the acceptance-test→merging gate is auto-approve.
+          // If so, skip broadcasting the acceptance test UI to frontend —
+          // the gate system will handle the transition automatically.
+          this.loadFleets().then((fleets) => {
+            const fleet = fleets.find((f) => f.id === ship.fleetId);
+            const gateType = resolveGate("acceptance-test", "merging", fleet?.gates);
+            const isAutoApprove = gateType === "auto-approve";
+
+            if (isAutoApprove) {
+              console.log(
+                `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test gate is auto-approve — skipping UI broadcast, auto-accepting`,
+              );
+              // Write acceptance-test-response.json so Ship CLI doesn't hang
+              this.shipManager.respondToAcceptanceTest(shipId, true);
+              return;
+            }
+
+            this.broadcast({
+              type: "ship:acceptance-test",
+              data: { id: shipId, url: request.url, checks: request.checks },
+            });
+
+            // Also inject into Bridge chat
+            const acceptanceMessage = {
+              type: "system" as const,
+              subtype: "acceptance-test" as const,
+              content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
+              meta: {
+                category: "acceptance-test" as const,
+                issueNumber: ship.issueNumber,
+                issueTitle: ship.issueTitle,
+                url: request.url,
+                checks: request.checks,
+              },
+            };
+            this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
+            this.broadcast({
+              type: "bridge:stream",
+              data: { fleetId: ship.fleetId, message: acceptanceMessage },
+            });
+          }).catch((err) => {
+            console.warn(`[ws-server] Failed to check gate settings for acceptance test:`, err);
+            // Fallback: broadcast anyway so UI is not broken
+            this.broadcast({
+              type: "ship:acceptance-test",
+              data: { id: shipId, url: request.url, checks: request.checks },
+            });
           });
         }
       },

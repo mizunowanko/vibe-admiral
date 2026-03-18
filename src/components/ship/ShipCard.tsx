@@ -23,7 +23,7 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
       onClick={onSelect}
       className={cn(
         "cursor-pointer rounded-lg border border-border bg-card p-4 transition-all hover:border-primary/50 hover:shadow-md",
-        ship.status === "acceptance-test" && "border-amber-500/50 ring-1 ring-amber-500/20",
+        ship.status === "acceptance-test" && ship.gateCheck?.gateType !== "auto-approve" && "border-amber-500/50 ring-1 ring-amber-500/20",
         ship.gateCheck?.status === "pending" && "border-sky-500/50 ring-1 ring-sky-500/20",
       )}
     >
@@ -89,8 +89,8 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
         {ship.repo}
       </p>
 
-      {/* Acceptance Test URL */}
-      {ship.acceptanceTest && ship.status === "acceptance-test" && (
+      {/* Acceptance Test URL — hidden when gate is auto-approve */}
+      {ship.acceptanceTest && ship.status === "acceptance-test" && ship.gateCheck?.gateType !== "auto-approve" && (
         <div className="mt-2 pt-2 border-t border-border">
           {isSafeUrl(ship.acceptanceTest.url) ? (
             <a

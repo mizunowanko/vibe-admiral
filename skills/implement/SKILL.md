@@ -271,7 +271,6 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 **`VIBE_ADMIRAL` 未設定時**:
 - EnterPlanMode で実装計画を立てる
 - CLAUDE.md の Implementation Layer Order に従って変更レイヤーを分類する
-- **plan 確定後、`.claude/plans/` 内のファイルをすべて削除する**
 
 ### Step 5: 実装
 
@@ -476,12 +475,7 @@ gh pr checks "$PR_NUM" --watch
 
 - CI が全てパスしたら Step 13 へ
 - CI が失敗した場合は Step 16（CI 修正ループ）へ
-- **CI が未設定の場合**（`no checks reported` が返る場合）: スキップして Step 13 へ進む
-
-### Step 13: plan ファイルの掃除
-
-- `.claude/plans/` 内に `.md` ファイルが残っていれば削除する（次セッションで古い plan が誤実行されるのを防ぐ）
-- **注意**: `~/.claude/plans/` は他プロジェクトの plan が含まれる可能性があるため触らないこと
+- **CI が未設定の場合**（`no checks reported` が返る場合）: スキップして Step 14 へ進む
 
 ### Step 14: レビュー結果の対応（マージ前に必須）
 
