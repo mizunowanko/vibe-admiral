@@ -53,7 +53,6 @@ export const useShipStore = create<ShipState>((set) => ({
         prUrl: null,
         prReviewStatus: null,
         gateCheck: null,
-        escortAgentId: null,
         retryCount: 0,
         createdAt: new Date().toISOString(),
         ...shipData,
@@ -94,8 +93,7 @@ export const useShipStore = create<ShipState>((set) => ({
           prUrl: null,
           prReviewStatus: null,
           gateCheck: null,
-          escortAgentId: null,
-          retryCount: 0,
+            retryCount: 0,
           createdAt: new Date().toISOString(),
         });
       }

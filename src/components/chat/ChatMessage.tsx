@@ -203,27 +203,20 @@ export function ChatMessage({ message, repeatCount, context }: ChatMessageProps)
     );
   }
 
-  // Escort/Dispatch log — sub-agent messages routed to Ship
-  if (isSystem && (message.meta?.category === "escort-log" || message.meta?.category === "dispatch-log")) {
-    const isEscort = message.meta.category === "escort-log";
-    const label = isEscort ? "Escort" : "Dispatch";
+  // Dispatch log — sub-agent messages routed to Ship
+  if (isSystem && message.meta?.category === "dispatch-log") {
     return (
       <div className="flex w-full justify-start">
         <div
           className={cn(
             "max-w-[90%] rounded-lg px-3 py-2 text-sm border",
-            isEscort
-              ? "border-cyan-500/20 bg-cyan-500/5"
-              : "border-amber-500/20 bg-amber-500/5",
+            "border-amber-500/20 bg-amber-500/5",
           )}
         >
           <span
-            className={cn(
-              "text-xs font-mono block mb-1",
-              isEscort ? "text-cyan-400/70" : "text-amber-400/70",
-            )}
+            className="text-xs font-mono block mb-1 text-amber-400/70"
           >
-            [{label}]
+            [Dispatch]
           </span>
           <div className="bridge-markdown break-words text-card-foreground">
             <ReactMarkdown
