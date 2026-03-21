@@ -429,7 +429,6 @@ export class FleetDatabase {
       prReviewStatus: null,
       gateCheck: null,
       qaRequired: row.qa_required === 1,
-      escortAgentId: null,
       retryCount: 0,
       createdAt: row.created_at,
       completedAt: row.completed_at ? new Date(row.completed_at).getTime() : undefined,
