@@ -57,7 +57,7 @@ const STYLE: Record<
   "task-notification": null,
   "ship-status": null,
   "compact-status": null,
-  "bridge-status": null,
+  "commander-status": null,
   "request-result": null,
   "dispatch-log": null,
 };

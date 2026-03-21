@@ -25,8 +25,8 @@ export const BridgeMessage = memo(function BridgeMessage({ message, repeatCount 
     );
   }
 
-  // Bridge status (CLI lifecycle) — Bridge-only
-  if (isSystem && message.subtype === "bridge-status") {
+  // Commander status (CLI lifecycle) — Flagship/Dock
+  if (isSystem && message.subtype === "commander-status") {
     const content = message.content ?? "";
     const isErrorStatus = content.includes("Failed");
     const isConnected = content.includes("connected");

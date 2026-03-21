@@ -1,8 +1,8 @@
 import type { ShipManager } from "./ship-manager.js";
 import type { StateSync } from "./state-sync.js";
-import type { BridgeRequest, FleetRepo, FleetSkillSources, ShipProcess } from "./types.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, ShipProcess } from "./types.js";
 
-export class BridgeRequestHandler {
+export class FlagshipRequestHandler {
   private shipManager: ShipManager;
   private stateSync: StateSync;
 
@@ -13,7 +13,7 @@ export class BridgeRequestHandler {
 
   async handle(
     fleetId: string,
-    request: BridgeRequest,
+    request: FlagshipRequest,
     fleetRepos: FleetRepo[],
     repoRemotes: string[],
     skillSources?: FleetSkillSources,
@@ -36,7 +36,7 @@ export class BridgeRequestHandler {
 
   private async handleSortie(
     fleetId: string,
-    request: Extract<BridgeRequest, { request: "sortie" }>,
+    request: Extract<FlagshipRequest, { request: "sortie" }>,
     fleetRepos: FleetRepo[],
     repoRemotes: string[],
     skillSources?: FleetSkillSources,
@@ -130,7 +130,7 @@ export class BridgeRequestHandler {
   }
 
   private handleShipStop(
-    request: Extract<BridgeRequest, { request: "ship-stop" }>,
+    request: Extract<FlagshipRequest, { request: "ship-stop" }>,
   ): string {
     const ship = this.shipManager.resolveShip(request.shipId);
     if (!ship) {
@@ -144,7 +144,7 @@ export class BridgeRequestHandler {
   }
 
   private handleShipResume(
-    request: Extract<BridgeRequest, { request: "ship-resume" }>,
+    request: Extract<FlagshipRequest, { request: "ship-resume" }>,
     shipExtraPrompt?: string,
   ): string {
     const ship = this.shipManager.resolveShip(request.shipId);
@@ -166,7 +166,7 @@ export class BridgeRequestHandler {
   }
 
   private handlePRReviewResult(
-    request: Extract<BridgeRequest, { request: "pr-review-result" }>,
+    request: Extract<FlagshipRequest, { request: "pr-review-result" }>,
   ): string {
     const ship = this.shipManager.resolveShip(request.shipId);
     if (!ship) {

@@ -15,7 +15,8 @@ interface FleetState {
     repos?: FleetRepo[];
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
-    bridgeRulePaths?: string[];
+    flagshipRulePaths?: string[];
+    dockRulePaths?: string[];
     shipRulePaths?: string[];
     maxConcurrentSorties?: number;
   }) => void;

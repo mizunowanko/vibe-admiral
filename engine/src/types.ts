@@ -97,12 +97,16 @@ export interface Fleet {
   name: string;
   repos: FleetRepo[];
   skillSources?: FleetSkillSources;
-  /** Rule files loaded for both Bridge and Ship sessions (fleet-wide context). */
+  /** Rule files loaded for Dock, Flagship, and Ship sessions (fleet-wide context). */
   sharedRulePaths?: string[];
-  /** Rule files loaded only for the Bridge session (e.g. triage policies). */
-  bridgeRulePaths?: string[];
+  /** Rule files loaded only for the Flagship session (Ship management policies). */
+  flagshipRulePaths?: string[];
+  /** Rule files loaded only for the Dock session (Issue management policies). */
+  dockRulePaths?: string[];
   /** Rule files loaded only for Ship sessions (e.g. implementation constraints). */
   shipRulePaths?: string[];
+  /** @deprecated Use flagshipRulePaths instead. Auto-migrated on load. */
+  bridgeRulePaths?: string[];
   /** Gate settings: which gate phases are enabled and their types. */
   gates?: FleetGateSettings;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
@@ -149,7 +153,7 @@ export interface Issue {
 export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
-  | "bridge-status"
+  | "commander-status"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request"
@@ -223,8 +227,8 @@ export interface ServerMessage {
   data: Record<string, unknown>;
 }
 
-// === Bridge Requests (Engine-only operations) ===
-export type BridgeRequest =
+// === Flagship Requests (Ship control operations via Flagship) ===
+export type FlagshipRequest =
   | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
@@ -232,13 +236,16 @@ export type BridgeRequest =
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
 ;
 
+/** @deprecated Use FlagshipRequest instead. Kept for backward compat. */
+export type BridgeRequest = FlagshipRequest;
+
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
   | { request: "status-transition"; status: Phase; planCommentUrl?: string; qaRequired?: boolean }
   | { request: "nothing-to-do"; reason: string };
 
-// === Admiral Request (union of Bridge + Ship requests) ===
-export type AdmiralRequest = BridgeRequest | ShipRequest;
+// === Admiral Request (union of Flagship + Ship requests) ===
+export type AdmiralRequest = FlagshipRequest | ShipRequest;
 
 // === DB Message Types ===
 export type DbMessageType =
@@ -273,9 +280,16 @@ export interface ShipProcess {
   processDead?: boolean;
 }
 
-// === Persisted Bridge Session (disk persistence across Engine restarts) ===
-export interface PersistedBridgeSession {
+// === Commander Role (Dock or Flagship) ===
+export type CommanderRole = "dock" | "flagship";
+
+// === Persisted Commander Session (disk persistence across Engine restarts) ===
+export interface PersistedCommanderSession {
   fleetId: string;
+  role: CommanderRole;
   sessionId: string | null;
   createdAt: string;
 }
+
+/** @deprecated Use PersistedCommanderSession instead. */
+export type PersistedBridgeSession = PersistedCommanderSession;
