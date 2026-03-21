@@ -58,7 +58,7 @@ STATEEOF
 if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキッ プ、ファイル伝言板方式
+- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキッ プ、DB メッセージボード方式
 - `VIBE_ADMIRAL_DISABLED`（スタンドアロン）: Worktree/ラベル管理をスキル内で実行
 
 ## ステータス遷移（admiral-request プロトコル）
@@ -73,40 +73,41 @@ if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "
 ```
 ````
 
-### Engine レスポンス待機
+### Engine レスポンス待機（DB ポーリング）
 
 ```bash
-while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
-RESPONSE=$(cat .claude/admiral-request-response.json)
-rm -f .claude/admiral-request-response.json
-echo "$RESPONSE"
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 1
+done
 ```
 
 - `ok: true` → 遷移確定
-- `ok: false` + "Gate check" → Gate 待機フロー
+- `ok: false` + `gate` フィールドあり → Ship 自身が Escort sub-agent を起動して Gate review を実施
 
-### Gate 待機フロー
+### Gate フロー（Ship Escort 方式）
 
-```bash
-echo "Gate check initiated. Waiting for Bridge approval..."
-rm -f .claude/admiral-request-response.json
-while [ ! -f .claude/gate-response.json ]; do sleep 2; done
-GATE_RESULT=$(cat .claude/gate-response.json)
-rm -f .claude/gate-response.json
-rm -f .claude/gate-request.json
-echo "$GATE_RESULT"
-```
-
-- `approved: true` → 次の作業に進む
-- `approved: false` → GitHub でフィードバックを確認、修正して再表明
+Engine 応答に `gate` フィールドが含まれる場合:
+1. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
+2. Escort がレビュー実施 → GitHub に記録 → DB に `gate-response` を書き込み
+3. Ship が DB をポーリングして gate-response を取得
+4. `approved: true` → 再度 `status-transition` を表明 → Engine が gate 完了を確認して遷移
+5. `approved: false` → GitHub でフィードバックを確認、修正して再度 `status-transition` → Escort 起動ループ
 
 ### Gate 付き遷移
 
 | 遷移 | Gate タイプ | 内容 |
 |------|-----------|------|
-| `planning → implementing` | plan-review | Bridge が計画の妥当性を検 証 |
-| `implementing → acceptance-test` | code-review | Bridge が PR の品質を検証 |
-| `acceptance-test → merging` | playwright | Bridge が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
+| `planning → planning-gate` | plan-review | Ship の Escort が計画の妥当性を検証 |
+| `implementing → implementing-gate` | code-review | Ship の Escort が PR の品質を検証 |
+| `acceptance-test → acceptance-test-gate` | playwright | Ship の Escort が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
 
 ## Sub-Skill ルーティング
 

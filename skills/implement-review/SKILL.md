@@ -11,7 +11,7 @@
 
 1. `git status && git diff --stat && git diff` で変更を把握
 2. 変更を論理的にグルーピングしてコミット（共通 CLAUDE.md のコミット規約に従う）
-   - `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>` を含め る
+   - `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>` を含める
    - `git add -A` は使わない（ファイル名指定）
 3. `git push -u origin <current-branch>` で push
 4. ブランチ名から Issue 番号を抽出し、PR を作成:
@@ -33,7 +33,7 @@
    )"
    ```
 
-**PR が既に存在する場合**: 未 push のコミットがあれば `git push` のみ 。
+**PR が既に存在する場合**: 未 push のコミットがあれば `git push` のみ。
 
 PR URL をユーザーに報告する。
 
@@ -41,9 +41,9 @@ PR URL をユーザーに報告する。
 
 > **このステップで code-review Gate が承認されるまで、次の sub-skill (`/implement-merge`) に進んではならない。**
 
-### VIBE_ADMIRAL 設定時（Gate 方式）
+### VIBE_ADMIRAL 設定時（Ship Escort 方式）
 
-PR 作成/push 完了後、`acceptance-test` への遷移を表明する。Engine はこの遷移に対して **code-review Gate** を発動する:
+PR 作成/push 完了後、`acceptance-test` への遷移を表明する。Engine はこの遷移に対して **code-review Gate** 情報を返す:
 
 ````
 ```admiral-request
@@ -67,11 +67,12 @@ while true; do
 done
 ```
 
-Gate 発動後、Bridge が自動で PR コードレビューを実施する。
-Ship は DB で Gate 応答を待機:
+応答に `gate` フィールドが含まれる場合、Ship 自身が Escort (sub-agent) を起動して code-review を実施する。`/gate-code-review` スキルを参照して Escort を Task tool で起動する。
+
+Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得:
 
 ```bash
-echo "Gate check initiated. Waiting for Bridge approval..."
+echo "Waiting for Escort code review..."
 while true; do
   ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
   if [ -n "$ROW" ]; then
@@ -83,8 +84,20 @@ while true; do
 done
 ```
 
-- `approved: true` → `/implement-merge` に進む
-- `approved: false` → PR レビューコメントを確認し修正 → commit & push → 再度 `status-transition` で `acceptance-test` を表明 → Gate 待機を繰り返す
+- `approved: true` → 再度 `status-transition` を表明して Engine に gate 完了を通知、`/implement-merge` に進む
+- `approved: false` → PR レビューコメントを確認し修正 → commit & push → 再度 `status-transition` → Escort 起動ループ
+
+#### Gate 完了通知
+
+Gate 承認後、再度 `status-transition` を表明して Engine に gate 完了を通知:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "acceptance-test" }
+```
+````
+
+Engine からの `{ok: true}` 応答を DB でポーリングして確認。
 
 ### VIBE_ADMIRAL 未設定時
 

@@ -90,33 +90,24 @@ done
 ```
 
 - `ok: true` → 遷移確定
-- `ok: false` + "Gate check" → Gate 待機フロー
+- `ok: false` + `gate` フィールドあり → Ship 自身が Escort sub-agent を起動して Gate review を実施
 
-### Gate 待機フロー（DB ポーリング）
+### Gate フロー（Ship Escort 方式）
 
-```bash
-echo "Gate check initiated. Waiting for Bridge approval..."
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 2
-done
-```
-
-- `approved: true` → 次の作業に進む
-- `approved: false` → GitHub でフィードバックを確認、修正して再表明
+Engine 応答に `gate` フィールドが含まれる場合:
+1. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
+2. Escort がレビュー実施 → GitHub に記録 → DB に `gate-response` を書き込み
+3. Ship が DB をポーリングして gate-response を取得
+4. `approved: true` → 再度 `status-transition` を表明 → Engine が gate 完了を確認して遷移
+5. `approved: false` → GitHub でフィードバックを確認、修正して再度 `status-transition` → Escort 起動ループ
 
 ### Gate 付き遷移
 
 | 遷移 | Gate タイプ | 内容 |
 |------|-----------|------|
-| `planning → planning-gate` | plan-review | Bridge が計画の妥当性を検 証 |
-| `implementing → implementing-gate` | code-review | Bridge が PR の品質を検証 |
-| `acceptance-test → acceptance-test-gate` | playwright | Bridge が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
+| `planning → planning-gate` | plan-review | Ship の Escort が計画の妥当性を検証 |
+| `implementing → implementing-gate` | code-review | Ship の Escort が PR の品質を検証 |
+| `acceptance-test → acceptance-test-gate` | playwright | Ship の Escort が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
 
 ## Sub-Skill ルーティング
 

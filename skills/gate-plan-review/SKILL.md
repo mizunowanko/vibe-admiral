@@ -1,41 +1,21 @@
-# /gate-plan-review — Plan Review Gate (Escort Model)
+# /gate-plan-review — Plan Review Gate (Ship Escort)
 
-トリガー: `[Gate Check Request]` with `plan-review` gate type を受信したとき。
+Ship が plan-review gate に到達したとき、Ship 自身がこのスキルを参照して Escort (sub-agent) を Task tool で起動する。
 
-## Pre-Dispatch Flow
+## Escort Template
 
-1. **Immediately send `gate-ack`** to reset the Engine's timeout window:
-
-```admiral-request
-{ "request": "gate-ack", "shipId": "<ship-id>", "gatePhase": "planning-gate" }
-```
-
-2. Call `ship-status` to verify the target Ship is still in expected state:
-   - If process is dead or phase is `done` → skip, log that gate was skipped
-   - If no pending gate for this gate phase → skip
-
-3. Check if the gate message contains `Escort agent ID: <id>`:
-   - **YES**: Resume the existing Escort via `Task(resume="<id>")` (preserves prior review context)
-   - **NO**: Launch a new Escort via `Task(...)` — the Escort must register itself
-
-## Escort Template (New — No Escort Agent ID)
+Ship は以下のテンプレートで Escort を起動する:
 
 ```
-Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose", run_in_background=true, prompt=`
-You are an Escort agent — a persistent sub-agent dedicated to Ship #<issue>.
-You will handle ALL gate checks (plan-review, code-review) for this Ship, preserving context across reviews.
+Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose", prompt=`
+You are an Escort agent performing a plan-review gate check for Ship #<issue>.
 
 Ship ID: <ship-id>
 Repo: <repo>
+DB path: <db-path>
 Ship log: <worktree>/.claude/ship-log.jsonl
 
-FIRST: Register yourself as this Ship's Escort by outputting:
-\`\`\`admiral-request
-{ "request": "escort-registered", "shipId": "<ship-id>", "agentId": "<your-agent-id>" }
-\`\`\`
-Note: Your agent ID will be provided by the system — use the value from your Task context.
-
-THEN: Perform plan-review:
+Perform plan-review:
 1. Read the Ship's investigation log to understand what was discovered during research:
    Run: tail -n 200 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 20
 2. Run: gh issue view <issue> --repo <repo> --json title,body,comments
@@ -43,59 +23,21 @@ THEN: Perform plan-review:
 4. Read the latest implementation plan comment from the Ship
 5. Check if the plan covers all requirements in the issue. Use the Ship's investigation log context to evaluate feasibility. If this is a re-review, verify that previous feedback has been addressed
 6. Verify the plan is feasible and well-scoped
-7. IMPORTANT: Record your review on GitHub:
+7. Record your review on GitHub:
    gh issue comment <issue> --repo <repo> --body "## Plan Review\n\n<your detailed review>\n\n**Verdict: APPROVE** (or REJECT)"
-8. Output EXACTLY one admiral-request block as your FINAL output:
+8. Write the gate-response to the DB:
 
 If approving:
-\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "approve" }
+\`\`\`bash
+sqlite3 "<db-path>" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('<ship-id>', 'gate-response', 'escort', '{\"approved\":true,\"gatePhase\":\"planning-gate\"}')"
 \`\`\`
 
 If rejecting:
-\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "reject", "feedback": "<what needs to be revised>" }
+\`\`\`bash
+sqlite3 "<db-path>" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('<ship-id>', 'gate-response', 'escort', '{\"approved\":false,\"gatePhase\":\"planning-gate\",\"feedback\":\"<what needs to be revised>\"}')"
 \`\`\`
 `)
 ```
-
-## Escort Template (Resume — Escort Agent ID Present)
-
-```
-Task(description="Escort: plan-review #<issue>", resume="<escort-agent-id>", run_in_background=true, prompt=`
-You are resuming as the Escort for Ship #<issue>. You have context from previous interactions.
-
-NEW TASK: plan-review gate check.
-Ship ID: <ship-id>
-Repo: <repo>
-Ship log: <worktree>/.claude/ship-log.jsonl
-
-Perform plan-review:
-1. Read the Ship's investigation log:
-   Run: tail -n 200 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 20
-2. Run: gh issue view <issue> --repo <repo> --json title,body,comments
-3. Read ALL comments — check for previous reviews. If a prior review rejected, note what was flagged
-4. Read the latest implementation plan comment
-5. Evaluate completeness, feasibility, and scope
-6. Record review on GitHub:
-   gh issue comment <issue> --repo <repo> --body "## Plan Review\n\n<your detailed review>\n\n**Verdict: APPROVE** (or REJECT)"
-7. Output EXACTLY one admiral-request block:
-
-If approving:
-\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "approve" }
-\`\`\`
-
-If rejecting:
-\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "reject", "feedback": "<what needs to be revised>" }
-\`\`\`
-`)
-```
-
-## Post-Dispatch
-
-When the Escort completes, relay its final output text verbatim — the admiral-request block will be processed by the Engine automatically.
 
 ## Review Guidelines
 

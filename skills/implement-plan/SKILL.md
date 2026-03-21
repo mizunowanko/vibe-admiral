@@ -21,7 +21,7 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 
 **`VIBE_ADMIRAL` 設定時**: EnterPlanMode は使わない。代わりに:
 
-1. 実装計画をテキストとして作成する（変更対象ファイル、実装方針、影響 範囲、テスト方針を含む）
+1. 実装計画をテキストとして作成する（変更対象ファイル、実装方針、影響範囲、テスト方針を含む）
 2. **QA 要否を判断する**: Issue の type ラベルと変更内容から、Playwright QA が必要かどうかを判断する:
    - `type/feature` で UI 変更を含む → `qaRequired: true`
    - `type/bug` で UI に影響するバグ → `qaRequired: true`
@@ -29,7 +29,7 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
    - `type/infra` → `qaRequired: false`
    - `type/skill` → `qaRequired: false`
    - `type/test` → `qaRequired: false`
-   - type ラベルなし or 判断に迷う場合 → `qaRequired: true`（保守的に デフォルト true）
+   - type ラベルなし or 判断に迷う場合 → `qaRequired: true`（保守的にデフォルト true）
 3. **計画を Issue コメントとして投稿する**（QA 判断理由を含む）:
    ```bash
    PLAN_COMMENT_URL=$(gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "$(cat <<'PLANEOF'
@@ -49,7 +49,7 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 
    ### QA Requirement
    **qaRequired: <true or false>**
-   Reason: <判断理由。例: "type/refactor で UI 変更を含まないため QA  不要" or "type/feature で新しい UI コンポーネントを追加するため QA 必 要">
+   Reason: <判断理由。例: "type/refactor で UI 変更を含まないため QA 不要" or "type/feature で新しい UI コンポーネントを追加するため QA 必要">
 
    🤖 Generated with [Claude Code](https://claude.com/claude-code)
    PLANEOF
@@ -69,14 +69,40 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 
 ## ステータス遷移
 
-**`VIBE_ADMIRAL` 設定時**: `implementing` への遷移を表明。これは `plan-review` Gate をトリガーする。
+**`VIBE_ADMIRAL` 設定時**: `implementing` への遷移を表明。Engine はこの遷移に対して gate 応答を返す。
 
-Gate 待機フロー: DB の `messages` テーブルをポーリングして Gate 応答を待つ。
+Engine からの応答を DB でポーリング:
 
 ```bash
 DB_PATH="$VIBE_ADMIRAL_DB_PATH"
 SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-echo "Gate check initiated. Waiting for Bridge approval..."
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 1
+done
+```
+
+応答に `gate` フィールドが含まれる場合、Ship 自身が Escort (sub-agent) を起動して plan-review を実施する。
+
+### Escort 起動（plan-review）
+
+`/gate-plan-review` スキルを参照して Escort を Task tool で起動する:
+
+```
+Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose", prompt=`
+<gate-plan-review スキルの Escort テンプレートに従う>
+`)
+```
+
+Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得:
+
+```bash
+echo "Waiting for Escort gate review..."
 while true; do
   ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
   if [ -n "$ROW" ]; then
@@ -88,8 +114,20 @@ while true; do
 done
 ```
 
-- `approved: true` → `/implement-code` に進む
-- `approved: false` → フィードバックを確認して計画を修正、再度遷移を表明
+- `approved: true` → 再度 `status-transition` を表明して Engine に gate 完了を通知、`/implement-code` に進む
+- `approved: false` → GitHub のフィードバックを確認して計画を修正、再度 `status-transition` → Escort 起動ループ
+
+### Gate 完了通知
+
+Gate 承認後、再度 `status-transition` を表明して Engine に gate 完了を通知:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "implementing" }
+```
+````
+
+Engine からの `{ok: true}` 応答を DB でポーリングして確認。
 
 ## 完了後
 
