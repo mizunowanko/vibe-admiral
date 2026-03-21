@@ -424,7 +424,7 @@ export class EngineServer {
         type: "ship:status",
         data: {
           id,
-          status: phase,
+          phase: phase,
           detail,
           fleetId: ship?.fleetId,
           repo: ship?.repo,
@@ -704,7 +704,7 @@ export class EngineServer {
               repo: ship.repo,
               issueNumber: ship.issueNumber,
               issueTitle: ship.issueTitle,
-              status: ship.phase,
+              phase: ship.phase,
               branchName: ship.branchName,
             },
           });
@@ -1282,7 +1282,7 @@ export class EngineServer {
       type: "ship:status",
       data: {
         id,
-        status: ship.phase,
+        phase: ship.phase,
         detail: `PR created: ${prUrl}`,
         fleetId: ship.fleetId,
         repo: ship.repo,
