@@ -52,6 +52,8 @@ export class EngineServer {
   private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   /** Per-ship mutex to serialize executeShipRequests() calls. */
   private shipRequestLocks = new Map<string, Promise<void>>();
+  /** Maps task toolUseId to shipId for dispatch-log routing. */
+  private bridgeActiveTasks = new Map<string, string>();
 
   /** Interval after which a pending gate check triggers a reminder to Bridge (ms). */
   private static readonly GATE_REMINDER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -176,6 +178,47 @@ export class EngineServer {
               type: "bridge:question",
               data: { fleetId, message: questionMessage },
             });
+          // Track Task execution to associate sub-agent logs with a Ship
+          } else if (parsed.type === "tool_use" && parsed.tool === "Task") {
+            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
+            const prompt = toolInput?.prompt as string | undefined;
+            const toolUseId = parsed.toolUseId as string | undefined;
+            if (prompt && toolUseId) {
+              const shipIdMatch = prompt.match(/Ship ID: ([a-f0-9-]{36})/i);
+              if (shipIdMatch) {
+                this.bridgeActiveTasks.set(toolUseId, shipIdMatch[1]);
+              }
+            }
+            // Normal bridge broadcast
+            this.bridgeManager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: "bridge:stream",
+              data: { fleetId, message: parsed },
+            });
+          // Route sub-agent chat logs to the targeted Ship
+          } else if (parsed.subtype === "dispatch-log") {
+            const toolUseId = msg.task_id as string | undefined;
+            const shipId = toolUseId ? this.bridgeActiveTasks.get(toolUseId) : undefined;
+            if (shipId) {
+              const ship = this.shipManager.getShip(shipId);
+              if (ship) {
+                const logMessage = {
+                  ...parsed,
+                  meta: { ...parsed.meta, category: "dispatch-log" as const, shipId },
+                };
+                this.logShipMessage(shipId, logMessage);
+                this.broadcast({
+                  type: "ship:stream",
+                  data: { id: shipId, message: logMessage },
+                });
+              }
+            }
+            // Also show in Bridge chat
+            this.bridgeManager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: "bridge:stream",
+              data: { fleetId, message: parsed },
+            });
           // Check for admiral-request blocks in assistant text
           } else if (parsed.type === "assistant" && parsed.content) {
             const allRequests = extractRequests(parsed.content);
@@ -198,6 +241,13 @@ export class EngineServer {
               const bridgeId = `bridge-${fleetId}`;
               this.executeRequestsSequentially(fleetId, bridgeId, requests);
             }
+          } else if (parsed.type === "result") {
+            // Task completion — clean up active task tracking
+            const toolUseId = msg.task_id as string | undefined;
+            if (toolUseId) {
+              this.bridgeActiveTasks.delete(toolUseId);
+            }
+            // Do NOT broadcast: result messages duplicate the preceding assistant text
           } else if (parsed.type !== "result") {
             // Non-assistant or no content — pass through normally
             // Skip "result" messages: they duplicate the preceding "assistant" text
