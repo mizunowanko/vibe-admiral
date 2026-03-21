@@ -23,7 +23,7 @@ export interface EscortInfo {
  * launched by the Engine when a Ship enters a gate phase.
  *
  * Lifecycle:
- * 1. Engine detects gate phase via ShipRequestHandler
+ * 1. Engine detects gate phase via phase change polling
  * 2. EscortManager.launchEscort() spawns a Claude CLI process with the
  *    appropriate gate skill (e.g. /gate-plan-review)
  * 3. Escort performs review, directly updates phases table and phase_transitions
