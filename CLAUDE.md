@@ -136,6 +136,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 既存 ADR:
 - [ADR-0001: AI 最適化開発モデル](adr/0001-ai-optimized-dev-model.md)
 - [ADR-0002: 品質保証戦略](adr/0002-qa-strategy.md)
+- [ADR-0003: Ship ステータス管理のリアーキテクチャ](adr/0003-ship-status-rearchitecture.md)
 
 ## ラベル体系
 
