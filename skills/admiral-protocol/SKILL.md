@@ -80,12 +80,12 @@ In Admiral mode, Ship processes communicate with the Engine via a SQLite `messag
 ### Message Types
 | Type | Sender | Description |
 |------|--------|-------------|
-| `gate-response` | escort/engine | Gate approval/rejection result (written by Ship's Escort sub-agent) |
+| `gate-response` | escort | Gate approval/rejection result (written by Engine-launched Escort process) |
 | `admiral-request-response` | engine | Response to admiral-request |
 | `acceptance-test-request` | ship | Request for acceptance testing (URL + checks) |
 | `acceptance-test-response` | engine | Acceptance test result |
 
-### Gate Flow (Ship Escort Model)
+### Gate Flow (Engine Escort Model)
 
 Gate checks are handled autonomously by Ships via direct DB updates:
 

@@ -30,6 +30,7 @@ import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
 import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
+import { EscortManager } from "./escort-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
@@ -48,6 +49,7 @@ export class EngineServer {
   private stateSync: StateSync;
   private requestHandler: FlagshipRequestHandler;
   private shipRequestHandler: ShipRequestHandler;
+  private escortManager: EscortManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
@@ -73,6 +75,7 @@ export class EngineServer {
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
     this.shipRequestHandler = new ShipRequestHandler(this.shipManager);
+    this.escortManager = new EscortManager(this.processManager, this.shipManager);
     this.lookout = new Lookout(this.shipManager, this.processManager);
 
     this.wss = new WebSocketServer({ port });
@@ -131,6 +134,28 @@ export class EngineServer {
 
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
+      // Route Escort stream data to frontend (separate from Ship stream)
+      if (this.escortManager.isEscortProcess(id)) {
+        const shipId = this.escortManager.findShipIdByEscortId(id);
+        if (shipId) {
+          const ship = this.shipManager.getShip(shipId);
+          const parsed = parseStreamMessage(msg);
+          if (parsed) {
+            this.broadcast({
+              type: "escort:stream",
+              data: {
+                id: shipId,
+                escortId: id,
+                fleetId: ship?.fleetId,
+                issueNumber: ship?.issueNumber,
+                message: parsed,
+              },
+            });
+          }
+        }
+        return;
+      }
+
       // Route to commander (Dock/Flagship) or Ship
       const commander = this.resolveCommander(id);
       if (commander) {
@@ -295,6 +320,45 @@ export class EngineServer {
     });
 
     this.processManager.on("exit", (id: string, code: number | null) => {
+      // Handle Escort process exit
+      if (this.escortManager.isEscortProcess(id)) {
+        const shipId = this.escortManager.findShipIdByEscortId(id);
+        this.escortManager.onEscortExit(id, code);
+        if (shipId) {
+          const ship = this.shipManager.getShip(shipId);
+          this.broadcast({
+            type: "escort:completed",
+            data: {
+              id: shipId,
+              escortId: id,
+              exitCode: code,
+              fleetId: ship?.fleetId,
+              issueNumber: ship?.issueNumber,
+            },
+          });
+
+          // Inject notification into Flagship chat
+          if (ship) {
+            const escortMsg = {
+              type: "system" as const,
+              subtype: "ship-status" as const,
+              content: `Ship #${ship.issueNumber} (${ship.issueTitle}): Escort review completed (exit ${code})`,
+              meta: {
+                category: "ship-status" as const,
+                issueNumber: ship.issueNumber,
+                issueTitle: ship.issueTitle,
+              },
+            };
+            this.flagshipManager.addToHistory(ship.fleetId, escortMsg);
+            this.broadcast({
+              type: "flagship:stream",
+              data: { fleetId: ship.fleetId, message: escortMsg },
+            });
+          }
+        }
+        return;
+      }
+
       const exitCommander = this.resolveCommander(id);
       if (exitCommander) {
         this.commanderFirstData.delete(id);
@@ -1288,6 +1352,7 @@ export class EngineServer {
       clearInterval(this.processLivenessTimer);
       this.processLivenessTimer = null;
     }
+    this.escortManager.killAll();
     this.shipManager.stopAll();
     this.flagshipManager.stopAll();
     this.dockManager.stopAll();

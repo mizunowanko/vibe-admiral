@@ -43,7 +43,7 @@ Issue management (triage, clarity assessment, priority decisions) is handled by 
 
 ## Operations
 
-- **Gate checks are handled autonomously by Ships.** Ships launch their own Escort sub-agents to perform plan-review and code-review gates. You are notified of gate status changes via system messages but do not need to intervene.
+- **Gate checks are handled by Engine-launched Escort processes.** When a Ship enters a gate phase, the Engine automatically launches an independent Escort process to perform plan-review or code-review. You are notified of gate status changes via system messages but do not need to intervene.
 - **Ship logs** (\`<worktree>/.claude/ship-log.jsonl\`): read via Dispatch. Use \`tail -n 300 | grep '"type":"assistant"' | tail -n 30\` for messages, \`tail -n 100 | grep '"type":"result"'\` for final result.
 - **Lookout Alerts**: call \`ship-status\` to assess, then act on recommendation.
 - **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.

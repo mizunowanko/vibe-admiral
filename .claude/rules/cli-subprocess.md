@@ -5,9 +5,9 @@ See `engine/src/process-manager.ts` for the implementation.
 
 ## stdio Configuration
 
-- **Ship / Session Resume**: `stdio: ['ignore', 'pipe', 'pipe']`
+- **Ship / Session Resume / Escort**: `stdio: ['ignore', 'pipe', 'pipe']`
   - stdin MUST be `'ignore'`. Claude CLI is built on Bun, which replaces pipe FDs with Unix sockets when stdin is a pipe, breaking stdout capture.
-  - Ships receive their full prompt via `-p` and don't need stdin.
+  - Ships and Escorts receive their full prompt via `-p` and don't need stdin.
 
 - **Commander (Dock / Flagship)**: `stdio: ['pipe', 'pipe', 'pipe']`
   - stdin is a pipe for sending interactive messages via `--input-format stream-json`.
@@ -16,9 +16,9 @@ See `engine/src/process-manager.ts` for the implementation.
 
 ## Tool Restrictions
 
-- **Ship disallowedTools**: `EnterPlanMode,ExitPlanMode,AskUserQuestion`
+- **Ship / Escort disallowedTools**: `EnterPlanMode,ExitPlanMode,AskUserQuestion`
   - `EnterPlanMode` / `ExitPlanMode`: In `-p` (prompt) mode, plan mode causes the CLI to exit after `ExitPlanMode` without performing the implementation. There is no human to approve the plan in non-interactive mode.
-  - `AskUserQuestion`: Ship runs non-interactively with stdin ignored. User interaction uses the DB message board (`messages` table in fleet.db).
+  - `AskUserQuestion`: Ships and Escorts run non-interactively with stdin ignored. Ships use the DB message board (`messages` table in fleet.db) for communication.
 
 - **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
   - Commanders are restricted to read-only and analysis tools (no Write/Edit).
@@ -26,7 +26,7 @@ See `engine/src/process-manager.ts` for the implementation.
 
 ## VIBE_ADMIRAL Environment Variable
 
-Set `VIBE_ADMIRAL=true` for all Ship and session resume processes. This signals to skills (e.g., `/implement`) that they are running inside the Admiral:
+Set `VIBE_ADMIRAL=true` for all Ship, Escort, and session resume processes. This signals to skills (e.g., `/implement`, `/gate-plan-review`) that they are running inside the Admiral:
 - Skip worktree creation/deletion (Admiral handles it)
 - Skip label changes (Engine handles it)
 - Skip plan mode (`EnterPlanMode`) and output plan as text instead

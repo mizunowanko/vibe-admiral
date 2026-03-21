@@ -1,43 +1,67 @@
-# /gate-plan-review — Plan Review Gate (Ship Escort)
+# /gate-plan-review — Plan Review Gate (Engine Escort)
 
-Ship が plan-review gate に到達したとき、Ship 自身がこのスキルを参照して Escort (sub-agent) を Task tool で起動する。
+Engine が plan-review gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 
-## Escort Template
+## 引数
 
-Ship は以下のテンプレートで Escort を起動する:
+- Issue 番号（例: `42`）
 
-```
-Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose", prompt=`
-You are an Escort agent performing a plan-review gate check for Ship #<issue>.
+## 環境変数
 
-Ship ID: <ship-id>
-Repo: <repo>
-DB path: <db-path>
-Ship log: <worktree>/.claude/ship-log.jsonl
+- `VIBE_ADMIRAL_SHIP_ID`: レビュー対象の Ship ID
+- `VIBE_ADMIRAL_DB_PATH`: Fleet SQLite データベースパス
+- `VIBE_ADMIRAL_MAIN_REPO`: リポジトリ（owner/repo）
 
-Perform plan-review:
-1. Read the Ship's investigation log to understand what was discovered during research:
-   Run: tail -n 200 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 20
-2. Run: gh issue view <issue> --repo <repo> --json title,body,comments
-3. Read ALL comments — check for previous plan review results (APPROVE/REJECT verdicts). If a prior review rejected the plan, note what was flagged
-4. Read the latest implementation plan comment from the Ship
-5. Check if the plan covers all requirements in the issue. Use the Ship's investigation log context to evaluate feasibility. If this is a re-review, verify that previous feedback has been addressed
-6. Verify the plan is feasible and well-scoped
-7. Record your review on GitHub:
-   gh issue comment <issue> --repo <repo> --body "## Plan Review\n\n<your detailed review>\n\n**Verdict: APPROVE** (or REJECT)"
-8. Write the gate-response to the DB:
+## Procedure
 
-If approving:
-\`\`\`bash
-sqlite3 "<db-path>" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('<ship-id>', 'gate-response', 'escort', '{\"approved\":true,\"gatePhase\":\"planning-gate\"}')"
-\`\`\`
+1. リポ情報を取得:
+   ```bash
+   REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+   DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+   ```
 
-If rejecting:
-\`\`\`bash
-sqlite3 "<db-path>" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('<ship-id>', 'gate-response', 'escort', '{\"approved\":false,\"gatePhase\":\"planning-gate\",\"feedback\":\"<what needs to be revised>\"}')"
-\`\`\`
-`)
-```
+2. Ship の調査ログを確認（コンテキスト理解のため）:
+   ```bash
+   tail -n 200 .claude/ship-log.jsonl 2>/dev/null | grep '"type":"assistant"' | tail -n 20
+   ```
+
+3. Issue の全コンテキストを取得:
+   ```bash
+   gh issue view <ISSUE_NUMBER> --repo "$REPO" --json title,body,comments
+   ```
+
+4. 全コメントを確認:
+   - 前回の plan review 結果（APPROVE/REJECT）があるか確認
+   - reject された場合、何が指摘されたか把握
+
+5. 最新の Implementation Plan コメントを読む
+
+6. レビュー:
+   - Plan が Issue の要件を全てカバーしているか
+   - 実現可能で適切なスコープか
+   - re-review の場合、前回のフィードバックが反映されているか
+
+7. GitHub にレビュー結果を記録:
+   ```bash
+   gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
+
+   <詳細なレビュー>
+
+   **Verdict: APPROVE** (or REJECT)"
+   ```
+
+8. DB に gate-response を書き込み:
+
+   承認の場合:
+   ```bash
+   sqlite3 "$DB_PATH" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('$SHIP_ID', 'gate-response', 'escort', '{\"approved\":true,\"gatePhase\":\"planning-gate\"}')"
+   ```
+
+   拒否の場合:
+   ```bash
+   sqlite3 "$DB_PATH" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('$SHIP_ID', 'gate-response', 'escort', '{\"approved\":false,\"gatePhase\":\"planning-gate\",\"feedback\":\"<修正すべき点>\"}')"
+   ```
 
 ## Review Guidelines
 
