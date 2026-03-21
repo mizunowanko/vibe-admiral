@@ -86,9 +86,9 @@ test.describe("Fleet management", () => {
       .filter({ hasText: "Select Test Fleet" });
     await fleetButton.click();
 
-    // Bridge view should appear with chat input
+    // Command view should appear with Flagship chat input
     await expect(
-      page.getByPlaceholder("Send a command to the Bridge..."),
+      page.getByPlaceholder("Send a command to Flagship..."),
     ).toBeVisible({ timeout: 5000 });
 
     // Settings button should appear in sidebar
@@ -98,7 +98,7 @@ test.describe("Fleet management", () => {
   });
 });
 
-test.describe("Bridge", () => {
+test.describe("Commander (Flagship)", () => {
   test.beforeEach(async ({ page }) => {
     await resetMockEngine(page);
   });
@@ -110,8 +110,8 @@ test.describe("Bridge", () => {
     // Create and select a fleet
     await createAndSelectFleet(page, "Chat Test Fleet");
 
-    // Bridge view should show the input
-    const input = page.getByPlaceholder("Send a command to the Bridge...");
+    // Flagship view should show the input
+    const input = page.getByPlaceholder("Send a command to Flagship...");
     await expect(input).toBeVisible({ timeout: 5000 });
 
     // Type and send a message
@@ -186,8 +186,8 @@ async function createAndSelectFleet(page: Page, name: string) {
   const fleetButton = page.locator("button").filter({ hasText: name });
   await fleetButton.click();
 
-  // Wait for Bridge view to appear (fleet selection auto-navigates to bridge)
+  // Wait for Command view to appear (fleet selection auto-navigates to command)
   await expect(
-    page.getByPlaceholder("Send a command to the Bridge..."),
+    page.getByPlaceholder("Send a command to Flagship..."),
   ).toBeVisible({ timeout: 5000 });
 }
