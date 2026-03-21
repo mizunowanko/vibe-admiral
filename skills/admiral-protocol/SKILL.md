@@ -80,7 +80,6 @@ In Admiral mode, Ship processes communicate with the Engine via a SQLite `messag
 ### Message Types
 | Type | Sender | Description |
 |------|--------|-------------|
-| `gate-response` | escort | Gate approval/rejection result (written by Engine-launched Escort process) |
 | `admiral-request-response` | engine | Response to admiral-request |
 | `acceptance-test-request` | ship | Request for acceptance testing (URL + checks) |
 | `acceptance-test-response` | engine | Acceptance test result |
@@ -91,11 +90,36 @@ Gate checks are handled autonomously by Ships via direct DB updates:
 
 1. Ship directly updates `phases` table to gate phase (e.g. `planning` → `planning-gate`) via `sqlite3`
 2. Ship launches Escort sub-agent via Task tool (see `/gate-plan-review`, `/gate-code-review`)
-3. Escort performs review, records on GitHub, writes `gate-response` to DB via `sqlite3`
-4. Ship polls DB for `gate-response`, reads result
-5. On approval: Ship directly updates `phases` table to next work phase (e.g. `planning-gate` → `implementing`)
+3. Escort performs review, records on GitHub, directly updates `phases` table and writes to `phase_transitions` via `sqlite3`
+4. Ship polls `phases` table for phase changes
+5. On approval: Escort has already updated phase to next work phase (e.g. `planning-gate` → `implementing`)
+6. On rejection: Escort reverts phase (e.g. `planning-gate` → `planning`); Ship reads feedback from `phase_transitions`
 
-### Polling Pattern
+### Gate Polling Pattern (phases table)
+```bash
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+while true; do
+  PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null)
+  case "$PHASE" in
+    <expected-next-phase>) echo "Gate approved"; break ;;
+    <rejection-phase>) echo "Gate rejected"; break ;;
+    <current-gate-phase>) sleep 2 ;;
+  esac
+done
+```
+
+### Feedback Retrieval (on rejection)
+```bash
+FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+  SELECT json_extract(metadata, '$.feedback')
+  FROM phase_transitions
+  WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
+  ORDER BY created_at DESC LIMIT 1
+")
+```
+
+### Message Polling Pattern (for acceptance-test etc.)
 ```bash
 DB_PATH="$VIBE_ADMIRAL_DB_PATH"
 SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"

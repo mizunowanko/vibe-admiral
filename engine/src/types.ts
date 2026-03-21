@@ -248,7 +248,6 @@ export type AdmiralRequest = FlagshipRequest | ShipRequest;
 
 // === DB Message Types ===
 export type DbMessageType =
-  | "gate-response"
   | "admiral-request-response";
 
 // === Ship Process Info ===

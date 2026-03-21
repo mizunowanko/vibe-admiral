@@ -111,31 +111,22 @@ Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose"
 `)
 ```
 
-Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
+Escort が完了すると、DB の `phases` テーブルが直接更新される。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=300; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=300; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null); case "$PHASE" in implementing) echo "Gate approved"; break ;; planning) echo "Gate rejected"; break ;; planning-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-- `approved: true` → `implementing` に直接 DB 更新して遷移、`/implement-code` に進む
-- `approved: false` → GitHub のフィードバックを確認して計画を修正、再度 gate に遷移 → Escort 起動ループ
-
-### Gate 承認後の遷移
-
-Gate 承認後、`implementing` に直接 DB 更新:
-
-```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'implementing', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'implementing'
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'planning-gate';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'planning-gate', 'implementing', 'ship', '{}');
-COMMIT;
-"
-```
+- `implementing` に遷移済み → Escort が承認し phase を更新済み。`/implement-code` に進む
+- `planning` に戻された → Escort が reject した。`phase_transitions` からフィードバックを取得して計画を修正、再度 gate に遷移 → Escort 起動ループ:
+  ```bash
+  FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+    SELECT json_extract(metadata, '$.feedback')
+    FROM phase_transitions
+    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
+    ORDER BY created_at DESC LIMIT 1
+  ")
+  ```
 
 ## 完了後
 

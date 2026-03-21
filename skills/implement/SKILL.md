@@ -99,10 +99,10 @@ done
 
 1. Ship が直接 DB で gate phase に遷移（例: `planning` → `planning-gate`）
 2. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
-3. Escort がレビュー実施 → GitHub に記録 → DB に `gate-response` を書き込み
+3. Escort がレビュー実施 → GitHub に記録 → DB の `phases` テーブルを直接更新（phase 遷移 + `phase_transitions` に結果記録）
 4. Ship が `phases` テーブルをポーリングして phase 変更を検知
-5. `approved: true` → Escort が phase を次の作業 phase に更新 → Ship が検知して次の作業を開始
-6. `approved: false` → GitHub でフィードバックを確認、修正して再度 gate phase に遷移 → Escort 起動ループ
+5. approved → Escort が phase を次の作業 phase に更新済み → Ship が検知して次の作業を開始
+6. rejected → `phase_transitions` からフィードバックを取得、修正して再度 gate phase に遷移 → Escort 起動ループ
 
 ### Gate 付き遷移
 
