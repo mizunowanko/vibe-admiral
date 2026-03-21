@@ -1,3 +1,10 @@
+---
+name: sortie
+description: Sortie 計画・優先順位決定・出撃実行。"sortie" や "出撃" で起動
+user-invocable: true
+argument-hint: [issue-numbers]
+---
+
 # /sortie — Sortie Planning and Execution
 
 トリガー: ユーザーが実装開始を依頼したとき ("start implementation", "sortie", "出撃", etc.)

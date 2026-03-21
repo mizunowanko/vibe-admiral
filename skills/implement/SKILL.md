@@ -2,6 +2,7 @@
 name: implement
 description: Issue ベースの機能実装ワークフロー。計画→実装→受け入れテスト→マージまで一気通貫で実行する。"/implement", "実装して" などで起動。
 user-invocable: true
+argument-hint: [issue-number]
 ---
 
 # /implement — 統合実装スキル（オーケストレータ）
@@ -116,17 +117,17 @@ done
 
 `currentStep` に基づいて対応する sub-skill の手順に従う:
 
-| currentStep | Sub-Skill | 内容 |
-|-------------|-----------|------|
-| 1-2 | `/implement-setup` | Issue 特定、worktree 作成 |
-| 3-4 | `/implement-plan` | 調査、計画、plan-review gate |
-| 5-8 | `/implement-code` | **Issue 再読み込み** → 実装、ビルド、統合、再テスト |
-| 9-10 | `/implement-review` | コミット、PR、**code-review gate** |
-| 11-16 | `/implement-merge` | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
+| currentStep | Sub-Skill | Sub-Skill Steps | 内容 |
+|-------------|-----------|-----------------|------|
+| 1-2 | `/implement-setup` | Steps 1-2 | Issue 特定、worktree 作成 |
+| 3-4 | `/implement-plan` | Steps 1-2 | 調査、計画、plan-review gate |
+| 5-8 | `/implement-code` | Steps 1-4 | **Issue 再読み込み** → 実装、ビルド、統合、再テスト |
+| 9-10 | `/implement-review` | Steps 1-2 | コミット、PR、**code-review gate** |
+| 11-16 | `/implement-merge` | Steps 1-6 | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
 
 > **フェーズ順序制約**: 各 sub-skill は上から順に実行する。code-review gate (`/implement-review`) の承認を得てから受け入れテスト (`/implement-merge`) に進む。順序のスキップ・逆転は禁止。
 
-> **コンテキストリフレッシュ**: `/implement-code` の Step 5a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
+> **コンテキストリフレッシュ**: `/implement-code` の Step 1a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
 
 state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する。
 
