@@ -195,7 +195,7 @@ export class ShipManager {
     if (killed) {
       const rt = this.runtime.get(shipId);
       if (rt) rt.isCompacting = false;
-      this.updatePhase(shipId, "done", "Manually stopped");
+      this.updatePhase(shipId, "stopped", "Manually stopped");
     }
     return killed;
   }

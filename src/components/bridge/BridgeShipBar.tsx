@@ -28,7 +28,7 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
     () =>
       showCompleted
         ? allFleetShips
-        : allFleetShips.filter((s) => s.phase !== "done" && !s.processDead),
+        : allFleetShips.filter((s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead),
     [allFleetShips, showCompleted],
   );
 
@@ -63,7 +63,7 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
             const config = ship.processDead
               ? PROCESS_DEAD_CONFIG
               : STATUS_CONFIG[ship.phase];
-            const isActive = ship.phase !== "done" && !ship.processDead;
+            const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
             const isSelected = ship.id === selectedShipId;
 
             return (

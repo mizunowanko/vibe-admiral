@@ -231,7 +231,7 @@ export class FleetDatabase {
       SELECT s.*, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase != 'done'
+      WHERE s.phase NOT IN ('done', 'stopped')
     `).all() as ShipJoinRow[];
 
     return rows.map((row) => this.rowToShipProcess(row));
@@ -283,7 +283,7 @@ export class FleetDatabase {
       SELECT s.*, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase != 'done'
+      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'stopped')
     `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
 
     return row ? this.rowToShipProcess(row) : undefined;
@@ -295,7 +295,7 @@ export class FleetDatabase {
       SELECT s.issue_number, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase != 'done'
+      WHERE s.phase NOT IN ('done', 'stopped')
     `).all() as Array<{ issue_number: number; owner: string; name: string }>;
 
     return rows.map((row) => ({

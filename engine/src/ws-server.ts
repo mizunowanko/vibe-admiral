@@ -301,7 +301,7 @@ export class EngineServer {
         // Ship explicitly declares "done" via admiral-request status-transition.
         // If the process exits while in "done" phase, treat as success.
         // If in "merging" phase (squash merge may kill the process), also treat as success.
-        const successPhases = new Set(["done", "merging"]);
+        const successPhases = new Set(["done", "merging", "stopped"]);
         if (successPhases.has(ship.phase)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else {
@@ -1259,7 +1259,7 @@ export class EngineServer {
   private startProcessLivenessCheck(): void {
     this.processLivenessTimer = setInterval(() => {
       for (const ship of this.shipManager.getAllShips()) {
-        if (ship.phase !== "done" && !this.processManager.isRunning(ship.id)) {
+        if (ship.phase !== "done" && ship.phase !== "stopped" && !this.processManager.isRunning(ship.id)) {
           if (!ship.processDead) {
             this.shipManager.notifyProcessDead(ship.id);
           }

@@ -117,6 +117,13 @@ export class StateSync {
     this.shipManager.setIsCompacting(shipId, false);
 
     if (succeeded) {
+      // Stopped ships: skip done transition, worktree removal, and issue closure.
+      // The worktree is preserved for re-sortie. Label rollback is handled by
+      // the ship:stop handler in ws-server.
+      if (ship.phase === "stopped") {
+        return;
+      }
+
       this.shipManager.updatePhase(shipId, "done");
 
       // Successful completion: remove worktree, mark done (label + close issue)
@@ -362,6 +369,7 @@ export class StateSync {
     for (const ship of this.shipManager.getAllShips()) {
       if (
         ship.phase !== "done" &&
+        ship.phase !== "stopped" &&
         !this.shipManager.hasRunningProcess(ship.id)
       ) {
         console.warn(

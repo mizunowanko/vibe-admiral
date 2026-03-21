@@ -10,7 +10,8 @@ export type Phase =
   | "acceptance-test"
   | "acceptance-test-gate"
   | "merging"
-  | "done";
+  | "done"
+  | "stopped";
 
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
