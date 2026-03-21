@@ -6,7 +6,7 @@ user-invocable: true
 
 # /implement — 統合実装スキル（オーケストレータ）
 
-GitHub Issues をベースに、計画→実装→受け入れテスト→マージまでを一気通 貫で行う。
+GitHub Issues をベースに、計画→実装→**code-review**→受け入れテスト→マージまでを一気通貫で行う。
 実際の処理は 5 つの sub-skill に委譲する。
 
 ## 引数
@@ -117,8 +117,10 @@ echo "$GATE_RESULT"
 | 1-2 | `/implement-setup` | Issue 特定、worktree 作成 |
 | 3-4 | `/implement-plan` | 調査、計画、plan-review gate |
 | 5-8 | `/implement-code` | 実装、ビルド、統合、再テスト |
-| 9-11 | `/implement-review` | コミット、PR、code-review、受入テスト |
-| 12-16 | `/implement-merge` | CI、マージ、done 遷移、クリーンアップ |
+| 9-10 | `/implement-review` | コミット、PR、**code-review gate** |
+| 11-16 | `/implement-merge` | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
+
+> **フェーズ順序制約**: 各 sub-skill は上から順に実行する。code-review gate (`/implement-review`) の承認を得てから受け入れテスト (`/implement-merge`) に進む。順序のスキップ・逆転は禁止。
 
 state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する 。
 
