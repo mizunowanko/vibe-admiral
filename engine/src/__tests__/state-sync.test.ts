@@ -79,6 +79,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     acceptanceTestApproved: false,
     gateCheck: null,
     qaRequired: true,
+    escortAgentId: null,
     errorType: null,
     retryCount: 0,
     createdAt: new Date().toISOString(),

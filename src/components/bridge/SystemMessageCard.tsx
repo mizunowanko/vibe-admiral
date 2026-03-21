@@ -46,6 +46,7 @@ const STYLE: Record<
   "compact-status": null,
   "bridge-status": null,
   "request-result": null,
+  "escort-log": null,
 };
 
 interface SystemMessageCardProps {

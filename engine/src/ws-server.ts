@@ -195,16 +195,18 @@ export class EngineServer {
               type: "bridge:stream",
               data: { fleetId, message: parsed },
             });
-          // Route sub-agent chat logs to the targeted Ship
+          // Route sub-agent (Escort/Dispatch) chat logs to the targeted Ship
           } else if (parsed.subtype === "dispatch-log") {
             const toolUseId = msg.task_id as string | undefined;
             const shipId = toolUseId ? this.bridgeActiveTasks.get(toolUseId) : undefined;
             if (shipId) {
               const ship = this.shipManager.getShip(shipId);
               if (ship) {
+                // Use "escort-log" category when this Ship has a registered Escort
+                const logCategory = ship.escortAgentId ? "escort-log" as const : "dispatch-log" as const;
                 const logMessage = {
                   ...parsed,
-                  meta: { ...parsed.meta, category: "dispatch-log" as const, shipId },
+                  meta: { ...parsed.meta, category: logCategory, shipId },
                 };
                 this.logShipMessage(shipId, logMessage);
                 this.broadcast({
@@ -1258,21 +1260,28 @@ export class EngineServer {
   ): string {
     const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
     const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}\nWorktree: ${ship.worktreePath}\nShip log: ${ship.worktreePath}/.claude/ship-log.jsonl`;
+    const escortLine = ship.escortAgentId
+      ? `\nEscort agent ID: ${ship.escortAgentId}`
+      : "";
     const retryNote = previousFeedback
       ? `\n\n⚠️ RETRY: This is a re-review after a previous rejection. The Ship claims to have addressed the following feedback:\n> ${previousFeedback}\nVerify that the previous issues have been fixed. Check GitHub (issue comments or PR reviews) for the full history of prior reviews.`
       : "";
+
+    const escortInstruction = ship.escortAgentId
+      ? `Resume the Escort (sub-agent) using Task(resume="${ship.escortAgentId}") to preserve context from previous reviews. The Escort must record on GitHub and output the gate-result admiral-request block.`
+      : `Launch a new Escort (sub-agent) via Task tool. The Escort must output an escort-registered admiral-request block with its agentId, then record on GitHub and output the gate-result admiral-request block.`;
 
     switch (gateType) {
       case "plan-review": {
         const planRef = planCommentUrl
           ? `\nPlan comment: ${planCommentUrl}`
           : "";
-        return `${header}\n${meta}${planRef}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the plan. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+        return `${header}\n${meta}${escortLine}${planRef}${retryNote}\n\n${escortInstruction}`;
       }
       case "code-review":
-        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+        return `${header}\n${meta}${escortLine}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\n${escortInstruction}`;
       case "playwright":
-        return `${header}\n${meta}${retryNote}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
+        return `${header}\n${meta}${escortLine}${retryNote}\n\n${escortInstruction}`;
     }
   }
 

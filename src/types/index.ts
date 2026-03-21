@@ -70,6 +70,8 @@ export interface Ship {
   acceptanceTest: AcceptanceTestRequest | null;
   acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
+  /** Agent ID of the persistent Escort sub-agent for this Ship's gate checks. */
+  escortAgentId: string | null;
   errorType: ShipErrorType | null;
   retryCount: number;
   nothingToDo?: boolean;
@@ -101,7 +103,8 @@ export type StreamMessageSubtype =
   | "pr-review-request"
   | "gate-check-request"
   | "lookout-alert"
-  | "task-notification";
+  | "task-notification"
+  | "escort-log";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -111,7 +114,7 @@ export type LookoutAlertType =
   | "excessive-retries";
 
 export interface SystemMessageMeta {
-  category: StreamMessageSubtype;
+  category: StreamMessageSubtype | "dispatch-log" | "escort-log";
   issueNumber?: number;
   issueTitle?: string;
   transition?: string;

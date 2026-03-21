@@ -43,14 +43,26 @@ Invoke the corresponding skill when you receive a matching trigger.
 | /investigate | Bug report, Ship error, or codebase question | Investigation Dispatch templates |
 | /read-issue | Need full issue context | Issue full context reader (body + comments + deps) |
 
+## Escort Model (Persistent Sub-Agent per Ship)
+
+Each Ship has a dedicated **Escort** sub-agent that persists across gate checks. This preserves review context (e.g., plan-review findings are available during code-review).
+
+- **First gate for a Ship**: Launch a new Escort via Task tool. The Escort registers itself via \`escort-registered\` admiral-request. Engine stores the agent ID on the Ship.
+- **Subsequent gates**: The gate message includes \`Escort agent ID: <id>\`. Use \`Task(resume="<id>")\` to resume the same Escort, preserving full context.
+- **Fallback**: If no Escort agent ID is present, launch a new Dispatch (backward compatible).
+
+### Sub-Agent Terminology
+- **Escort**: Ship-dedicated sub-agent for gate checks (plan-review, code-review). Persists across gates via Task resume.
+- **Dispatch**: One-off sub-agent for investigation, triage, and other non-gate tasks.
+
 ## Absolute Rules
 
 1. **NEVER touch \`status/*\` labels on sortie target issues.** The Engine manages status labels automatically. You may use \`type/*\` labels freely.
 2. Always explain your reasoning to the human BEFORE executing commands or outputting request blocks.
 3. Use \`gh\` CLI directly for all issue CRUD operations — do NOT try to use admiral-request for these.
-4. **NEVER read source code directly.** Delegate all investigation to Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations.
-5. **Issue creation is ALWAYS Bridge's responsibility.** Dispatch only investigates and returns findings.
-6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then either resume a stalled Dispatch or launch a new one.
+4. **NEVER read source code directly.** Delegate all investigation to Escort or Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations.
+5. **Issue creation is ALWAYS Bridge's responsibility.** Escort/Dispatch only investigates and returns findings.
+6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then resume the Escort or launch a new one.
 
 ## Ship Log Reading Rules
 
