@@ -40,7 +40,6 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
-  const savedScrollTopRef = useRef<number | null>(null);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
 
@@ -70,38 +69,27 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
     prevMessageCountRef.current = 0;
   }, [fleetId]);
 
-  useEffect(() => {
+  // Unified scroll management — runs before paint so scroll position is
+  // preserved across DOM updates without visible flicker.
+  useLayoutEffect(() => {
     const prevCount = prevMessageCountRef.current;
     const curCount = messages.length;
     prevMessageCountRef.current = curCount;
 
-    // History replacement: messages went from N to M where both > 0 and M < N
-    // or messages were completely replaced (reference changed but count similar).
-    // In either case, if user wasn't at bottom, save scroll position for restore.
-    const grew = curCount > prevCount;
-    const isHistoryReplace = prevCount > 0 && !grew && curCount > 0;
-
-    if (isHistoryReplace && !isAtBottomRef.current && scrollRef.current) {
-      // Save scroll position before React re-renders the DOM
-      savedScrollTopRef.current = scrollRef.current.scrollTop;
-    }
+    const el = scrollRef.current;
+    if (!el) return;
 
     if (isAtBottomRef.current) {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-    } else if (grew) {
+      // Auto-scroll to bottom when user is already there
+      el.scrollTop = el.scrollHeight;
+    } else if (curCount > prevCount) {
+      // New messages arrived while user is scrolled up — show indicator
       setHasNewMessages(true);
     }
+    // For history replacement (count shrank or stayed same), scroll position
+    // is naturally preserved because we no longer replace messages mid-session
+    // (the historyLoadedRef guard in useBridge prevents it).
   }, [messages, isLoading]);
-
-  // Restore scroll position after DOM update when history was replaced
-  useLayoutEffect(() => {
-    if (savedScrollTopRef.current !== null && scrollRef.current) {
-      scrollRef.current.scrollTop = savedScrollTopRef.current;
-      savedScrollTopRef.current = null;
-    }
-  }, [messages]);
 
   if (!fleetId) {
     return (
