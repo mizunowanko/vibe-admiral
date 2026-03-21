@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import type { StatusManager } from "./status-manager.js";
@@ -102,12 +102,15 @@ export class ShipManager {
     // 5. Copy /implement skill to worktree
     await this.deploySkills(repoRoot, worktreePath, skillSources);
 
-    // 6. npm install if web project
+    // 6. Remove stale workflow-state.json from previous sortie
+    await unlink(join(worktreePath, ".claude", "workflow-state.json")).catch(() => {});
+
+    // 7. npm install if web project
     if (await worktree.isWebProject(worktreePath)) {
       await execFileAsync("npm", ["install"], { cwd: worktreePath });
     }
 
-    // 7. Detect existing PR for branch reuse (preserves review history)
+    // 8. Detect existing PR for branch reuse (preserves review history)
     let existingPrUrl: string | null = null;
     let existingPrReviewStatus: PRReviewStatus | null = null;
     try {
@@ -163,7 +166,7 @@ export class ShipManager {
       retryCount: 0,
     });
 
-    // 8. Build extra context for Ship
+    // 9. Build extra context for Ship
     // Embed issue info in the prompt so Ship doesn't need to call `gh issue view`
     const issueContext = [
       `[Issue Context] Issue #${issue.number}: ${issue.title}`,
@@ -177,7 +180,7 @@ export class ShipManager {
       .filter(Boolean)
       .join("\n\n") || undefined;
 
-    // 9. Launch Claude CLI process with DB path for message polling
+    // 10. Launch Claude CLI process with DB path for message polling
     const shipEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: repo,
     };
