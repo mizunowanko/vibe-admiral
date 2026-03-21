@@ -1,15 +1,15 @@
-# /implement-code — Implementation & Build Verification (Steps 5-8)
+# /implement-code — Implementation & Build Verification (impl-01〜impl-04)
 
-## Step 5: 実装
+## impl-01: 実装
 
 CLAUDE.md に記載されたレイヤー順序で実装する。
 
-## Step 6: ビルド検証
+## impl-02: ビルド検証
 
 CLAUDE.md の Commands テーブルに記載されたビルド・テスト・リントコマンドを実行する。
 テストやリントが失敗したら修正して再実行する。
 
-## Step 7: 統合
+## impl-03: 統合
 
 最新のデフォルトブランチをマージし、コンフリクトがあれば解消する。
 
@@ -21,7 +21,7 @@ git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
 - コンフリクトが発生したら解消してからコミットする
 - **Web プロジェクトの場合**: `npm install` も実行する
 
-## Step 8: テスト再実行
+## impl-04: テスト再実行
 
 ビルド・テスト・リントを再度実行して統合後の問題がないことを確認する。
 

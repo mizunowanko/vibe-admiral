@@ -1,6 +1,6 @@
-# /implement-review — Commit, PR, Code Review & Acceptance Test (Steps 9-11)
+# /implement-review — Commit, PR, Code Review & Acceptance Test (review-01〜review-03)
 
-## Step 9: コミット & PR
+## review-01: コミット & PR
 
 まず `gh pr list --head $(git branch --show-current) --json number --jq '.[0].number'` で既存 PR の有無を確認する。
 
@@ -53,26 +53,26 @@ echo "$RESPONSE"
 
 Gate 発動時は Gate 待機フローに従う。
 
-## Step 10: コードレビュー（CI 並行）
+## review-02: コードレビュー（CI 並行）
 
 ### VIBE_ADMIRAL 設定時（Gate 方式）
 
-Step 9 で code-review Gate が発動し、Bridge が自動で PR コードレビューを実施。
+review-01 で code-review Gate が発動し、Bridge が自動で PR コードレビューを実施。
 Ship は Gate 待機フローに従い `gate-response.json` を待機する。
 
-- `approved: true` → Step 11 へ
+- `approved: true` → review-03 へ
 - `approved: false` → PR レビューコメントを確認、修正 → commit & push → 再度 `status-transition` で `acceptance-test` を表明
 
 ### VIBE_ADMIRAL 未設定時
 
 1. `/review-pr` スキルをバックグラウンドで起動（Task ツール `run_in_background: true`）
-2. Step 11 へ進む
+2. review-03 へ進む
 
-## Step 11: 受け入れテスト
+## review-03: 受け入れテスト
 
 ### QA スキップ判定
 
-Step 4 で `qaRequired: false` と判断した場合、**このステップ全体をスキップして `/implement-merge` に進む**。
+plan-02 で `qaRequired: false` と判断した場合、**このステップ全体をスキップして `/implement-merge` に進む**。
 
 ### VIBE_ADMIRAL 設定時（ファイル伝言板方式）
 

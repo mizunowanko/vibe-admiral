@@ -1,6 +1,6 @@
-# /implement-plan — Investigation & Planning (Steps 3-4)
+# /implement-plan — Investigation & Planning (plan-01〜plan-02)
 
-## Step 3: 調査
+## plan-01: 調査
 
 まず Issue の body と全 comments を読んで要件を完全に把握する:
 ```bash
@@ -17,7 +17,7 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 - Task ツールで並列調査する（影響範囲の特定）
 - CLAUDE.md の Conflict Risk Areas を参照する
 
-## Step 4: 計画
+## plan-02: 計画
 
 **`VIBE_ADMIRAL` 設定時**: EnterPlanMode は使わない。代わりに:
 

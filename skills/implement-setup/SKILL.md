@@ -1,4 +1,4 @@
-# /implement-setup — Issue Identification & Worktree Setup (Steps 1-2)
+# /implement-setup — Issue Identification & Worktree Setup (setup-01〜setup-02)
 
 ## 引数
 
@@ -10,7 +10,7 @@
 if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-## Step 1: GH Issue の特定
+## setup-01: GH Issue の特定
 
 リポ情報を取得する:
 ```bash
@@ -37,7 +37,7 @@ DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBran
 gh issue edit <番号> --repo "$REPO" --remove-label status/todo --add-label status/implementing
 ```
 
-## Step 2: Worktree 作成
+## setup-02: Worktree 作成
 
 **`VIBE_ADMIRAL` 設定時**: スキップ（すでに worktree 内にいる）。
 

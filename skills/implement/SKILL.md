@@ -25,8 +25,8 @@ cat .claude/workflow-state.json 2>/dev/null || echo "NO_STATE"
 {
   "skill": "implement",
   "issueNumber": 42,
-  "currentStep": 5,
-  "completedSteps": [1, 2, 3, 4],
+  "currentStep": "impl-01",
+  "completedSteps": ["setup-01", "setup-02", "plan-01", "plan-02"],
   "branchName": "feature/42-add-login",
   "prNumber": null,
   "reviewTaskId": null,
@@ -42,7 +42,7 @@ cat > .claude/workflow-state.json << 'STATEEOF'
 {
   "skill": "implement",
   "issueNumber": <NUMBER>,
-  "currentStep": <NEXT_STEP>,
+  "currentStep": "<NEXT_STEP>",
   "completedSteps": [<COMPLETED>],
   "branchName": "<BRANCH>",
   "prNumber": <PR_OR_NULL>,
@@ -110,17 +110,17 @@ echo "$GATE_RESULT"
 
 ## Sub-Skill ルーティング
 
-`currentStep` に基づいて対応する sub-skill の手順に従う:
+`currentStep` の prefix に基づいて対応する sub-skill の手順に従う:
 
 | currentStep | Sub-Skill | 内容 |
 |-------------|-----------|------|
-| 1-2 | `/implement-setup` | Issue 特定、worktree 作成 |
-| 3-4 | `/implement-plan` | 調査、計画、plan-review gate |
-| 5-8 | `/implement-code` | 実装、ビルド、統合、再テスト |
-| 9-11 | `/implement-review` | コミット、PR、code-review、受入テスト |
-| 12-16 | `/implement-merge` | CI、マージ、done 遷移、クリーンアップ |
+| `setup-01`〜`setup-02` | `/implement-setup` | Issue 特定、worktree 作成 |
+| `plan-01`〜`plan-02` | `/implement-plan` | 調査、計画、plan-review gate |
+| `impl-01`〜`impl-04` | `/implement-code` | 実装、ビルド、統合、再テスト |
+| `review-01`〜`review-03` | `/implement-review` | コミット、PR、code-review、受入テスト |
+| `merge-01`〜`merge-05` | `/implement-merge` | CI、マージ、done 遷移、クリーンアップ |
 
-state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する 。
+state が `NO_STATE` の場合は `setup-01`（`/implement-setup`）から開始する。
 
 **`VIBE_ADMIRAL` 未設定時**:
 admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。
