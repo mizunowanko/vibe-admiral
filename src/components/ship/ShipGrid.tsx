@@ -3,7 +3,7 @@ import { useShipsByFleet } from "@/hooks/useShip";
 import { useShipStore } from "@/stores/shipStore";
 import { useFleetStore } from "@/stores/fleetStore";
 import { ShipCard } from "./ShipCard";
-import { ShipDetail } from "./ShipDetail";
+import { ShipDetailModal } from "./ShipDetailModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Ship, Rocket, ChevronDown, ChevronRight } from "lucide-react";
@@ -14,7 +14,6 @@ interface ShipGridProps {
 
 export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const ships = useShipsByFleet(fleetId);
-  const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
   const retryShip = useShipStore((s) => s.retryShip);
@@ -183,13 +182,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
         </div>
       </div>
 
-      {/* Detail Panel */}
-      {selectedShipId && (
-        <ShipDetail
-          shipId={selectedShipId}
-          onClose={() => selectShip(null)}
-        />
-      )}
+      <ShipDetailModal />
     </div>
   );
 });
