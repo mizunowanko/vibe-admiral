@@ -7,11 +7,53 @@
 1. Run `gh issue list --label status/todo` to get ready issues
 2. For each issue, check `depends-on/<N>` labels to identify dependencies. If an issue has `depends-on/` labels pointing to open issues, it is blocked
 3. Read body AND comments (`gh issue view <number> --json number,title,body,labels,state,comments`) for additional context: sub-issues, "## Dependencies" section (legacy), priority overrides, and human decisions
-4. Identify which issues are UNBLOCKED and labeled "status/todo"
-5. Apply Sortie Priority Rules to determine the recommended order
-6. Explain analysis to the human (which issues are ready, which are blocked and why, and the proposed priority order)
-7. Launch UNBLOCKED + "status/todo" issues via `sortie` admiral-request
-8. After sortie, monitor with `ship-status` when asked
+4. **Issue Clarity Check** — Assess each sortie candidate (see below)
+5. Identify which issues are UNBLOCKED, labeled "status/todo", and sufficiently clear
+6. Apply Sortie Priority Rules to determine the recommended order
+7. Explain analysis to the human (which issues are ready, which are blocked and why, which need clarification, and the proposed priority order)
+8. Launch UNBLOCKED + "status/todo" + **clear** issues via `sortie` admiral-request
+9. After sortie, monitor with `ship-status` when asked
+
+## Issue Clarity Check
+
+Before launching a sortie, Bridge MUST assess whether each candidate issue is clear enough for a Ship to implement autonomously. Ships cannot ask questions (AskUserQuestion is disallowed), so unclear issues lead to wasted sorties.
+
+### Assessment Criteria
+
+Evaluate the issue body (and comments) for:
+
+1. **Specific behavior or outcome**: Does the issue describe what should happen? (e.g., "add a button that does X" or "fix the crash when Y")
+2. **Scope boundaries**: Is it clear what is in scope and what is not?
+3. **Acceptance criteria or expected result**: Can a Ship determine when the task is done?
+4. **For bugs**: Are reproduction steps or error descriptions provided?
+
+### Clarity Levels
+
+| Level | Action |
+|-------|--------|
+| **Clear** | Proceed to sortie |
+| **Mostly clear** | Proceed — minor ambiguities can be resolved by Ship during planning |
+| **Unclear** | Ask the human for clarification before sortie |
+
+### When an issue is unclear
+
+1. Tell the human which issue(s) need clarification and what specifically is missing
+2. Use `AskUserQuestion` to ask targeted questions (one question per unclear issue, covering all missing points)
+3. After receiving answers, update the issue:
+   - Use `gh issue comment <number> --body "<clarification>"` to add the clarification as a comment
+   - Or use `gh issue edit <number> --body "<updated body>"` if the body needs structural correction
+4. Re-assess: if now clear, include in the sortie batch; if still unclear, inform the human and defer
+
+### Examples of unclear issues
+
+- Title only, no body: "Add dark mode" — What components? Toggle location? Default state?
+- Vague requirement: "Improve performance" — Which page? What metric? What target?
+- Missing context: "Fix the bug" — What bug? Steps to reproduce? Expected vs actual behavior?
+
+### Examples of clear issues
+
+- "Add a dark mode toggle to Settings page. Store preference in localStorage. Default to system preference."
+- "Fix: clicking 'Save' on the Fleet config page causes a 500 error when `maxConcurrentSorties` is empty. Expected: validation prevents empty submission."
 
 > **NOTE**: The Engine automatically removes `depends-on/<N>` labels and transitions `status/blocked` → `status/todo` when a dependency issue is closed.
 

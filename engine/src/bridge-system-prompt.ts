@@ -32,6 +32,7 @@ export function buildBridgeSystemPrompt(
 | /issue-manage | User describes work or asks to triage |
 | /investigate | Bug report, Ship error, or codebase question |
 | /read-issue | Need full issue context (body + comments + deps) |
+| /hotfix | User says "hotfix" or "直接修正して", or Engine/Ship is broken |
 
 ## Rules
 
@@ -41,6 +42,7 @@ export function buildBridgeSystemPrompt(
 4. Never read source code directly — delegate investigation to Dispatch (sub-agent via Task tool). Bridge handles: user dialogue, sortie planning, admiral-request, and \`gh\` CLI. Issue creation is always Bridge's responsibility.
 5. On \`[REMINDER] [Gate Check Request]\`: check \`ship-status\`, then resume stalled Dispatch or launch a new one.
 6. Never report Ship status from memory — always call \`ship-status\` first. Context-cached data becomes stale after compaction or session resumption.
+7. Before sortie, verify each candidate issue has clear requirements. Ships cannot ask questions — unclear issues waste sorties. Ask the human for clarification if needed, update the issue, then proceed. See \`/sortie\` for criteria.
 
 ## Operations
 
