@@ -1,6 +1,6 @@
 import { memo, useState, useMemo, useRef } from "react";
 import { useShipStore } from "@/stores/shipStore";
-import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
+import { ShipDetailModal } from "@/components/ship/ShipDetailModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -50,10 +50,6 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
         : allFleetShips.filter((s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead),
     [allFleetShips, showCompleted],
   );
-
-  // Only show log panel for ships belonging to this fleet
-  const showLogPanel =
-    selectedShipId && allFleetShips.some((s) => s.id === selectedShipId);
 
   return (
     <div className="w-72 shrink-0 border-l border-border bg-background/50 flex flex-col">
@@ -147,13 +143,7 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
         </div>
       </ScrollArea>
 
-      {/* Ship Log Panel */}
-      {showLogPanel && (
-        <ShipLogPanel
-          shipId={selectedShipId!}
-          onClose={() => selectShip(null)}
-        />
-      )}
+      <ShipDetailModal />
     </div>
   );
 });
