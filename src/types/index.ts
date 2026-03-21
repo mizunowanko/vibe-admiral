@@ -118,6 +118,7 @@ export interface SystemMessageMeta {
   checks?: string[];
   alertType?: LookoutAlertType;
   shipId?: string;
+  branchName?: string;
 }
 
 export interface StreamMessage {
