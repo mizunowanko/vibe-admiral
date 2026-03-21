@@ -2,6 +2,7 @@
 name: adr
 description: ADR（Architecture Decision Records）の作成・更新・検索。"/adr create <title>", "/adr list", "/adr search <query>" などで起動。
 user-invocable: true
+argument-hint: [create|list|search] [args]
 ---
 
 # /adr — ADR 管理スキル

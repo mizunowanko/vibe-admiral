@@ -1,9 +1,15 @@
-# /implement-review — Commit, PR & Code Review (Steps 9-10)
+---
+name: implement-review
+description: /implement のサブスキル — コードレビュー準備
+user-invocable: false
+---
 
-> **CRITICAL: Step 9 → Step 10 の順序は絶対にスキップ・逆転してはならない。**
+# /implement-review — Commit, PR & Code Review
+
+> **CRITICAL: Step 1 → Step 2 の順序は絶対にスキップ・逆転してはならない。**
 > code-review Gate が承認されてから次の sub-skill に進む。
 
-## Step 9: コミット & PR 作成
+## Step 1: コミット & PR 作成
 
 まず `gh pr list --head $(git branch --show-current) --json number --jq '.[0].number'` で既存 PR の有無を確認する。
 
@@ -37,7 +43,7 @@
 
 PR URL をユーザーに報告する。
 
-## Step 10: code-review Gate
+## Step 2: code-review Gate
 
 > **このステップで code-review Gate が承認されるまで、次の sub-skill (`/implement-merge`) に進んではならない。**
 
@@ -80,7 +86,7 @@ DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; E
 ### VIBE_ADMIRAL 未設定時
 
 1. `/review-pr` スキルをバックグラウンドで起動（Task ツール `run_in_background: true`）
-2. `/implement-merge` に進む（レビュー結果は Step 14 で対応）
+2. `/implement-merge` に進む（レビュー結果は `/implement-merge` Step 4 で対応）
 
 ## 完了後
 

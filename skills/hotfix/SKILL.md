@@ -1,3 +1,10 @@
+---
+name: hotfix
+description: Engine/Ship の緊急修正。"hotfix" や "直接修正して" で起動
+user-invocable: true
+argument-hint: [description]
+---
+
 # /hotfix — Hotfix Dispatch (Emergency Code Fix)
 
 Trigger: User asks Bridge to directly fix code, says "hotfix", "直接修正して", or when Ship/Engine is broken and normal sortie flow cannot proceed.

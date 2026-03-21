@@ -1,3 +1,9 @@
+---
+name: read-issue
+description: Issue の本文 + コメント + 依存関係を一括取得する内部ヘルパー
+user-invocable: false
+---
+
 # /read-issue — Issue Full Context Reader
 
 Bridge/Ship 共通の Issue 全コンテキスト取得スキル。

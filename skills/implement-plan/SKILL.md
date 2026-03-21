@@ -1,11 +1,17 @@
-# /implement-plan — Investigation & Planning (Steps 3-4)
+---
+name: implement-plan
+description: /implement のサブスキル — 調査 + 計画策定
+user-invocable: false
+---
 
-## Step 3: 調査
+# /implement-plan — Investigation & Planning
+
+## Step 1: 調査
 
 > **Issue 読み取りは `/read-issue` スキルの手順に準拠する。**
 > コマンドやフィールドを変更する場合は `/read-issue` (skills/read-issue/SKILL.md) と同期すること。
 
-### 3a. Issue 全コンテキスト取得
+### 1a. Issue 全コンテキスト取得
 
 ```bash
 REPO="${REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
@@ -14,7 +20,7 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json number,title,body,labels,stat
 
 **`VIBE_ADMIRAL` 設定時**: Issue body は prompt の `[Issue Context]` ブロックにも含まれているが、comments・labels・state の最新情報を取得するために上記コマンドを実行する。
 
-### 3b. Comments の解析
+### 1b. Comments の解析
 
 全コメントを読み、以下を抽出する:
 - 人間からの追加指示やポリシー変更
@@ -22,24 +28,24 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json number,title,body,labels,stat
 - 優先度の変更や要件の追加・修正
 - 前回の plan-review で reject された場合のフィードバック
 
-### 3c. 関連 PR の確認
+### 1c. 関連 PR の確認
 
 ```bash
 gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,url
 ```
 
-### 3d. Dependencies の解析
+### 1d. Dependencies の解析
 
 - `depends-on/<N>` ラベルの確認（labels フィールドから抽出）
 - body 内の "## Dependencies" セクションの解析
 
-### 3e. コード調査
+### 1e. コード調査
 
 その上で:
 - Task ツールで並列調査する（影響範囲の特定）
 - CLAUDE.md の Conflict Risk Areas を参照する
 
-## Step 4: 計画
+## Step 2: 計画
 
 **`VIBE_ADMIRAL` 設定時**: EnterPlanMode は使わない。代わりに:
 
@@ -133,5 +139,5 @@ DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=300; E
 workflow-state.json を更新して `/implement-code` に進む。
 
 > **コンテキストリフレッシュ**: Planning phase の調査・試行錯誤でコンテキストが膨らんでいる。
-> `/implement-code` の Step 5a で Issue 全文（plan コメント含む）を再読み込みすることで、
+> `/implement-code` の Step 1a で Issue 全文（plan コメント含む）を再読み込みすることで、
 > stale な planning コンテキストに頼らずフレッシュな状態で実装を開始する。

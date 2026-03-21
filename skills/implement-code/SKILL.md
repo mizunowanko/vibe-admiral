@@ -1,8 +1,14 @@
-# /implement-code — Implementation & Build Verification (Steps 5-8)
+---
+name: implement-code
+description: /implement のサブスキル — コーディング + テスト実行
+user-invocable: false
+---
 
-## Step 5: 実装
+# /implement-code — Implementation & Build Verification
 
-### 5a. コンテキストリフレッシュ（必須）
+## Step 1: 実装
+
+### 1a. コンテキストリフレッシュ（必須）
 
 Planning phase の調査・試行錯誤でコンテキストが膨らんでいるため、実装開始前に Issue を再読み込みしてコンテキストをリフレッシュする。
 
@@ -20,16 +26,16 @@ gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,body,labels,sta
 
 > **なぜこのステップが必要か**: Planning phase で大量の調査・コード探索を行うとコンテキストが圧迫される。承認済みの plan は Issue コメントに永続化されているため、plan + issue 本文を読み直す方が、stale な planning コンテキストを引きずるより効率的。
 
-### 5b. 実装
+### 1b. 実装
 
 CLAUDE.md に記載されたレイヤー順序で実装する。
 
-## Step 6: ビルド検証
+## Step 2: ビルド検証
 
 CLAUDE.md の Commands テーブルに記載されたビルド・テスト・リントコマンドを実行する。
 テストやリントが失敗したら修正して再実行する。
 
-## Step 7: 統合
+## Step 3: 統合
 
 最新のデフォルトブランチをマージし、コンフリクトがあれば解消する。
 
@@ -41,7 +47,7 @@ git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
 - コンフリクトが発生したら解消してからコミットする
 - **Web プロジェクトの場合**: `npm install` も実行する
 
-## Step 8: テスト再実行
+## Step 4: テスト再実行
 
 ビルド・テスト・リントを再度実行して統合後の問題がないことを確認する。
 

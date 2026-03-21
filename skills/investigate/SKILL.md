@@ -1,3 +1,10 @@
+---
+name: investigate
+description: バグ調査・Ship エラー分析・コードベース調査。Dispatch テンプレートとして使用
+user-invocable: true
+argument-hint: [description or issue-number]
+---
+
 # /investigate — Investigation Dispatch Templates
 
 トリガー: バグ報告、Ship エラー、コードベースの質問があったとき。

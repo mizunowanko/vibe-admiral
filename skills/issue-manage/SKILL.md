@@ -1,3 +1,10 @@
+---
+name: issue-manage
+description: Issue 作成・整理・トリアージ。ユーザーが作業内容を説明したときに起動
+user-invocable: true
+argument-hint: [description]
+---
+
 # /issue-manage — Issue Creation and Triage
 
 トリガー: ユーザーが作業内容を説明したとき、Issue の整理を依頼されたとき。

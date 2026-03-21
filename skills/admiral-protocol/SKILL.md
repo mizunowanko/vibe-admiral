@@ -1,3 +1,9 @@
+---
+name: admiral-protocol
+description: admiral-request プロトコル仕様。Bridge/Ship が admiral-request を送信する際に参照する
+user-invocable: false
+---
+
 # /admiral-protocol — Admiral-Request Protocol Reference
 
 Bridge/Ship 共通の admiral-request プロトコル仕様。

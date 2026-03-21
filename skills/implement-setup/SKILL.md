@@ -1,4 +1,10 @@
-# /implement-setup — Issue Identification & Worktree Setup (Steps 1-2)
+---
+name: implement-setup
+description: /implement のサブスキル — worktree + ブランチ初期化
+user-invocable: false
+---
+
+# /implement-setup — Issue Identification & Worktree Setup
 
 ## 引数
 
