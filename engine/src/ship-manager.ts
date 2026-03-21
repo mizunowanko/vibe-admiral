@@ -276,6 +276,16 @@ export class ShipManager {
     ship.acceptanceTest = null;
   }
 
+  respondToPRReview(
+    shipId: string,
+    result: { verdict: "approve" | "request-changes"; comments?: string },
+  ): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.prReviewStatus =
+      result.verdict === "approve" ? "approved" : "changes-requested";
+  }
+
   respondToAcceptanceTest(
     shipId: string,
     accepted: boolean,
