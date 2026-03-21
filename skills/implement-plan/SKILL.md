@@ -2,7 +2,12 @@
 
 ## Step 3: 調査
 
-まず Issue の body と全 comments を読んで要件を完全に把握する:
+**`VIBE_ADMIRAL` 設定時**: Issue body は prompt の `[Issue Context]` ブロックに含まれている。body の再取得は不要。comments のみ取得して追加指示を確認する:
+```bash
+gh issue view <ISSUE_NUMBER> --repo "$REPO" --json comments --jq '.comments'
+```
+
+**`VIBE_ADMIRAL` 未設定時**: Issue の body と全 comments を読んで要件を完全に把握する:
 ```bash
 gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 ```
@@ -71,20 +76,10 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 
 **`VIBE_ADMIRAL` 設定時**: `implementing` への遷移を表明。Engine はこの遷移に対して gate 応答を返す。
 
-Engine からの応答を DB でポーリング:
+Engine からの応答を DB でポーリング（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"
-SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 1
-done
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=120; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 2; ELAPSED=$((ELAPSED + 2)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
 応答に `gate` フィールドが含まれる場合、Ship 自身が Escort (sub-agent) を起動して plan-review を実施する。
@@ -99,19 +94,10 @@ Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose"
 `)
 ```
 
-Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得:
+Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
 
 ```bash
-echo "Waiting for Escort gate review..."
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 2
-done
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=300; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
 - `approved: true` → 再度 `status-transition` を表明して Engine に gate 完了を通知、`/implement-code` に進む

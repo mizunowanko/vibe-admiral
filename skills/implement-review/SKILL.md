@@ -51,37 +51,18 @@ PR 作成/push 完了後、`acceptance-test` への遷移を表明する。Engin
 ```
 ````
 
-Engine からの応答を DB でポーリング:
+Engine からの応答を DB でポーリング（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"
-SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 1
-done
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=120; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 2; ELAPSED=$((ELAPSED + 2)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
 応答に `gate` フィールドが含まれる場合、Ship 自身が Escort (sub-agent) を起動して code-review を実施する。`/gate-code-review` スキルを参照して Escort を Task tool で起動する。
 
-Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得:
+Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
 
 ```bash
-echo "Waiting for Escort code review..."
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 2
-done
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
 - `approved: true` → 再度 `status-transition` を表明して Engine に gate 完了を通知、`/implement-merge` に進む
