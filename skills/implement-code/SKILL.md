@@ -2,6 +2,26 @@
 
 ## Step 5: 実装
 
+### 5a. コンテキストリフレッシュ（必須）
+
+Planning phase の調査・試行錯誤でコンテキストが膨らんでいるため、実装開始前に Issue を再読み込みしてコンテキストをリフレッシュする。
+
+```bash
+REPO="${REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+ISSUE_NUMBER=<issue-number>
+gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,body,labels,state,comments
+```
+
+出力から以下を確認する:
+- **Issue 本文**: 最新の要件
+- **Implementation Plan コメント**: 承認済みの実装計画（Plan Review で APPROVE された内容）
+- **Plan Review コメント**: レビューでの指摘事項（あれば反映する）
+- **その他のコメント**: 人間からの追加指示や要件変更
+
+> **なぜこのステップが必要か**: Planning phase で大量の調査・コード探索を行うとコンテキストが圧迫される。承認済みの plan は Issue コメントに永続化されているため、plan + issue 本文を読み直す方が、stale な planning コンテキストを引きずるより効率的。
+
+### 5b. 実装
+
 CLAUDE.md に記載されたレイヤー順序で実装する。
 
 ## Step 6: ビルド検証

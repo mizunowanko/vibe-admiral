@@ -132,3 +132,7 @@ Engine からの `{ok: true}` 応答を DB でポーリングして確認。
 ## 完了後
 
 workflow-state.json を更新して `/implement-code` に進む。
+
+> **コンテキストリフレッシュ**: Planning phase の調査・試行錯誤でコンテキストが膨らんでいる。
+> `/implement-code` の Step 5a で Issue 全文（plan コメント含む）を再読み込みすることで、
+> stale な planning コンテキストに頼らずフレッシュな状態で実装を開始する。
