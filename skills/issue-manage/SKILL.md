@@ -16,8 +16,10 @@
 
 ## Mandatory Labels on Issue Creation
 
+> **Note**: Bridge Rules state "Never touch `status/*` labels", but issue creation is the **sole exception** — you MUST include `--label status/todo` in every `gh issue create` command. Without it, the issue won't appear in the sortie candidate list and will require manual label addition.
+
 Every issue MUST have:
-1. **One `status/` label** — always `status/todo` for new issues
+1. **One `status/` label** — always `status/todo` for new issues (include `--label status/todo` in the `gh issue create` command)
 2. **One `type/` label** — choose exactly one based on classification criteria
 
 Optional labels:
