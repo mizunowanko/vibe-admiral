@@ -114,67 +114,6 @@ That should do it.`;
     });
   });
 
-  describe("gate-result requests", () => {
-    it("parses gate-result approve with valid transition", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "abc-123", "transition": "planning→implementing", "verdict": "approve" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      expect(isBridgeRequest(requests[0]!)).toBe(true);
-      if (requests[0]!.request === "gate-result") {
-        expect(requests[0]!.verdict).toBe("approve");
-      }
-    });
-
-    it("parses gate-result reject with feedback", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "abc-123", "transition": "implementing→acceptance-test", "verdict": "reject", "feedback": "Missing tests" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      if (requests[0]!.request === "gate-result") {
-        expect(requests[0]!.verdict).toBe("reject");
-        expect(requests[0]!.feedback).toBe("Missing tests");
-      }
-    });
-
-    it("rejects gate-result with invalid transition", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "abc-123", "transition": "invalid→transition", "verdict": "approve" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(0);
-    });
-
-    it("rejects gate-result with invalid verdict", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "gate-result", "shipId": "abc-123", "transition": "planning→implementing", "verdict": "maybe" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(0);
-    });
-  });
-
-  describe("gate-ack requests", () => {
-    it("parses gate-ack with issueNumber", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "gate-ack", "shipId": "abc-123", "transition": "planning→implementing", "issueNumber": 42 }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      expect(isBridgeRequest(requests[0]!)).toBe(true);
-      if (requests[0]!.request === "gate-ack") {
-        expect(requests[0]!.issueNumber).toBe(42);
-      }
-    });
-  });
-
   describe("nothing-to-do requests from Ship", () => {
     it("parses nothing-to-do with reason", () => {
       const text = `\`\`\`admiral-request
@@ -199,24 +138,12 @@ That should do it.`;
     });
   });
 
-  describe("escort-registered requests", () => {
-    it("parses escort-registered with agentId", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "escort-registered", "shipId": "ship-1", "agentId": "agent-abc" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      expect(isBridgeRequest(requests[0]!)).toBe(true);
-    });
-  });
-
   describe("multiple requests in a single message", () => {
     it("extracts multiple requests from one text block", () => {
       const text = `Here are my actions:
 
 \`\`\`admiral-request
-{ "request": "gate-ack", "shipId": "abc", "transition": "planning→implementing" }
+{ "request": "ship-stop", "shipId": "abc" }
 \`\`\`
 
 And also:
@@ -227,7 +154,7 @@ And also:
 
       const requests = extractRequests(text);
       expect(requests).toHaveLength(2);
-      expect(requests[0]!.request).toBe("gate-ack");
+      expect(requests[0]!.request).toBe("ship-stop");
       expect(requests[1]!.request).toBe("ship-status");
     });
 
@@ -313,9 +240,7 @@ Goodbye`;
         `{ "request": "ship-status" }`,
         `{ "request": "ship-stop", "shipId": "x" }`,
         `{ "request": "ship-resume", "shipId": "x" }`,
-        `{ "request": "gate-result", "shipId": "x", "transition": "planning→implementing", "verdict": "approve" }`,
-        `{ "request": "gate-ack", "shipId": "x", "transition": "planning→implementing" }`,
-        `{ "request": "escort-registered", "shipId": "x", "agentId": "a" }`,
+        `{ "request": "pr-review-result", "shipId": "x", "prNumber": 1, "verdict": "approve" }`,
       ];
 
       for (const json of bridgeTypes) {

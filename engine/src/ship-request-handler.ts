@@ -1,4 +1,5 @@
 import type { ShipManager } from "./ship-manager.js";
+import type { FleetDatabase } from "./db.js";
 import type {
   ShipRequest,
   Phase,
@@ -7,7 +8,7 @@ import type {
   FleetGateSettings,
 } from "./types.js";
 import { PHASE_ORDER, GATE_PREV_PHASE, GATE_NEXT_PHASE, isGatePhase } from "./types.js";
-import { resolveGateType, getNextPhaseAfterGate } from "./gate-config.js";
+import { resolveGateType } from "./gate-config.js";
 import * as github from "./github.js";
 
 /** Simple ok/error response for admiral requests. */
@@ -18,8 +19,9 @@ export interface AdmiralRequestResponse {
 
 /**
  * Extended response that indicates whether a gate check was triggered.
- * When `gate` is set, the caller should initiate the gate check flow
+ * When `gate` is set, the caller should set gate state on the Ship
  * and write the response to the DB via fleetDb.insertMessage().
+ * The Ship is responsible for launching its own Escort sub-agent.
  */
 export interface StatusTransitionResult extends AdmiralRequestResponse {
   gate?: {
@@ -52,6 +54,10 @@ function findGatePhaseForWorkPhase(currentPhase: Phase): GatePhase | undefined {
  * - `status-transition`: Phase-model transition —
  *   Ship requests a target work phase, Engine determines if a gate phase
  *   is needed first, checks gate settings/state, and advances accordingly.
+ *   When a gate is required, the Ship handles it autonomously by launching
+ *   an Escort sub-agent. The Escort writes gate-response to the DB.
+ *   On re-request, the Engine checks the DB for gate-response to determine
+ *   if the gate was approved.
  * - `nothing-to-do`: Ship determined there is no work to do —
  *   posts a comment on the issue, closes it, and marks the Ship as done.
  *
@@ -60,9 +66,14 @@ function findGatePhaseForWorkPhase(currentPhase: Phase): GatePhase | undefined {
  */
 export class ShipRequestHandler {
   private shipManager: ShipManager;
+  private fleetDb: FleetDatabase | null = null;
 
   constructor(shipManager: ShipManager) {
     this.shipManager = shipManager;
+  }
+
+  setDatabase(db: FleetDatabase): void {
+    this.fleetDb = db;
   }
 
   /**
@@ -97,11 +108,12 @@ export class ShipRequestHandler {
    *    - acceptance-test → acceptance-test-gate (to go to merging)
    * 3. Check if gate is enabled for that gate phase via resolveGateType()
    * 4. If gate enabled:
-   *    - Check if ship is already in the gate phase:
-   *      - approved: advance to target work phase
-   *      - pending: return "waiting for approval"
-   *      - rejected: clear, return gate info for re-initiation
-   *    - If not in gate phase yet: return gate info for initiation
+   *    - Check if ship has a pending gateCheck:
+   *      - Check DB for gate-response from Ship's Escort
+   *      - If approved: clear gate, advance
+   *      - If rejected: clear, return gate info for re-initiation
+   *      - If no response: return "waiting"
+   *    - If no gateCheck: return gate info for initiation
    * 5. If gate disabled: advance directly to target work phase
    * 6. For "done": handle directly (terminal state)
    * 7. Label sync is non-blocking (failure doesn't block phase transition)
@@ -170,32 +182,38 @@ export class ShipRequestHandler {
       }
 
       if (gateType) {
-        // Check if ship is already in this gate phase (has an active gateCheck)
+        // Check if ship has a pending gateCheck
         if (ship.gateCheck?.gatePhase === gatePhase) {
-          if (ship.gateCheck.status === "approved") {
-            // Gate was approved — clear and proceed to target work phase
-            this.shipManager.clearGateCheck(shipId);
-            // Fall through to advance below
-          } else if (ship.gateCheck.status === "pending") {
-            // Gate is still pending — tell Ship to wait
-            return {
-              ok: false,
-              error: `Gate check pending for ${gatePhase}. Waiting for Bridge approval.`,
-            };
-          } else if (ship.gateCheck.status === "rejected") {
-            // Gate was rejected — capture feedback, clear, return gate info for re-initiation
-            const prevFeedback = ship.gateCheck.feedback;
-            this.shipManager.clearGateCheck(shipId);
-            return {
-              ok: false,
-              gate: {
-                type: gateType,
-                gatePhase,
-                targetPhase,
-                previousFeedback: prevFeedback,
-              },
-              error: `Gate check required for ${gatePhase}. Initiating review.`,
-            };
+          // Check DB for gate-response written by Ship's Escort
+          const gateResponse = this.checkDbForGateResponse(shipId);
+
+          if (gateResponse) {
+            if (gateResponse.approved) {
+              // Gate approved — clear and advance
+              this.shipManager.clearGateCheck(shipId);
+              // Fall through to advance below
+            } else {
+              // Gate rejected — capture feedback, clear, return gate info for re-initiation
+              this.shipManager.clearGateCheck(shipId);
+              return {
+                ok: false,
+                gate: {
+                  type: gateType,
+                  gatePhase,
+                  targetPhase,
+                  previousFeedback: gateResponse.feedback,
+                },
+                error: `Gate check required for ${gatePhase}. Initiating review.`,
+              };
+            }
+          } else {
+            // No gate-response yet — tell Ship to wait or launch Escort
+            if (ship.gateCheck.status === "pending") {
+              return {
+                ok: false,
+                error: `Gate check pending for ${gatePhase}. Launch Escort sub-agent if not already running.`,
+              };
+            }
           }
         } else {
           // Not in gate phase yet — return gate info for initiation
@@ -212,6 +230,32 @@ export class ShipRequestHandler {
     // Per-phase labels abolished — only status/sortied exists (set at sortie time)
     this.shipManager.updatePhase(shipId, targetPhase);
     return { ok: true };
+  }
+
+  /**
+   * Check the DB for an unread gate-response message for a Ship.
+   * Returns the parsed payload if found (and marks it as read), null otherwise.
+   */
+  private checkDbForGateResponse(
+    shipId: string,
+  ): { approved: boolean; feedback?: string; gatePhase?: string } | null {
+    if (!this.fleetDb) return null;
+
+    const messages = this.fleetDb.getUnreadMessages(shipId, "gate-response");
+    if (messages.length === 0) return null;
+
+    // Use the latest gate-response
+    const latest = messages[messages.length - 1]!;
+    // Mark all gate-response messages as read
+    for (const msg of messages) {
+      this.fleetDb.markMessageRead(msg.id);
+    }
+
+    try {
+      return JSON.parse(latest.payload) as { approved: boolean; feedback?: string; gatePhase?: string };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -255,28 +299,6 @@ export class ShipRequestHandler {
     this.shipManager.setNothingToDo(shipId, reason);
     this.shipManager.updatePhase(shipId, "done");
 
-    return { ok: true };
-  }
-
-  /**
-   * Execute a transition that was previously gated and is now approved.
-   * Called by the gate result handler after Bridge approves.
-   *
-   * Advances from gate phase to the next work phase.
-   * Label sync is non-blocking (try/catch, warn on failure, don't block).
-   */
-  async executeGatedTransition(
-    shipId: string,
-    gatePhase: GatePhase,
-  ): Promise<AdmiralRequestResponse> {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) {
-      return { ok: false, error: `Ship ${shipId} not found` };
-    }
-
-    const targetPhase = getNextPhaseAfterGate(gatePhase);
-
-    this.shipManager.updatePhase(shipId, targetPhase);
     return { ok: true };
   }
 

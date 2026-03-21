@@ -118,10 +118,12 @@ while true; do
 done
 ```
 
-Gate 発動時は DB で Gate 応答をポーリング:
+応答に `gate` フィールドが含まれる場合、Ship 自身が Escort (sub-agent) を起動して playwright テストを実施する。
+
+Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得:
 
 ```bash
-echo "Gate check initiated. Waiting for Bridge approval..."
+echo "Waiting for Escort gate review..."
 while true; do
   ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
   if [ -n "$ROW" ]; then
@@ -133,7 +135,15 @@ while true; do
 done
 ```
 
-Gate 承認後、マージを実行:
+Gate 承認後、再度 `status-transition` を表明して Engine に gate 完了を通知:
+
+````
+```admiral-request
+{ "request": "status-transition", "status": "merging" }
+```
+````
+
+Engine からの `{ok: true}` 応答を DB でポーリングして確認後、マージを実行:
 
 ```bash
 gh pr merge "$PR_NUM" --squash

@@ -12,19 +12,15 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test issue",
-    status: "planning",
+    phase: "planning",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/repo/.worktrees/feature/42-test",
     sessionId: null,
     prUrl: null,
     prReviewStatus: null,
-    acceptanceTest: null,
-    acceptanceTestApproved: false,
     gateCheck: null,
     qaRequired: true,
-    escortAgentId: null,
-    errorType: null,
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
@@ -81,12 +77,12 @@ describe("FleetDatabase", () => {
       const ship = makeShip();
       db.upsertShip(ship);
 
-      const updated = makeShip({ status: "implementing", issueTitle: "Updated" });
+      const updated = makeShip({ phase: "implementing", issueTitle: "Updated" });
       db.upsertShip(updated);
 
       const ships = db.getActiveShips();
       expect(ships).toHaveLength(1);
-      expect(ships[0]!.status).toBe("implementing");
+      expect(ships[0]!.phase).toBe("implementing");
       expect(ships[0]!.issueTitle).toBe("Updated");
     });
 
@@ -101,10 +97,10 @@ describe("FleetDatabase", () => {
 
   describe("getActiveShips", () => {
     it("returns only non-terminal ships", () => {
-      db.upsertShip(makeShip({ id: "s1", status: "planning" }));
-      db.upsertShip(makeShip({ id: "s2", issueNumber: 43, status: "done", completedAt: Date.now() }));
-      db.upsertShip(makeShip({ id: "s3", issueNumber: 44, status: "implementing" }));
-      db.upsertShip(makeShip({ id: "s4", issueNumber: 45, status: "error", completedAt: Date.now() }));
+      db.upsertShip(makeShip({ id: "s1", phase: "planning" }));
+      db.upsertShip(makeShip({ id: "s2", issueNumber: 43, phase: "done", completedAt: Date.now() }));
+      db.upsertShip(makeShip({ id: "s3", issueNumber: 44, phase: "implementing" }));
+      db.upsertShip(makeShip({ id: "s4", issueNumber: 45, phase: "done", processDead: true, completedAt: Date.now() }));
 
       const active = db.getActiveShips();
       expect(active).toHaveLength(2);
@@ -113,7 +109,7 @@ describe("FleetDatabase", () => {
     });
 
     it("returns empty array when no active ships", () => {
-      db.upsertShip(makeShip({ status: "done", completedAt: Date.now() }));
+      db.upsertShip(makeShip({ phase: "done", completedAt: Date.now() }));
       expect(db.getActiveShips()).toHaveLength(0);
     });
 
@@ -124,19 +120,19 @@ describe("FleetDatabase", () => {
     });
   });
 
-  describe("updateShipStatus", () => {
-    it("updates status for an existing ship", () => {
+  describe("updateShipPhase", () => {
+    it("updates phase for an existing ship", () => {
       db.upsertShip(makeShip());
-      db.updateShipStatus("ship-001", "implementing");
+      db.updateShipPhase("ship-001", "implementing");
 
       const ships = db.getActiveShips();
-      expect(ships[0]!.status).toBe("implementing");
+      expect(ships[0]!.phase).toBe("implementing");
     });
 
-    it("sets completedAt for terminal statuses", () => {
+    it("sets completedAt for terminal phases", () => {
       db.upsertShip(makeShip());
       const now = Date.now();
-      db.updateShipStatus("ship-001", "done", now);
+      db.updateShipPhase("ship-001", "done", now);
 
       // Ship is in terminal state, so getActiveShips won't return it
       // Verify by checking that active list is empty
@@ -187,10 +183,10 @@ describe("FleetDatabase", () => {
   });
 
   describe("purgeTerminalShips", () => {
-    it("removes ships in done and error states", () => {
-      db.upsertShip(makeShip({ id: "s1", status: "planning" }));
-      db.upsertShip(makeShip({ id: "s2", issueNumber: 43, status: "done", completedAt: Date.now() }));
-      db.upsertShip(makeShip({ id: "s3", issueNumber: 44, status: "error", completedAt: Date.now() }));
+    it("removes ships in done phase", () => {
+      db.upsertShip(makeShip({ id: "s1", phase: "planning" }));
+      db.upsertShip(makeShip({ id: "s2", issueNumber: 43, phase: "done", completedAt: Date.now() }));
+      db.upsertShip(makeShip({ id: "s3", issueNumber: 44, phase: "done", processDead: true, completedAt: Date.now() }));
 
       const purged = db.purgeTerminalShips();
       expect(purged).toBe(2);

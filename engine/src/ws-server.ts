@@ -29,7 +29,7 @@ import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipProcess, ShipRequest, GatePhase, GateType } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipRequest } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -48,17 +48,12 @@ export class EngineServer {
   private clients = new Set<WebSocket>();
   private launchingBridges = new Set<string>();
   private bridgeFirstData = new Set<string>();
-  private gateReminderTimer: ReturnType<typeof setInterval> | null = null;
   private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private processLivenessTimer: ReturnType<typeof setInterval> | null = null;
   /** Per-ship mutex to serialize executeShipRequests() calls. */
   private shipRequestLocks = new Map<string, Promise<void>>();
-  /** Maps task toolUseId to shipId for dispatch-log routing. */
-  private bridgeActiveTasks = new Map<string, string>();
   private fleetDb: FleetDatabase | null = null;
 
-  /** Interval after which a pending gate check triggers a reminder to Bridge (ms). */
-  private static readonly GATE_REMINDER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   /** Unanswered Bridge questions auto-answered after this duration (ms). */
   private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -75,21 +70,11 @@ export class EngineServer {
     this.shipRequestHandler = new ShipRequestHandler(this.shipManager);
     this.lookout = new Lookout(this.shipManager, this.processManager);
 
-    // Wire up cross-handler references for gate flow
-    this.requestHandler.setShipRequestHandler(this.shipRequestHandler);
-    this.requestHandler.setGateApprovedHandler((shipId, gatePhase) => {
-      this.onGateApproved(shipId, gatePhase);
-    });
-    this.requestHandler.setGateRejectedHandler((shipId, gatePhase, feedback) => {
-      this.onGateRejected(shipId, gatePhase, feedback);
-    });
-
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
     this.setupProcessEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
-    this.startGateReminderScanner();
     this.startQuestionTimeoutScanner();
     this.setupLookout();
     this.startProcessLivenessCheck();
@@ -178,49 +163,6 @@ export class EngineServer {
               type: "bridge:question",
               data: { fleetId, message: questionMessage },
             });
-          // Track Task execution to associate sub-agent logs with a Ship
-          } else if (parsed.type === "tool_use" && parsed.tool === "Task") {
-            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
-            const prompt = toolInput?.prompt as string | undefined;
-            const toolUseId = parsed.toolUseId as string | undefined;
-            if (prompt && toolUseId) {
-              const shipIdMatch = prompt.match(/Ship ID: ([a-f0-9-]{36})/i);
-              if (shipIdMatch?.[1]) {
-                this.bridgeActiveTasks.set(toolUseId, shipIdMatch[1]);
-              }
-            }
-            // Normal bridge broadcast
-            this.bridgeManager.addToHistory(fleetId, parsed);
-            this.broadcast({
-              type: "bridge:stream",
-              data: { fleetId, message: parsed },
-            });
-          // Route sub-agent (Escort/Dispatch) chat logs to the targeted Ship
-          } else if (parsed.subtype === "dispatch-log") {
-            const toolUseId = msg.task_id as string | undefined;
-            const shipId = toolUseId ? this.bridgeActiveTasks.get(toolUseId) : undefined;
-            if (shipId) {
-              const ship = this.shipManager.getShip(shipId);
-              if (ship) {
-                // Use "escort-log" category when this Ship has a registered Escort
-                const logCategory = ship.escortAgentId ? "escort-log" as const : "dispatch-log" as const;
-                const logMessage = {
-                  ...parsed,
-                  meta: { ...parsed.meta, category: logCategory, shipId },
-                };
-                this.logShipMessage(shipId, logMessage);
-                this.broadcast({
-                  type: "ship:stream",
-                  data: { id: shipId, message: logMessage },
-                });
-              }
-            }
-            // Also show in Bridge chat
-            this.bridgeManager.addToHistory(fleetId, parsed);
-            this.broadcast({
-              type: "bridge:stream",
-              data: { fleetId, message: parsed },
-            });
           // Check for admiral-request blocks in assistant text
           } else if (parsed.type === "assistant" && parsed.content) {
             const allRequests = extractRequests(parsed.content);
@@ -243,13 +185,6 @@ export class EngineServer {
               const bridgeId = `bridge-${fleetId}`;
               this.executeRequestsSequentially(fleetId, bridgeId, requests);
             }
-          } else if (parsed.type === "result") {
-            // Task completion — clean up active task tracking
-            const toolUseId = msg.task_id as string | undefined;
-            if (toolUseId) {
-              this.bridgeActiveTasks.delete(toolUseId);
-            }
-            // Do NOT broadcast: result messages duplicate the preceding assistant text
           } else if (parsed.type !== "result") {
             // Non-assistant or no content — pass through normally
             // Skip "result" messages: they duplicate the preceding "assistant" text
@@ -1027,25 +962,77 @@ export class EngineServer {
     const fleet = fleets.find((f) => f.id === ship.fleetId);
 
     for (const request of requests) {
+      // Capture pre-request gate state to detect gate resolution
+      const preGateCheck = ship.gateCheck;
+
       const response: StatusTransitionResult = await this.shipRequestHandler.handle(shipId, request, fleet?.gates);
 
       if (response.gate) {
-        // Gate check required — initiate gate flow instead of writing response
-        const planCommentUrl = request.request === "status-transition" ? request.planCommentUrl : undefined;
-        await this.initiateGateCheck(shipId, response.gate.type, response.gate.gatePhase, planCommentUrl, response.gate.previousFeedback);
-        // Write a "pending" response to DB so Ship knows to wait
+        // Gate check required — set gate state and tell Ship to handle it
+        this.shipManager.setGateCheck(shipId, response.gate.gatePhase, response.gate.type);
+
+        // Notify frontend of pending gate
+        this.broadcast({
+          type: "ship:gate-pending",
+          data: {
+            id: shipId,
+            gatePhase: response.gate.gatePhase,
+            gateType: response.gate.type,
+            fleetId: ship.fleetId,
+            issueNumber: ship.issueNumber,
+            issueTitle: ship.issueTitle,
+          },
+        });
+
+        // Inject gate notification into Bridge chat (informational only)
+        const bridgeMsg = {
+          type: "system" as const,
+          subtype: "gate-check-request" as const,
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${response.gate.gatePhase} gate pending — Ship will handle review autonomously`,
+          meta: {
+            category: "gate-check-request" as const,
+            issueNumber: ship.issueNumber,
+            issueTitle: ship.issueTitle,
+            gatePhase: response.gate.gatePhase,
+            gateType: response.gate.type,
+          },
+        };
+        this.bridgeManager.addToHistory(ship.fleetId, bridgeMsg);
+        this.broadcast({
+          type: "bridge:stream",
+          data: { fleetId: ship.fleetId, message: bridgeMsg },
+        });
+
+        // Write response to DB so Ship knows to launch its own Escort
         this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", {
           ok: false,
-          error: `Gate check initiated for ${response.gate.gatePhase}. Poll DB for gate-response.`,
+          gate: {
+            type: response.gate.type,
+            gatePhase: response.gate.gatePhase,
+            previousFeedback: response.gate.previousFeedback,
+          },
+          error: `Gate check required for ${response.gate.gatePhase}. Launch Escort sub-agent.`,
         });
         console.log(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check initiated: ${response.gate.gatePhase} (${response.gate.type})`,
+          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check required: ${response.gate.gatePhase} (${response.gate.type}) — Ship will handle`,
         );
       } else {
         // Write response to DB so Ship CLI can poll for the result
         this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", response as unknown as Record<string, unknown>);
 
         if (response.ok) {
+          // If a gate was previously pending and now resolved, broadcast gate-resolved
+          if (preGateCheck && preGateCheck.status === "pending" && !ship.gateCheck) {
+            this.broadcast({
+              type: "ship:gate-resolved",
+              data: {
+                id: shipId,
+                gatePhase: preGateCheck.gatePhase,
+                gateType: preGateCheck.gateType,
+                approved: true,
+              },
+            });
+          }
           console.log(
             `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
           );
@@ -1055,181 +1042,6 @@ export class EngineServer {
           );
         }
       }
-    }
-  }
-
-  private async initiateGateCheck(
-    shipId: string,
-    gateType: GateType,
-    gatePhase: GatePhase,
-    planCommentUrl?: string,
-    previousFeedback?: string,
-  ): Promise<void> {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    // Dedup guard: skip if a pending gate already exists for this gate phase
-    if (ship.gateCheck?.gatePhase === gatePhase && ship.gateCheck.status === "pending") {
-      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${gatePhase} — skipping duplicate`);
-      return;
-    }
-
-    // For code-review gates, ensure PR URL is available.
-    // If detectPRCreation() hasn't captured it yet, fall back to `gh pr list`.
-    if (gateType === "code-review" && !ship.prUrl && ship.branchName) {
-      try {
-        const { stdout } = await execFileAsync("gh", [
-          "pr", "list",
-          "--head", ship.branchName,
-          "--repo", ship.repo,
-          "--json", "number,url",
-          "--jq", ".[0]",
-        ]);
-        const trimmed = stdout.trim();
-        if (trimmed) {
-          const pr = JSON.parse(trimmed) as { number: number; url: string };
-          ship.prUrl = pr.url;
-          ship.prReviewStatus = "pending";
-          console.log(
-            `[ws-server] Ship ${shipId.slice(0, 8)}... PR URL resolved via fallback: ${pr.url}`,
-          );
-        }
-      } catch {
-        // gh pr list failed — proceed with "not yet created"
-      }
-    }
-
-
-    // Set gate check state on the ship
-    this.shipManager.setGateCheck(shipId, gatePhase, gateType);
-
-    // Notify frontend
-    this.broadcast({
-      type: "ship:gate-pending",
-      data: {
-        id: shipId,
-        gatePhase,
-        gateType,
-        fleetId: ship.fleetId,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-      },
-    });
-
-    // Build gate check message for Bridge
-    const gateMessage = this.buildGateCheckMessage(ship, gatePhase, gateType, planCommentUrl, previousFeedback);
-
-    // Inject into Bridge chat
-    const bridgeMsg = {
-      type: "system" as const,
-      subtype: "gate-check-request" as const,
-      content: gateMessage,
-      meta: {
-        category: "gate-check-request" as const,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-        gatePhase,
-        gateType,
-      },
-    };
-    this.bridgeManager.addToHistory(ship.fleetId, bridgeMsg);
-    this.broadcast({
-      type: "bridge:stream",
-      data: { fleetId: ship.fleetId, message: bridgeMsg },
-    });
-
-    // Send to Bridge stdin
-    const bridgeId = `bridge-${ship.fleetId}`;
-    this.processManager.sendMessage(bridgeId, gateMessage);
-  }
-
-  private buildGateCheckMessage(
-    ship: ShipProcess,
-    gatePhase: GatePhase,
-    gateType: GateType,
-    planCommentUrl?: string,
-    previousFeedback?: string,
-  ): string {
-    const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${gatePhase}`;
-    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}\nWorktree: ${ship.worktreePath}\nShip log: ${ship.worktreePath}/.claude/ship-log.jsonl`;
-    const escortLine = ship.escortAgentId
-      ? `\nEscort agent ID: ${ship.escortAgentId}`
-      : "";
-    const retryNote = previousFeedback
-      ? `\n\n⚠️ RETRY: This is a re-review after a previous rejection. The Ship claims to have addressed the following feedback:\n> ${previousFeedback}\nVerify that the previous issues have been fixed. Check GitHub (issue comments or PR reviews) for the full history of prior reviews.`
-      : "";
-
-    const escortInstruction = ship.escortAgentId
-      ? `Resume the Escort (sub-agent) using Task(resume="${ship.escortAgentId}") to preserve context from previous reviews. The Escort must record on GitHub and output the gate-result admiral-request block.`
-      : `Launch a new Escort (sub-agent) via Task tool. The Escort must output an escort-registered admiral-request block with its agentId, then record on GitHub and output the gate-result admiral-request block.`;
-
-    switch (gateType) {
-      case "plan-review": {
-        const planRef = planCommentUrl
-          ? `\nPlan comment: ${planCommentUrl}`
-          : "";
-        return `${header}\n${meta}${escortLine}${planRef}${retryNote}\n\n${escortInstruction}`;
-      }
-      case "code-review":
-        return `${header}\n${meta}${escortLine}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\n${escortInstruction}`;
-      case "playwright":
-        return `${header}\n${meta}${escortLine}${retryNote}\n\n${escortInstruction}`;
-    }
-  }
-
-  private onGateApproved(shipId: string, gatePhase: GatePhase): void {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    // Resolve gate type for the notification
-    const gateType = ship.gateCheck?.gateType ?? "code-review";
-
-    // Notify frontend that gate was approved
-    this.broadcast({
-      type: "ship:gate-resolved",
-      data: {
-        id: shipId,
-        gatePhase,
-        gateType,
-        approved: true,
-      },
-    });
-
-    // Write gate-response to DB so Ship can poll it
-    if (this.fleetDb) {
-      this.fleetDb.insertMessage(shipId, "gate-response", "engine", {
-        approved: true,
-        gatePhase,
-      });
-    }
-  }
-
-  private onGateRejected(shipId: string, gatePhase: GatePhase, feedback?: string): void {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    // Resolve gate type for the notification
-    const gateType = ship.gateCheck?.gateType ?? "code-review";
-
-    // Notify frontend that gate was rejected
-    this.broadcast({
-      type: "ship:gate-resolved",
-      data: {
-        id: shipId,
-        gatePhase,
-        gateType,
-        approved: false,
-        feedback,
-      },
-    });
-
-    // Write gate-response to DB so Ship can poll it
-    if (this.fleetDb) {
-      this.fleetDb.insertMessage(shipId, "gate-response", "engine", {
-        approved: false,
-        feedback,
-        gatePhase,
-      });
     }
   }
 
@@ -1250,6 +1062,7 @@ export class EngineServer {
       const dbDir = join(process.env.HOME ?? homedir(), ".vibe-admiral");
       this.fleetDb = await initFleetDatabase(dbDir);
       this.shipManager.setDatabase(this.fleetDb);
+      this.shipRequestHandler.setDatabase(this.fleetDb);
       console.log("[engine] Fleet database initialized");
     } catch (err) {
       console.warn("[engine] Failed to initialize fleet database:", err);
@@ -1387,15 +1200,6 @@ export class EngineServer {
     return parts.join("\n\n");
   }
 
-  private startGateReminderScanner(): void {
-    // Scan every 30 seconds for gate checks needing a reminder
-    this.gateReminderTimer = setInterval(() => {
-      this.scanGateReminders();
-    }, 30_000);
-    // Allow Node to exit even if the timer is still running
-    this.gateReminderTimer.unref();
-  }
-
   private startQuestionTimeoutScanner(): void {
     this.questionTimeoutTimer = setInterval(() => {
       this.scanQuestionTimeouts();
@@ -1455,43 +1259,6 @@ export class EngineServer {
     }
   }
 
-  private scanGateReminders(): void {
-    const now = Date.now();
-
-    for (const ship of this.shipManager.getAllShips()) {
-      if (
-        ship.gateCheck &&
-        ship.gateCheck.status === "pending"
-      ) {
-        // Use the later of acknowledgedAt or lastRemindedAt as the base,
-        // falling back to requestedAt for brand-new gates
-        const reminderBase = ship.gateCheck.lastRemindedAt
-          ?? ship.gateCheck.acknowledgedAt
-          ?? ship.gateCheck.requestedAt;
-        if (now - new Date(reminderBase).getTime() <= EngineServer.GATE_REMINDER_INTERVAL_MS) continue;
-
-        const gatePhase = ship.gateCheck.gatePhase;
-        console.log(
-          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... pending (${gatePhase}). Sending reminder to Bridge.`,
-        );
-
-        // Update lastRemindedAt to avoid spamming
-        ship.gateCheck.lastRemindedAt = new Date().toISOString();
-
-        // Re-send the gate check message to Bridge as a reminder
-        const gateMessage = this.buildGateCheckMessage(
-          ship,
-          gatePhase,
-          ship.gateCheck.gateType,
-          undefined,
-          ship.gateCheck.feedback,
-        );
-        const bridgeId = `bridge-${ship.fleetId}`;
-        this.processManager.sendMessage(bridgeId, `[REMINDER] ${gateMessage}`);
-      }
-    }
-  }
-
   private startProcessLivenessCheck(): void {
     this.processLivenessTimer = setInterval(() => {
       for (const ship of this.shipManager.getAllShips()) {
@@ -1506,10 +1273,6 @@ export class EngineServer {
   }
 
   shutdown(): void {
-    if (this.gateReminderTimer) {
-      clearInterval(this.gateReminderTimer);
-      this.gateReminderTimer = null;
-    }
     if (this.questionTimeoutTimer) {
       clearInterval(this.questionTimeoutTimer);
       this.questionTimeoutTimer = null;

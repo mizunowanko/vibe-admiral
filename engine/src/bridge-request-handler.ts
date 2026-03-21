@@ -1,38 +1,14 @@
 import type { ShipManager } from "./ship-manager.js";
-import type { ShipRequestHandler } from "./ship-request-handler.js";
 import type { StateSync } from "./state-sync.js";
-import type { BridgeRequest, FleetRepo, FleetSkillSources, GatePhase, ShipProcess } from "./types.js";
+import type { BridgeRequest, FleetRepo, FleetSkillSources, ShipProcess } from "./types.js";
 
 export class BridgeRequestHandler {
   private shipManager: ShipManager;
   private stateSync: StateSync;
-  private shipRequestHandler: ShipRequestHandler | null = null;
-  private onGateApproved:
-    | ((shipId: string, gatePhase: GatePhase) => void)
-    | null = null;
-  private onGateRejected:
-    | ((shipId: string, gatePhase: GatePhase, feedback?: string) => void)
-    | null = null;
 
   constructor(shipManager: ShipManager, stateSync: StateSync) {
     this.shipManager = shipManager;
     this.stateSync = stateSync;
-  }
-
-  setShipRequestHandler(handler: ShipRequestHandler): void {
-    this.shipRequestHandler = handler;
-  }
-
-  setGateApprovedHandler(
-    handler: (shipId: string, gatePhase: GatePhase) => void,
-  ): void {
-    this.onGateApproved = handler;
-  }
-
-  setGateRejectedHandler(
-    handler: (shipId: string, gatePhase: GatePhase, feedback?: string) => void,
-  ): void {
-    this.onGateRejected = handler;
   }
 
   async handle(
@@ -55,12 +31,6 @@ export class BridgeRequestHandler {
         return this.handleShipResume(request, shipExtraPrompt);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
-      case "gate-result":
-        return this.handleGateResult(request);
-      case "gate-ack":
-        return this.handleGateAck(request);
-      case "escort-registered":
-        return this.handleEscortRegistered(request);
     }
   }
 
@@ -212,81 +182,4 @@ export class BridgeRequestHandler {
     return `[PR Review Result] Ship #${ship.issueNumber} PR #${request.prNumber}: ${label}${request.comments ? ` — ${request.comments}` : ""}`;
   }
 
-  private handleGateAck(
-    request: Extract<BridgeRequest, { request: "gate-ack" }>,
-  ): string {
-    const ship = this.shipManager.resolveShip(request.shipId, request.issueNumber);
-    if (!ship) {
-      return `[Gate ACK Failed] Ship ${request.shipId} not found`;
-    }
-
-    if (!ship.gateCheck || ship.gateCheck.gatePhase !== request.gatePhase) {
-      return `[Gate ACK Failed] Ship #${ship.issueNumber} has no pending gate for ${request.gatePhase}`;
-    }
-
-    if (ship.gateCheck.status !== "pending") {
-      return `[Gate ACK Failed] Ship #${ship.issueNumber} gate for ${request.gatePhase} is already ${ship.gateCheck.status}`;
-    }
-
-    ship.gateCheck.acknowledgedAt = new Date().toISOString();
-    console.log(
-      `[bridge-request] Gate ACK received for Ship #${ship.issueNumber}: ${request.gatePhase} — acknowledged`,
-    );
-    return `[Gate ACK] Ship #${ship.issueNumber}: ${request.gatePhase} acknowledged`;
-  }
-
-  private handleEscortRegistered(
-    request: Extract<BridgeRequest, { request: "escort-registered" }>,
-  ): string {
-    const ship = this.shipManager.resolveShip(request.shipId, request.issueNumber);
-    if (!ship) {
-      return `[Escort Registration Failed] Ship ${request.shipId} not found`;
-    }
-
-    this.shipManager.setEscortAgentId(ship.id, request.agentId);
-    return `[Escort Registered] Ship #${ship.issueNumber}: agent ${request.agentId}`;
-  }
-
-  private async handleGateResult(
-    request: Extract<BridgeRequest, { request: "gate-result" }>,
-  ): Promise<string> {
-    const ship = this.shipManager.resolveShip(request.shipId, request.issueNumber);
-    if (!ship) {
-      return `[Gate Result Failed] Ship ${request.shipId} not found`;
-    }
-
-    if (!ship.gateCheck || ship.gateCheck.gatePhase !== request.gatePhase) {
-      return `[Gate Result Failed] Ship #${ship.issueNumber} has no pending gate for ${request.gatePhase}`;
-    }
-
-    if (ship.gateCheck.status !== "pending") {
-      return `[Gate Result Failed] Ship #${ship.issueNumber} gate for ${request.gatePhase} is already ${ship.gateCheck.status}`;
-    }
-
-    const approved = request.verdict === "approve";
-
-    if (approved) {
-      ship.gateCheck.status = "approved";
-      // Execute the gated transition
-      if (this.shipRequestHandler) {
-        const result = await this.shipRequestHandler.executeGatedTransition(
-          ship.id,
-          request.gatePhase,
-        );
-        if (result.ok) {
-          this.shipManager.clearGateCheck(ship.id);
-          this.onGateApproved?.(ship.id, request.gatePhase);
-          return `[Gate Approved] Ship #${ship.issueNumber}: ${request.gatePhase} — transition confirmed`;
-        }
-        return `[Gate Approved but Transition Failed] Ship #${ship.issueNumber}: ${result.error}`;
-      }
-      this.onGateApproved?.(ship.id, request.gatePhase);
-      return `[Gate Approved] Ship #${ship.issueNumber}: ${request.gatePhase}`;
-    } else {
-      ship.gateCheck.status = "rejected";
-      ship.gateCheck.feedback = request.feedback;
-      this.onGateRejected?.(ship.id, request.gatePhase, request.feedback);
-      return `[Gate Rejected] Ship #${ship.issueNumber}: ${request.gatePhase}${request.feedback ? ` — ${request.feedback}` : ""}`;
-    }
-  }
 }

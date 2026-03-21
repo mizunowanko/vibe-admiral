@@ -73,8 +73,6 @@ export interface Ship {
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
   gateCheck: GateCheckState | null;
-  /** Agent ID of the persistent Escort sub-agent for this Ship's gate checks. */
-  escortAgentId: string | null;
   retryCount: number;
   nothingToDo?: boolean;
   nothingToDoReason?: string;
@@ -100,8 +98,7 @@ export type StreamMessageSubtype =
   | "gate-check-request"
   | "lookout-alert"
   | "task-notification"
-  | "dispatch-log"
-  | "escort-log";
+  | "dispatch-log";
 
 // === Lookout ===
 export type LookoutAlertType =

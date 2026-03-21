@@ -1,17 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ShipRequestHandler } from "../ship-request-handler.js";
+import type { FleetDatabase } from "../db.js";
 import type { ShipProcess, FleetGateSettings } from "../types.js";
 
 // Minimal mock types
 type MockShipManager = {
   getShip: ReturnType<typeof vi.fn>;
-  updateStatus: ReturnType<typeof vi.fn>;
+  updatePhase: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
   setQaRequired: ReturnType<typeof vi.fn>;
-};
-
-type MockStatusManager = {
-  syncPhaseLabel: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
@@ -21,19 +18,15 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test",
-    status: "planning",
+    phase: "planning",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/tmp/worktree",
     sessionId: null,
     prUrl: null,
     prReviewStatus: null,
-    acceptanceTest: null,
-    acceptanceTestApproved: false,
     gateCheck: null,
     qaRequired: true,
-    escortAgentId: null,
-    errorType: null,
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
@@ -44,21 +37,16 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
 describe("ShipRequestHandler", () => {
   let handler: ShipRequestHandler;
   let mockShipManager: MockShipManager;
-  let mockStatusManager: MockStatusManager;
 
   beforeEach(() => {
     mockShipManager = {
       getShip: vi.fn(),
-      updateStatus: vi.fn(),
+      updatePhase: vi.fn(),
       clearGateCheck: vi.fn(),
       setQaRequired: vi.fn(),
     };
-    mockStatusManager = {
-      syncPhaseLabel: vi.fn(),
-    };
     handler = new ShipRequestHandler(
       mockShipManager as unknown as ConstructorParameters<typeof ShipRequestHandler>[0],
-      mockStatusManager as unknown as ConstructorParameters<typeof ShipRequestHandler>[1],
     );
   });
 
@@ -76,17 +64,16 @@ describe("ShipRequestHandler", () => {
     });
 
     it("handles 'done' as a terminal state", async () => {
-      mockShipManager.getShip.mockReturnValue(makeShip({ status: "merging" }));
+      mockShipManager.getShip.mockReturnValue(makeShip({ phase: "merging" }));
       const result = await handler.handle("ship-1", {
         request: "status-transition",
         status: "done",
       });
       expect(result).toEqual({ ok: true });
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith("ship-1", "done");
-      expect(mockStatusManager.syncPhaseLabel).not.toHaveBeenCalled();
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("ship-1", "done");
     });
 
-    it("rejects invalid target status", async () => {
+    it("rejects invalid target phase", async () => {
       mockShipManager.getShip.mockReturnValue(makeShip());
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -94,12 +81,12 @@ describe("ShipRequestHandler", () => {
         status: "invalid-status",
       });
       expect(result.ok).toBe(false);
-      expect(result.error).toContain("Invalid target status");
+      expect(result.error).toContain("Invalid target phase");
     });
 
     it("rejects backward transitions", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "implementing" }),
+        makeShip({ phase: "implementing" }),
       );
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -111,12 +98,11 @@ describe("ShipRequestHandler", () => {
 
     it("allows forward transition without gate (gate disabled)", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
+        makeShip({ phase: "planning" }),
       );
-      mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
 
       const settings: FleetGateSettings = {
-        "planning→implementing": false,
+        "planning-gate": false,
       };
       const result = await handler.handle(
         "ship-1",
@@ -124,12 +110,7 @@ describe("ShipRequestHandler", () => {
         settings,
       );
       expect(result).toEqual({ ok: true });
-      expect(mockStatusManager.syncPhaseLabel).toHaveBeenCalledWith(
-        "owner/repo",
-        42,
-        "implementing",
-      );
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith(
         "ship-1",
         "implementing",
       );
@@ -137,7 +118,7 @@ describe("ShipRequestHandler", () => {
 
     it("returns gate info for gated transitions", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
+        makeShip({ phase: "planning" }),
       );
 
       const result = await handler.handle("ship-1", {
@@ -147,24 +128,31 @@ describe("ShipRequestHandler", () => {
       expect(result.ok).toBe(false);
       expect(result.gate).toEqual({
         type: "plan-review",
-        from: "planning",
-        to: "implementing",
+        gatePhase: "planning-gate",
+        targetPhase: "implementing",
       });
     });
 
-    it("proceeds when gate was already approved", async () => {
+    it("proceeds when gate response found in DB (approved)", async () => {
       mockShipManager.getShip.mockReturnValue(
         makeShip({
-          status: "planning",
+          phase: "planning",
           gateCheck: {
-            transition: "planning→implementing",
+            gatePhase: "planning-gate",
             gateType: "plan-review",
-            status: "approved",
+            status: "pending",
             requestedAt: new Date().toISOString(),
           },
         }),
       );
-      mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
+
+      // Mock DB with approved gate-response
+      handler.setDatabase({
+        getUnreadMessages: vi.fn().mockReturnValue([
+          { id: 1, payload: JSON.stringify({ approved: true, gatePhase: "planning-gate" }) },
+        ]),
+        markMessageRead: vi.fn(),
+      } as unknown as FleetDatabase);
 
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -174,18 +162,24 @@ describe("ShipRequestHandler", () => {
       expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-1");
     });
 
-    it("rejects when gate is still pending", async () => {
+    it("returns pending when gate has no response in DB yet", async () => {
       mockShipManager.getShip.mockReturnValue(
         makeShip({
-          status: "planning",
+          phase: "planning",
           gateCheck: {
-            transition: "planning→implementing",
+            gatePhase: "planning-gate",
             gateType: "plan-review",
             status: "pending",
             requestedAt: new Date().toISOString(),
           },
         }),
       );
+
+      // Mock DB with no gate-response
+      handler.setDatabase({
+        getUnreadMessages: vi.fn().mockReturnValue([]),
+        markMessageRead: vi.fn(),
+      } as unknown as FleetDatabase);
 
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -195,18 +189,26 @@ describe("ShipRequestHandler", () => {
       expect(result.error).toContain("Gate check pending");
     });
 
-    it("re-initiates gate check after rejection", async () => {
+    it("re-initiates gate check after rejection from DB", async () => {
       mockShipManager.getShip.mockReturnValue(
         makeShip({
-          status: "planning",
+          phase: "planning",
           gateCheck: {
-            transition: "planning→implementing",
+            gatePhase: "planning-gate",
             gateType: "plan-review",
-            status: "rejected",
+            status: "pending",
             requestedAt: new Date().toISOString(),
           },
         }),
       );
+
+      // Mock DB with rejected gate-response
+      handler.setDatabase({
+        getUnreadMessages: vi.fn().mockReturnValue([
+          { id: 1, payload: JSON.stringify({ approved: false, gatePhase: "planning-gate" }) },
+        ]),
+        markMessageRead: vi.fn(),
+      } as unknown as FleetDatabase);
 
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -215,8 +217,8 @@ describe("ShipRequestHandler", () => {
       expect(result.ok).toBe(false);
       expect(result.gate).toEqual({
         type: "plan-review",
-        from: "planning",
-        to: "implementing",
+        gatePhase: "planning-gate",
+        targetPhase: "implementing",
         previousFeedback: undefined,
       });
       expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-1");
@@ -225,16 +227,23 @@ describe("ShipRequestHandler", () => {
     it("passes previous feedback when re-initiating after rejection", async () => {
       mockShipManager.getShip.mockReturnValue(
         makeShip({
-          status: "planning",
+          phase: "planning",
           gateCheck: {
-            transition: "planning→implementing",
+            gatePhase: "planning-gate",
             gateType: "plan-review",
-            status: "rejected",
-            feedback: "Plan is missing test strategy",
+            status: "pending",
             requestedAt: new Date().toISOString(),
           },
         }),
       );
+
+      // Mock DB with rejected gate-response that includes feedback
+      handler.setDatabase({
+        getUnreadMessages: vi.fn().mockReturnValue([
+          { id: 1, payload: JSON.stringify({ approved: false, gatePhase: "planning-gate", feedback: "Plan is missing test strategy" }) },
+        ]),
+        markMessageRead: vi.fn(),
+      } as unknown as FleetDatabase);
 
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -243,20 +252,19 @@ describe("ShipRequestHandler", () => {
       expect(result.ok).toBe(false);
       expect(result.gate).toEqual({
         type: "plan-review",
-        from: "planning",
-        to: "implementing",
+        gatePhase: "planning-gate",
+        targetPhase: "implementing",
         previousFeedback: "Plan is missing test strategy",
       });
     });
 
     it("respects fleet gate settings (disabled gate)", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
+        makeShip({ phase: "planning" }),
       );
-      mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
 
       const settings: FleetGateSettings = {
-        "planning→implementing": false,
+        "planning-gate": false,
       };
       const result = await handler.handle(
         "ship-1",
@@ -268,9 +276,8 @@ describe("ShipRequestHandler", () => {
 
     it("skips playwright gate when qaRequired is false", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "acceptance-test", qaRequired: false }),
+        makeShip({ phase: "acceptance-test", qaRequired: false }),
       );
-      mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
 
       const result = await handler.handle("ship-1", {
         request: "status-transition",
@@ -278,16 +285,15 @@ describe("ShipRequestHandler", () => {
       });
       // Should proceed without gate because qaRequired is false
       expect(result).toEqual({ ok: true });
-      expect(mockStatusManager.syncPhaseLabel).toHaveBeenCalledWith(
-        "owner/repo",
-        42,
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith(
+        "ship-1",
         "merging",
       );
     });
 
     it("triggers playwright gate when qaRequired is true", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "acceptance-test", qaRequired: true }),
+        makeShip({ phase: "acceptance-test", qaRequired: true }),
       );
 
       const result = await handler.handle("ship-1", {
@@ -297,14 +303,14 @@ describe("ShipRequestHandler", () => {
       expect(result.ok).toBe(false);
       expect(result.gate).toEqual({
         type: "playwright",
-        from: "acceptance-test",
-        to: "merging",
+        gatePhase: "acceptance-test-gate",
+        targetPhase: "merging",
       });
     });
 
     it("triggers playwright gate when qaRequired is not set (defaults to true)", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "acceptance-test" }),
+        makeShip({ phase: "acceptance-test" }),
       );
 
       const result = await handler.handle("ship-1", {
@@ -314,14 +320,14 @@ describe("ShipRequestHandler", () => {
       expect(result.ok).toBe(false);
       expect(result.gate).toEqual({
         type: "playwright",
-        from: "acceptance-test",
-        to: "merging",
+        gatePhase: "acceptance-test-gate",
+        targetPhase: "merging",
       });
     });
 
     it("stores qaRequired when transitioning to implementing", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
+        makeShip({ phase: "planning" }),
       );
 
       await handler.handle("ship-1", {
@@ -334,7 +340,7 @@ describe("ShipRequestHandler", () => {
 
     it("does not call setQaRequired when qaRequired is not provided", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
+        makeShip({ phase: "planning" }),
       );
 
       await handler.handle("ship-1", {
@@ -344,73 +350,22 @@ describe("ShipRequestHandler", () => {
       expect(mockShipManager.setQaRequired).not.toHaveBeenCalled();
     });
 
-    it("returns error when GitHub label sync fails", async () => {
+    it("advances phase when gate disabled and updates ship manager", async () => {
       mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
-      );
-      mockStatusManager.syncPhaseLabel.mockRejectedValue(
-        new Error("GitHub API error"),
+        makeShip({ phase: "planning" }),
       );
 
-      // Disable gate so we reach the label sync path
       const settings: FleetGateSettings = {
-        "planning→implementing": false,
+        "planning-gate": false,
       };
       const result = await handler.handle(
         "ship-1",
         { request: "status-transition", status: "implementing" },
         settings,
       );
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain("GitHub label sync failed");
-    });
-  });
-
-  describe("executeGatedTransition", () => {
-    it("syncs label and updates status on success", async () => {
-      mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
-      );
-      mockStatusManager.syncPhaseLabel.mockResolvedValue(undefined);
-
-      const result = await handler.executeGatedTransition(
-        "ship-1",
-        "implementing",
-      );
       expect(result).toEqual({ ok: true });
-      expect(mockStatusManager.syncPhaseLabel).toHaveBeenCalledWith(
-        "owner/repo",
-        42,
-        "implementing",
-      );
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
-        "ship-1",
-        "implementing",
-      );
-    });
-
-    it("returns error when ship not found", async () => {
-      mockShipManager.getShip.mockReturnValue(undefined);
-      const result = await handler.executeGatedTransition(
-        "unknown",
-        "implementing",
-      );
-      expect(result.ok).toBe(false);
-    });
-
-    it("returns error when label sync fails", async () => {
-      mockShipManager.getShip.mockReturnValue(
-        makeShip({ status: "planning" }),
-      );
-      mockStatusManager.syncPhaseLabel.mockRejectedValue(
-        new Error("API error"),
-      );
-      const result = await handler.executeGatedTransition(
-        "ship-1",
-        "implementing",
-      );
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain("GitHub label sync failed");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("ship-1", "implementing");
     });
   });
+
 });

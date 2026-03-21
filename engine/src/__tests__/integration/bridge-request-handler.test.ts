@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { BridgeRequestHandler } from "../../bridge-request-handler.js";
-import { ShipRequestHandler } from "../../ship-request-handler.js";
-import type { ShipProcess, FleetRepo, BridgeRequest, GateTransition } from "../../types.js";
+import type { ShipProcess, FleetRepo, BridgeRequest } from "../../types.js";
 
 // === Mock types (real classes wired together, only I/O mocked) ===
 
@@ -13,17 +12,13 @@ type MockShipManager = {
   sortie: ReturnType<typeof vi.fn>;
   stopShip: ReturnType<typeof vi.fn>;
   retryShip: ReturnType<typeof vi.fn>;
-  updateStatus: ReturnType<typeof vi.fn>;
+  updatePhase: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
   setQaRequired: ReturnType<typeof vi.fn>;
   setGateCheck: ReturnType<typeof vi.fn>;
-  setEscortAgentId: ReturnType<typeof vi.fn>;
+  setNothingToDo: ReturnType<typeof vi.fn>;
   respondToGate: ReturnType<typeof vi.fn>;
   respondToPRReview: ReturnType<typeof vi.fn>;
-};
-
-type MockStatusManager = {
-  syncPhaseLabel: ReturnType<typeof vi.fn>;
 };
 
 type MockStateSync = {
@@ -37,19 +32,15 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test feature",
-    status: "planning",
+    phase: "planning",
     isCompacting: false,
     branchName: "feature/42-test-feature",
     worktreePath: "/tmp/worktrees/42",
     sessionId: null,
     prUrl: null,
     prReviewStatus: null,
-    acceptanceTest: null,
-    acceptanceTestApproved: false,
     gateCheck: null,
     qaRequired: true,
-    escortAgentId: null,
-    errorType: null,
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
@@ -59,9 +50,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
 
 describe("BridgeRequestHandler (integration)", () => {
   let handler: BridgeRequestHandler;
-  let shipRequestHandler: ShipRequestHandler;
   let mockShipManager: MockShipManager;
-  let mockStatusManager: MockStatusManager;
   let mockStateSync: MockStateSync;
 
   const fleetRepos: FleetRepo[] = [
@@ -78,16 +67,13 @@ describe("BridgeRequestHandler (integration)", () => {
       sortie: vi.fn(),
       stopShip: vi.fn(),
       retryShip: vi.fn(),
-      updateStatus: vi.fn(),
+      updatePhase: vi.fn(),
       clearGateCheck: vi.fn(),
       setQaRequired: vi.fn(),
       setGateCheck: vi.fn(),
-      setEscortAgentId: vi.fn(),
+      setNothingToDo: vi.fn(),
       respondToGate: vi.fn(),
       respondToPRReview: vi.fn(),
-    };
-    mockStatusManager = {
-      syncPhaseLabel: vi.fn().mockResolvedValue(undefined),
     };
     mockStateSync = {
       sortieGuard: vi.fn().mockResolvedValue({ ok: true }),
@@ -98,11 +84,6 @@ describe("BridgeRequestHandler (integration)", () => {
       mockShipManager as unknown as ConstructorParameters<typeof BridgeRequestHandler>[0],
       mockStateSync as unknown as ConstructorParameters<typeof BridgeRequestHandler>[1],
     );
-    shipRequestHandler = new ShipRequestHandler(
-      mockShipManager as unknown as ConstructorParameters<typeof ShipRequestHandler>[0],
-      mockStatusManager as unknown as ConstructorParameters<typeof ShipRequestHandler>[1],
-    );
-    handler.setShipRequestHandler(shipRequestHandler);
   });
 
   describe("sortie flow", () => {
@@ -151,8 +132,8 @@ describe("BridgeRequestHandler (integration)", () => {
 
     it("throttles when concurrent limit is reached", async () => {
       const activeShips = [
-        makeShip({ id: "s1", status: "planning" }),
-        makeShip({ id: "s2", status: "implementing" }),
+        makeShip({ id: "s1", phase: "planning" }),
+        makeShip({ id: "s2", phase: "implementing" }),
       ];
       mockShipManager.getShipsByFleet.mockReturnValue(activeShips);
 
@@ -196,8 +177,8 @@ describe("BridgeRequestHandler (integration)", () => {
   describe("ship-status", () => {
     it("returns status for all ships in fleet", async () => {
       mockShipManager.getShipsByFleet.mockReturnValue([
-        makeShip({ id: "s1", issueNumber: 10, status: "planning" }),
-        makeShip({ id: "s2", issueNumber: 11, status: "implementing" }),
+        makeShip({ id: "s1", issueNumber: 10, phase: "planning" }),
+        makeShip({ id: "s2", issueNumber: 11, phase: "implementing" }),
       ]);
 
       const result = await handler.handle(
@@ -246,8 +227,8 @@ describe("BridgeRequestHandler (integration)", () => {
   });
 
   describe("ship-resume", () => {
-    it("resumes an errored ship with session", async () => {
-      const ship = makeShip({ status: "error", sessionId: "sess-123" });
+    it("resumes a dead ship with session", async () => {
+      const ship = makeShip({ phase: "implementing", sessionId: "sess-123" });
       mockShipManager.resolveShip.mockReturnValue(ship);
       mockShipManager.retryShip.mockReturnValue(ship);
 
@@ -260,8 +241,8 @@ describe("BridgeRequestHandler (integration)", () => {
       expect(result).toContain("session resume");
     });
 
-    it("rejects resume for non-error ship", async () => {
-      const ship = makeShip({ status: "implementing" });
+    it("rejects resume for done ship", async () => {
+      const ship = makeShip({ phase: "done" });
       mockShipManager.resolveShip.mockReturnValue(ship);
 
       const result = await handler.handle(
@@ -269,171 +250,7 @@ describe("BridgeRequestHandler (integration)", () => {
         { request: "ship-resume", shipId: "ship-aaa-111" },
         fleetRepos, repoRemotes,
       );
-      expect(result).toContain("not in error state");
-    });
-  });
-
-  describe("gate-ack", () => {
-    it("acknowledges a pending gate check", async () => {
-      const ship = makeShip({
-        gateCheck: {
-          transition: "planning→implementing",
-          gateType: "plan-review",
-          status: "pending",
-          requestedAt: new Date().toISOString(),
-        },
-      });
-      mockShipManager.resolveShip.mockReturnValue(ship);
-
-      const result = await handler.handle(
-        "fleet-1",
-        {
-          request: "gate-ack",
-          shipId: "ship-aaa-111",
-          transition: "planning→implementing" as GateTransition,
-        },
-        fleetRepos, repoRemotes,
-      );
-      expect(result).toContain("Gate ACK");
-      expect(ship.gateCheck!.acknowledgedAt).toBeDefined();
-    });
-
-    it("rejects ack for non-pending gate", async () => {
-      const ship = makeShip({
-        gateCheck: {
-          transition: "planning→implementing",
-          gateType: "plan-review",
-          status: "approved",
-          requestedAt: new Date().toISOString(),
-        },
-      });
-      mockShipManager.resolveShip.mockReturnValue(ship);
-
-      const result = await handler.handle(
-        "fleet-1",
-        {
-          request: "gate-ack",
-          shipId: "ship-aaa-111",
-          transition: "planning→implementing" as GateTransition,
-        },
-        fleetRepos, repoRemotes,
-      );
-      expect(result).toContain("already approved");
-    });
-  });
-
-  describe("gate-result → gated transition (cross-handler)", () => {
-    let gateApprovedSpy: ReturnType<typeof vi.fn<(shipId: string, transition: GateTransition) => void>>;
-    let gateRejectedSpy: ReturnType<typeof vi.fn<(shipId: string, transition: GateTransition, feedback?: string) => void>>;
-
-    beforeEach(() => {
-      gateApprovedSpy = vi.fn<(shipId: string, transition: GateTransition) => void>();
-      gateRejectedSpy = vi.fn<(shipId: string, transition: GateTransition, feedback?: string) => void>();
-      handler.setGateApprovedHandler(gateApprovedSpy);
-      handler.setGateRejectedHandler(gateRejectedSpy);
-    });
-
-    it("approves gate and executes gated transition via ShipRequestHandler", async () => {
-      const ship = makeShip({
-        status: "planning",
-        gateCheck: {
-          transition: "planning→implementing",
-          gateType: "plan-review",
-          status: "pending",
-          requestedAt: new Date().toISOString(),
-        },
-      });
-      mockShipManager.resolveShip.mockReturnValue(ship);
-      mockShipManager.getShip.mockReturnValue(ship);
-      mockShipManager.respondToGate.mockResolvedValue(undefined);
-
-      const result = await handler.handle(
-        "fleet-1",
-        {
-          request: "gate-result",
-          shipId: "ship-aaa-111",
-          transition: "planning→implementing" as GateTransition,
-          verdict: "approve",
-        },
-        fleetRepos, repoRemotes,
-      );
-
-      expect(result).toContain("Gate Approved");
-      expect(result).toContain("transition confirmed");
-      expect(mockShipManager.respondToGate).toHaveBeenCalledWith("ship-aaa-111", true, undefined);
-      expect(mockStatusManager.syncPhaseLabel).toHaveBeenCalledWith("owner/repo", 42, "implementing");
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith("ship-aaa-111", "implementing");
-      expect(gateApprovedSpy).toHaveBeenCalledWith("ship-aaa-111", "planning→implementing");
-    });
-
-    it("rejects gate and notifies handler", async () => {
-      const ship = makeShip({
-        status: "planning",
-        gateCheck: {
-          transition: "planning→implementing",
-          gateType: "plan-review",
-          status: "pending",
-          requestedAt: new Date().toISOString(),
-        },
-      });
-      mockShipManager.resolveShip.mockReturnValue(ship);
-      mockShipManager.respondToGate.mockResolvedValue(undefined);
-
-      const result = await handler.handle(
-        "fleet-1",
-        {
-          request: "gate-result",
-          shipId: "ship-aaa-111",
-          transition: "planning→implementing" as GateTransition,
-          verdict: "reject",
-          feedback: "Plan lacks test coverage",
-        },
-        fleetRepos, repoRemotes,
-      );
-
-      expect(result).toContain("Gate Rejected");
-      expect(result).toContain("Plan lacks test coverage");
-      expect(gateRejectedSpy).toHaveBeenCalledWith(
-        "ship-aaa-111",
-        "planning→implementing",
-        "Plan lacks test coverage",
-      );
-    });
-
-    it("fails gate-result when no pending gate exists", async () => {
-      const ship = makeShip({ gateCheck: null });
-      mockShipManager.resolveShip.mockReturnValue(ship);
-
-      const result = await handler.handle(
-        "fleet-1",
-        {
-          request: "gate-result",
-          shipId: "ship-aaa-111",
-          transition: "planning→implementing" as GateTransition,
-          verdict: "approve",
-        },
-        fleetRepos, repoRemotes,
-      );
-      expect(result).toContain("Gate Result Failed");
-    });
-  });
-
-  describe("escort-registered", () => {
-    it("registers escort agent ID on ship", async () => {
-      const ship = makeShip();
-      mockShipManager.resolveShip.mockReturnValue(ship);
-
-      const result = await handler.handle(
-        "fleet-1",
-        {
-          request: "escort-registered",
-          shipId: "ship-aaa-111",
-          agentId: "agent-xyz",
-        },
-        fleetRepos, repoRemotes,
-      );
-      expect(result).toContain("Escort Registered");
-      expect(mockShipManager.setEscortAgentId).toHaveBeenCalledWith("ship-aaa-111", "agent-xyz");
+      expect(result).toContain("already done");
     });
   });
 });

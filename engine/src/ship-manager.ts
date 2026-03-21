@@ -121,7 +121,6 @@ export class ShipManager {
       prReviewStatus: existingPrReviewStatus,
       gateCheck: null,
       qaRequired: true,
-      escortAgentId: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
       lastOutputAt: null,
@@ -250,7 +249,6 @@ export class ShipManager {
       ship.phase = phase;
       if (phase === "done") {
         ship.completedAt = Date.now();
-        ship.escortAgentId = null;
       }
       // Note: GitHub label sync is now handled transactionally by ShipRequestHandler.
       // This method only updates in-memory state and notifies the frontend.
@@ -305,21 +303,6 @@ export class ShipManager {
     ship.gateCheck = null;
   }
 
-  setEscortAgentId(shipId: string, agentId: string): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-    ship.escortAgentId = agentId;
-    console.log(
-      `[ship-manager] Escort registered for Ship #${ship.issueNumber}: ${agentId}`,
-    );
-  }
-
-  clearEscortAgentId(shipId: string): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-    ship.escortAgentId = null;
-  }
-
   writeDbMessage(
     shipId: string,
     type: DbMessageType,
@@ -355,6 +338,9 @@ export class ShipManager {
       "implement-code",
       "implement-review",
       "implement-merge",
+      // Gate skills (Ship launches its own Escort sub-agents)
+      "gate-plan-review",
+      "gate-code-review",
       // Shared skills (Bridge/Ship common)
       "admiral-protocol",
       "read-issue",

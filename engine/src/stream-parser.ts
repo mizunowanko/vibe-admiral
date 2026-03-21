@@ -1,5 +1,4 @@
-import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, Phase, GatePhase } from "./types.js";
-import { GATE_PHASES } from "./gate-config.js";
+import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, Phase } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -219,45 +218,6 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
         items.push(entry);
       }
       return { request: "sortie", items };
-    }
-
-    case "gate-result": {
-      if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.gatePhase !== "string" || !GATE_PHASES.includes(r.gatePhase as GatePhase)) return null;
-      if (r.verdict !== "approve" && r.verdict !== "reject") return null;
-      const gateResult: { request: "gate-result"; shipId: string; gatePhase: GatePhase; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number } = {
-        request: "gate-result",
-        shipId: r.shipId,
-        gatePhase: r.gatePhase as GatePhase,
-        verdict: r.verdict,
-      };
-      if (typeof r.feedback === "string") gateResult.feedback = r.feedback;
-      if (typeof r.issueNumber === "number") gateResult.issueNumber = r.issueNumber;
-      return gateResult;
-    }
-
-    case "gate-ack": {
-      if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.gatePhase !== "string" || !GATE_PHASES.includes(r.gatePhase as GatePhase)) return null;
-      const gateAck: { request: "gate-ack"; shipId: string; gatePhase: GatePhase; issueNumber?: number } = {
-        request: "gate-ack",
-        shipId: r.shipId,
-        gatePhase: r.gatePhase as GatePhase,
-      };
-      if (typeof r.issueNumber === "number") gateAck.issueNumber = r.issueNumber;
-      return gateAck;
-    }
-
-    case "escort-registered": {
-      if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.agentId !== "string" || !r.agentId) return null;
-      const escortReg: { request: "escort-registered"; shipId: string; agentId: string; issueNumber?: number } = {
-        request: "escort-registered",
-        shipId: r.shipId,
-        agentId: r.agentId,
-      };
-      if (typeof r.issueNumber === "number") escortReg.issueNumber = r.issueNumber;
-      return escortReg;
     }
 
     case "status-transition": {
