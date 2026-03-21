@@ -45,7 +45,13 @@ export function useBridge(fleetId: string | null) {
               // ignore parse errors
             }
           } else {
-            setIsLoading(false);
+            // Only clear loading state for Bridge CLI responses (assistant, tool_use, etc.).
+            // Engine-injected system messages (ship-status, request-result, etc.)
+            // should not affect loading state to avoid unnecessary re-renders
+            // that could disrupt scroll position during sortie.
+            if (data.message.type !== "system") {
+              setIsLoading(false);
+            }
             setMessages((prev) => [...prev, { ...data.message, timestamp: data.message.timestamp ?? Date.now() }]);
           }
         }

@@ -1,4 +1,4 @@
-import { memo, useState, useMemo } from "react";
+import { memo, useState, useMemo, useRef } from "react";
 import { useShipStore } from "@/stores/shipStore";
 import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
 import { Badge } from "@/components/ui/badge";
@@ -7,22 +7,41 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
 import { Square } from "lucide-react";
+import type { Ship } from "@/types";
 
 interface BridgeShipBarProps {
   fleetId: string;
 }
 
+/**
+ * Build a stable fingerprint for a fleet's ship list.
+ * Only re-renders when ships relevant to this fleet actually change.
+ */
+function buildFleetShipFingerprint(ships: Ship[]): string {
+  return ships
+    .map((s) => `${s.id}:${s.phase}:${s.issueNumber}:${s.issueTitle}:${s.isCompacting}:${s.gateCheck?.status ?? ""}:${s.processDead ?? false}:${s.repo}`)
+    .join("|");
+}
+
 export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
-  const ships = useShipStore((s) => s.ships);
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
   const [showCompleted, setShowCompleted] = useState(false);
 
-  const allFleetShips = useMemo(
-    () => Array.from(ships.values()).filter((s) => s.fleetId === fleetId),
-    [ships, fleetId],
-  );
+  // Use a fingerprint-based selector to avoid re-renders when unrelated ships change.
+  // The selector extracts fleet-specific ships and returns a stable reference
+  // as long as the ships' display-relevant fields haven't changed.
+  const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
+  const allFleetShips = useShipStore((s) => {
+    const filtered = Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId);
+    const fingerprint = buildFleetShipFingerprint(filtered);
+    if (fingerprint === prevRef.current.fingerprint) {
+      return prevRef.current.ships;
+    }
+    prevRef.current = { fingerprint, ships: filtered };
+    return filtered;
+  });
 
   const fleetShips = useMemo(
     () =>
