@@ -19,6 +19,9 @@ REPO=$(echo "$REMOTE_URL" | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E '
 DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')
 ```
 
+**`VIBE_ADMIRAL` 設定時**: Engine が sortie 時に issue 情報を `--append-system-prompt` 経由で `[Issue Context]` ブロックとして注入済み。`gh issue view` は呼ばず、prompt に含まれた issue 情報を使用する。
+
+**`VIBE_ADMIRAL` 未設定時**:
 - 引数で指定されている場合:
   ```bash
   gh issue view <番号> --repo "$REPO" --json number,title,body,labels,comments
@@ -32,10 +35,10 @@ DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBran
   Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
   **アクティブステータスラベルが付いている Issue は絶対に選択しない。**
 
-**`VIBE_ADMIRAL` 未設定の場合のみ**: ラベル変更:
-```bash
-gh issue edit <番号> --repo "$REPO" --remove-label status/todo --add-label status/implementing
-```
+- ラベル変更:
+  ```bash
+  gh issue edit <番号> --repo "$REPO" --remove-label status/todo --add-label status/implementing
+  ```
 
 ## Step 2: Worktree 作成
 

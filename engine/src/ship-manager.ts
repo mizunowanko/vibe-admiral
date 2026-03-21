@@ -128,13 +128,19 @@ export class ShipManager {
     this.ships.set(shipId, ship);
     this.persistToDb(ship);
 
-    // 8. Build extra context for Ship if there's an existing PR
+    // 8. Build extra context for Ship
+    // Embed issue info in the prompt so Ship doesn't need to call `gh issue view`
+    const issueContext = [
+      `[Issue Context] Issue #${issue.number}: ${issue.title}`,
+      `Labels: ${issue.labels.join(", ") || "none"}`,
+      `Body:\n${issue.body}`,
+    ].join("\n");
     const prContext = existingPrUrl
       ? `\n\n[Prior Work Context] An existing PR was found for this branch: ${existingPrUrl}. The branch contains previous commits from a prior sortie. Check for existing work before starting from scratch. Run \`gh pr view --json number,url,body,reviews,comments\` to review the PR history.`
       : "";
-    const fullExtraPrompt = extraPrompt
-      ? `${extraPrompt}${prContext}`
-      : prContext || undefined;
+    const fullExtraPrompt = [issueContext, extraPrompt, prContext]
+      .filter(Boolean)
+      .join("\n\n") || undefined;
 
     // 9. Launch Claude CLI process with DB path for message polling
     const shipEnv: Record<string, string> = {
