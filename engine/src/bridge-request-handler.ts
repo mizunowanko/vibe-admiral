@@ -172,11 +172,6 @@ export class BridgeRequestHandler {
     return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
   }
 
-    return `[Ship Stopped] ${ship.id}`;
-    }
-    return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
-  }
-
   private handleShipResume(
     request: Extract<BridgeRequest, { request: "ship-resume" }>,
     shipExtraPrompt?: string,
