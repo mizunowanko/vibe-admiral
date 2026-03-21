@@ -237,6 +237,73 @@ export class FleetDatabase {
     return rows.map((row) => this.rowToShipProcess(row));
   }
 
+  /** Get all ships (including done) from the database. */
+  getAllShips(): ShipProcess[] {
+    const rows = this.db.prepare(`
+      SELECT s.*, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      ORDER BY s.created_at ASC
+    `).all() as ShipJoinRow[];
+
+    return rows.map((row) => this.rowToShipProcess(row));
+  }
+
+  /** Get all ships for a specific fleet. */
+  getShipsByFleet(fleetId: string): ShipProcess[] {
+    const rows = this.db.prepare(`
+      SELECT s.*, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      WHERE s.fleet_id = ?
+      ORDER BY s.created_at ASC
+    `).all(fleetId) as ShipJoinRow[];
+
+    return rows.map((row) => this.rowToShipProcess(row));
+  }
+
+  /** Get a single ship by ID. */
+  getShipById(shipId: string): ShipProcess | undefined {
+    const row = this.db.prepare(`
+      SELECT s.*, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      WHERE s.id = ?
+    `).get(shipId) as ShipJoinRow | undefined;
+
+    return row ? this.rowToShipProcess(row) : undefined;
+  }
+
+  /** Get a ship by repo and issue number (active only, phase != done). */
+  getShipByIssue(repo: string, issueNumber: number): ShipProcess | undefined {
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) return undefined;
+
+    const row = this.db.prepare(`
+      SELECT s.*, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase != 'done'
+    `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
+
+    return row ? this.rowToShipProcess(row) : undefined;
+  }
+
+  /** Get active ship issue numbers (phase != done). */
+  getActiveShipIssueNumbers(): Array<{ repo: string; issueNumber: number }> {
+    const rows = this.db.prepare(`
+      SELECT s.issue_number, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      WHERE s.phase != 'done'
+    `).all() as Array<{ issue_number: number; owner: string; name: string }>;
+
+    return rows.map((row) => ({
+      repo: `${row.owner}/${row.name}`,
+      issueNumber: row.issue_number,
+    }));
+  }
+
   /**
    * Transactional phase transition.
    * 1. Verify current phase matches expected

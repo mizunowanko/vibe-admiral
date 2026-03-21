@@ -105,6 +105,38 @@ Issues with `priority/critical` override base priority and sort first. Only huma
 3. Separate `priority/critical` issues (these come first)
 4. Sort remaining by base type priority
 5. Within each tier, prefer issues with fewer dependencies
-6. Propose ordered list to human → sortie after approval
+6. **Critical Issue Escalation** — if any candidate has `priority/critical`, run the Pre-Sortie Escalation flow (see below) BEFORE proceeding
+7. Propose ordered list to human → sortie after approval
+
+## Pre-Sortie Escalation (priority/critical)
+
+When a sortie candidate has the `priority/critical` label, Bridge MUST discuss the approach with the human **before** launching the sortie. Ships run non-interactively and cannot ask questions, so unclear or risky plans waste the sortie.
+
+### Why before sortie
+
+- Ships run in `-p` mode — changing direction after launch requires stop → issue update → re-sortie
+- Fixing the plan pre-sortie is cheap; fixing it post-sortie is expensive
+- plan-review Gate happens after the Ship has already started, which is too late for critical decisions
+
+### Escalation Flow
+
+1. **Highlight**: Clearly inform the human that critical issue(s) were detected in the sortie candidates
+2. **Summarize**: For each critical issue, present:
+   - Issue number, title, and labels
+   - Impact scope (which components, systems, or users are affected)
+   - Proposed approach (from the issue body or Bridge's analysis)
+   - Key risks or open questions
+3. **Discuss**: Ask the human to confirm, refine, or reject the approach. Use normal Bridge chat messages — do NOT use `AskUserQuestion`
+4. **Record**: After reaching agreement, update the issue to capture the agreed approach:
+   - `gh issue edit <number> --body "<updated body>"` to append an "## Agreed Approach" section, OR
+   - `gh issue comment <number> --body "<agreement summary>"` if the body should remain unchanged
+5. **Proceed**: Include the critical issue(s) in the sortie batch alongside any non-critical candidates
+
+### Constraints
+
+- **`AskUserQuestion` is PROHIBITED** for this flow. Use regular Bridge chat messages only.
+- Only humans may apply the `priority/critical` label. Bridge may suggest it but must not apply it.
+- If the human declines the approach, defer the critical issue and sortie only the non-critical candidates.
+- Non-critical candidates in the same batch do NOT need escalation — they proceed normally.
 
 > **NOTE**: The Engine's `getUnblockedTodoIssues()` returns issues pre-sorted by this priority order. Bridge should respect this order.

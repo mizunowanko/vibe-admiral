@@ -197,17 +197,14 @@ export class EngineServer {
         }
       } else {
         // Update lastOutputAt for Lookout no-output detection
-        {
-          const ship = this.shipManager.getShip(id);
-          if (ship) ship.lastOutputAt = Date.now();
-        }
+        this.shipManager.setLastOutputAt(id, Date.now());
 
         // Extract sessionId from init messages (before parsing drops them)
         const sessionId = extractSessionId(msg);
         if (sessionId) {
           const ship = this.shipManager.getShip(id);
           if (ship && !ship.sessionId) {
-            ship.sessionId = sessionId;
+            this.shipManager.setSessionId(id, sessionId);
             console.log(
               `[ws-server] Ship ${id.slice(0, 8)}... sessionId captured: ${sessionId.slice(0, 12)}...`,
             );
@@ -1087,8 +1084,8 @@ export class EngineServer {
 
     const prUrl = prUrlMatch[0];
 
-    // Store PR URL on ship
-    ship.prUrl = prUrl;
+    // Store PR URL on ship (DB + runtime)
+    this.shipManager.setPrUrl(id, prUrl);
 
     // Broadcast PR creation to frontend
     this.broadcast({
@@ -1119,7 +1116,7 @@ export class EngineServer {
     const ship = this.shipManager.getShip(id);
     if (!ship) return;
 
-    ship.isCompacting = isCompacting;
+    this.shipManager.setIsCompacting(id, isCompacting);
     this.broadcast({
       type: "ship:compacting",
       data: { id, isCompacting },
