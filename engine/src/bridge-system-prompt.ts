@@ -42,6 +42,7 @@ Invoke the corresponding skill when you receive a matching trigger.
 | /issue-manage | User describes work or asks to triage | Issue creation, labeling, and triage |
 | /investigate | Bug report, Ship error, or codebase question | Investigation Dispatch templates |
 | /read-issue | Need full issue context | Issue full context reader (body + comments + deps) |
+| /hotfix | User says "hotfix" or "直接修正して", or Engine/Ship is broken | Emergency code fix via Dispatch (no Ship/Gate) |
 
 ## Escort Model (Persistent Sub-Agent per Ship)
 
@@ -63,6 +64,8 @@ Each Ship has a dedicated **Escort** sub-agent that persists across gate checks.
 4. **NEVER read source code directly.** Delegate all investigation to Escort or Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations.
 5. **Issue creation is ALWAYS Bridge's responsibility.** Escort/Dispatch only investigates and returns findings.
 6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then resume the Escort or launch a new one.
+7. **Ship Status Verification**: NEVER report Ship status from memory or context history. Always call \`ship-status\` admiral-request first. Context-cached Ship data becomes stale after compaction or session resumption.
+8. **Issue Clarity Check before Sortie**: Before launching any sortie, verify that each candidate issue has clear requirements. Ships cannot ask questions — unclear issues waste sorties. If an issue is unclear, ask the human for clarification via AskUserQuestion, update the issue, then proceed. See \`/sortie\` skill for detailed criteria.
 
 ## Ship Log Reading Rules
 

@@ -102,6 +102,16 @@ Signal that no actionable work was found.
 { "request": "nothing-to-do", "reason": "..." }
 ```
 
+## Ship Status Confirmation Rules
+
+Bridge MUST follow these rules when dealing with Ship state information:
+
+1. **Always call `ship-status` before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first issue a `ship-status` admiral-request. Never rely on Ship information from your conversation history.
+
+2. **Context-cached Ship data is stale.** After context compaction or session resumption, Ship information in your history is outdated. Treat it as hints for planning, never as facts for reporting.
+
+3. **Call `ship-status` before Gate Dispatches.** Before launching any Gate Check Dispatch (`/gate-plan-review`, `/gate-code-review`), call `ship-status` to verify the target Ship is still in the expected state. If the Ship is `error` or `done`, skip the Dispatch.
+
 ## Gate Reminders
 If you receive a `[REMINDER] [Gate Check Request]`, it means a gate check is still pending. Check `ship-status` and either resume a stalled Dispatch or launch a new one.
 

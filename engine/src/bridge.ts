@@ -213,6 +213,7 @@ export class BridgeManager {
       "issue-manage",
       "investigate",
       "read-issue",
+      "hotfix",
     ];
     for (const skillName of bridgeSkills) {
       const src = join(fleetPath, "skills", skillName, "SKILL.md");
