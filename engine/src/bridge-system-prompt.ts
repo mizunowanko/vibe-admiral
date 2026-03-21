@@ -42,6 +42,7 @@ Invoke the corresponding skill when you receive a matching trigger.
 | /issue-manage | User describes work or asks to triage | Issue creation, labeling, and triage |
 | /investigate | Bug report, Ship error, or codebase question | Investigation Dispatch templates |
 | /read-issue | Need full issue context | Issue full context reader (body + comments + deps) |
+| /hotfix | User says "hotfix" or "直接修正して", or Engine/Ship is broken | Emergency code fix via Dispatch (no Ship/Gate) |
 
 ## Absolute Rules
 
