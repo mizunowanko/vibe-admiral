@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import type { Ship, ShipStatus, StreamMessage, AcceptanceTestRequest, GateCheckState } from "@/types";
+import type { Ship, Phase, StreamMessage, GateCheckState } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
-interface ShipStatusData {
+interface ShipPhaseData {
   fleetId?: string;
   repo?: string;
   issueNumber?: number;
@@ -15,13 +15,11 @@ interface ShipState {
   ships: Map<string, Ship>;
   shipLogs: Map<string, StreamMessage[]>;
   selectedShipId: string | null;
-  respondingTestIds: Set<string>;
 
-  addShip: (ship: Partial<Ship> & { id: string; status: ShipStatus }) => void;
-  setShipStatus: (id: string, status: ShipStatus, extra?: ShipStatusData) => void;
+  addShip: (ship: Partial<Ship> & { id: string; phase: Phase }) => void;
+  setShipPhase: (id: string, phase: Phase, extra?: ShipPhaseData) => void;
   setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
-  setAcceptanceTest: (id: string, test: AcceptanceTestRequest) => void;
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
@@ -31,8 +29,6 @@ interface ShipState {
   fetchShips: () => void;
   sortie: (fleetId: string, repo: string, issueNumber: number) => void;
   chatWithShip: (id: string, message: string) => void;
-  acceptTest: (id: string) => void;
-  rejectTest: (id: string, feedback: string) => void;
   retryShip: (id: string) => void;
   stopShip: (id: string) => void;
 }
@@ -41,7 +37,6 @@ export const useShipStore = create<ShipState>((set) => ({
   ships: new Map(),
   shipLogs: new Map(),
   selectedShipId: null,
-  respondingTestIds: new Set(),
 
   addShip: (shipData) => {
     set((state) => {
@@ -57,11 +52,8 @@ export const useShipStore = create<ShipState>((set) => ({
         sessionId: null,
         prUrl: null,
         prReviewStatus: null,
-        acceptanceTest: null,
-        acceptanceTestApproved: false,
         gateCheck: null,
         escortAgentId: null,
-        errorType: null,
         retryCount: 0,
         createdAt: new Date().toISOString(),
         ...shipData,
@@ -70,14 +62,14 @@ export const useShipStore = create<ShipState>((set) => ({
     });
   },
 
-  setShipStatus: (id, status, extra) => {
+  setShipPhase: (id, phase, extra) => {
     set((state) => {
       const ships = new Map(state.ships);
       const existing = ships.get(id);
       if (existing) {
         ships.set(id, {
           ...existing,
-          status,
+          phase,
           ...(extra?.fleetId && { fleetId: extra.fleetId }),
           ...(extra?.repo && { repo: extra.repo }),
           ...(extra?.issueNumber && { issueNumber: extra.issueNumber }),
@@ -94,25 +86,20 @@ export const useShipStore = create<ShipState>((set) => ({
           repo: extra?.repo ?? "",
           issueNumber: extra?.issueNumber ?? 0,
           issueTitle: extra?.issueTitle ?? "",
-          status,
+          phase,
           isCompacting: false,
           branchName: "",
           worktreePath: "",
           sessionId: null,
           prUrl: null,
           prReviewStatus: null,
-          acceptanceTest: null,
-          acceptanceTestApproved: false,
           gateCheck: null,
           escortAgentId: null,
-          errorType: null,
           retryCount: 0,
           createdAt: new Date().toISOString(),
         });
       }
-      const respondingTestIds = new Set(state.respondingTestIds);
-      respondingTestIds.delete(id);
-      return { ships, respondingTestIds };
+      return { ships };
     });
   },
 
@@ -133,17 +120,6 @@ export const useShipStore = create<ShipState>((set) => ({
       const logs = shipLogs.get(id) ?? [];
       shipLogs.set(id, [...logs, message]);
       return { shipLogs };
-    });
-  },
-
-  setAcceptanceTest: (id, test) => {
-    set((state) => {
-      const ships = new Map(state.ships);
-      const ship = ships.get(id);
-      if (ship) {
-        ships.set(id, { ...ship, acceptanceTest: test, status: "acceptance-test" });
-      }
-      return { ships };
     });
   },
 
@@ -176,7 +152,7 @@ export const useShipStore = create<ShipState>((set) => ({
       if (ship) {
         ships.set(id, {
           ...ship,
-          status: "done",
+          phase: "done",
           prUrl: prUrl ?? ship.prUrl,
         });
       }
@@ -210,20 +186,6 @@ export const useShipStore = create<ShipState>((set) => ({
 
   chatWithShip: (id, message) => {
     wsClient.send({ type: "ship:chat", data: { id, message } });
-  },
-
-  acceptTest: (id) => {
-    set((state) => ({
-      respondingTestIds: new Set(state.respondingTestIds).add(id),
-    }));
-    wsClient.send({ type: "ship:accept", data: { id } });
-  },
-
-  rejectTest: (id, feedback) => {
-    set((state) => ({
-      respondingTestIds: new Set(state.respondingTestIds).add(id),
-    }));
-    wsClient.send({ type: "ship:reject", data: { id, feedback } });
   },
 
   retryShip: (id) => {

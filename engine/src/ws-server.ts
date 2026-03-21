@@ -10,7 +10,6 @@ const execFileAsync = promisify(execFile);
 import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { BridgeManager } from "./bridge.js";
-import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import { StatusManager } from "./status-manager.js";
 import { StateSync } from "./state-sync.js";
 import { BridgeRequestHandler } from "./bridge-request-handler.js";
@@ -30,7 +29,7 @@ import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipProcess, ShipRequest, GatePhase, GateType } from "./types.js";
 
 const FLEETS_DIR =
   join(process.env.HOME ?? "~", ".vibe-admiral");
@@ -41,7 +40,6 @@ export class EngineServer {
   private processManager: ProcessManager;
   private shipManager: ShipManager;
   private bridgeManager: BridgeManager;
-  private acceptanceWatcher: AcceptanceWatcher;
   private statusManager: StatusManager;
   private stateSync: StateSync;
   private requestHandler: BridgeRequestHandler;
@@ -52,6 +50,7 @@ export class EngineServer {
   private bridgeFirstData = new Set<string>();
   private gateReminderTimer: ReturnType<typeof setInterval> | null = null;
   private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+  private processLivenessTimer: ReturnType<typeof setInterval> | null = null;
   /** Per-ship mutex to serialize executeShipRequests() calls. */
   private shipRequestLocks = new Map<string, Promise<void>>();
   /** Maps task toolUseId to shipId for dispatch-log routing. */
@@ -65,37 +64,35 @@ export class EngineServer {
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
-    this.acceptanceWatcher = new AcceptanceWatcher();
     this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
-      this.acceptanceWatcher,
       this.statusManager,
     );
     this.bridgeManager = new BridgeManager(this.processManager);
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
-    this.shipRequestHandler = new ShipRequestHandler(this.shipManager, this.statusManager);
+    this.shipRequestHandler = new ShipRequestHandler(this.shipManager);
     this.lookout = new Lookout(this.shipManager, this.processManager);
 
     // Wire up cross-handler references for gate flow
     this.requestHandler.setShipRequestHandler(this.shipRequestHandler);
-    this.requestHandler.setGateApprovedHandler((shipId, transition) => {
-      this.onGateApproved(shipId, transition);
+    this.requestHandler.setGateApprovedHandler((shipId, gatePhase) => {
+      this.onGateApproved(shipId, gatePhase);
     });
-    this.requestHandler.setGateRejectedHandler((shipId, transition, feedback) => {
-      this.onGateRejected(shipId, transition, feedback);
+    this.requestHandler.setGateRejectedHandler((shipId, gatePhase, feedback) => {
+      this.onGateRejected(shipId, gatePhase, feedback);
     });
 
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
     this.setupProcessEvents();
-    this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
     this.startGateReminderScanner();
     this.startQuestionTimeoutScanner();
     this.setupLookout();
+    this.startProcessLivenessCheck();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
 
@@ -370,15 +367,13 @@ export class EngineServer {
           return;
         }
         // Ship explicitly declares "done" via admiral-request status-transition.
-        // If the process exits while in "done" status, treat as success.
-        // If in "merging" status (squash merge may kill the process), also treat as success.
+        // If the process exits while in "done" phase, treat as success.
+        // If in "merging" phase (squash merge may kill the process), also treat as success.
         const successPhases = new Set(["done", "merging"]);
-        if (successPhases.has(ship.status)) {
+        if (successPhases.has(ship.phase)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else {
           // Process exited without declaring done — treat as failure.
-          // If rate-limited, the ship will be in "error" state and the user
-          // can manually retry via the UI Retry button.
           this.stateSync.onProcessExit(id, false).catch(console.error);
         }
       }
@@ -389,9 +384,6 @@ export class EngineServer {
         console.warn(`[ws-server] Bridge ${id} hit rate limit`);
         return;
       }
-      const ship = this.shipManager.getShip(id);
-      if (!ship) return;
-      ship.errorType = "rate_limit";
       console.warn(
         `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — will stop and await manual retry`,
       );
@@ -424,62 +416,15 @@ export class EngineServer {
     });
   }
 
-  private setupAcceptanceEvents(): void {
-    this.acceptanceWatcher.on(
-      "request",
-      (shipId: string, request: { url: string; checks: string[] }) => {
-        const ship = this.shipManager.getShip(shipId);
-        if (ship) {
-          this.shipManager.setAcceptanceTest(shipId, request);
-          this.shipManager.updateStatus(shipId, "acceptance-test");
-
-          // Broadcast acceptance test to frontend and Bridge
-          this.loadFleets().then(() => {
-            this.broadcast({
-              type: "ship:acceptance-test",
-              data: { id: shipId, url: request.url, checks: request.checks },
-            });
-
-            // Also inject into Bridge chat
-            const acceptanceMessage = {
-              type: "system" as const,
-              subtype: "acceptance-test" as const,
-              content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
-              meta: {
-                category: "acceptance-test" as const,
-                issueNumber: ship.issueNumber,
-                issueTitle: ship.issueTitle,
-                url: request.url,
-                checks: request.checks,
-              },
-            };
-            this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
-            this.broadcast({
-              type: "bridge:stream",
-              data: { fleetId: ship.fleetId, message: acceptanceMessage },
-            });
-          }).catch((err) => {
-            console.warn(`[ws-server] Failed to check gate settings for acceptance test:`, err);
-            // Fallback: broadcast anyway so UI is not broken
-            this.broadcast({
-              type: "ship:acceptance-test",
-              data: { id: shipId, url: request.url, checks: request.checks },
-            });
-          });
-        }
-      },
-    );
-  }
-
   private setupShipStatusHandler(): void {
-    this.shipManager.setStatusChangeHandler((id, status, detail) => {
+    this.shipManager.setPhaseChangeHandler((id, phase, detail) => {
       const ship = this.shipManager.getShip(id);
 
       this.broadcast({
         type: "ship:status",
         data: {
           id,
-          status,
+          status: phase,
           detail,
           fleetId: ship?.fleetId,
           repo: ship?.repo,
@@ -494,20 +439,18 @@ export class EngineServer {
 
       // Also inject into Bridge chat for the ship's fleet
       if (ship) {
-        const nothingToDoSuffix = ship.nothingToDo && status === "done" ? " (nothing to do)" : "";
-        // Enrich error notifications with resume eligibility for Bridge
-        const resumeInfo = status === "error"
+        const nothingToDoSuffix = ship.nothingToDo && phase === "done" ? " (nothing to do)" : "";
+        const resumeInfo = detail === "Process dead"
           ? `\nShip ID: ${ship.id}\nResumable: ${ship.sessionId ? "yes (session available)" : "no (no session — re-sortie only)"}\nWorktree: ${ship.worktreePath}`
           : "";
         const statusMessage = {
           type: "system" as const,
           subtype: "ship-status" as const,
-          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${nothingToDoSuffix}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${phase}${nothingToDoSuffix}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
           meta: {
             category: "ship-status" as const,
             issueNumber: ship.issueNumber,
             issueTitle: ship.issueTitle,
-            ...(status === "error" && { shipId: ship.id }),
           },
         };
         this.bridgeManager.addToHistory(ship.fleetId, statusMessage);
@@ -761,7 +704,7 @@ export class EngineServer {
               repo: ship.repo,
               issueNumber: ship.issueNumber,
               issueTitle: ship.issueTitle,
-              status: ship.status,
+              status: ship.phase,
               branchName: ship.branchName,
             },
           });
@@ -779,51 +722,11 @@ export class EngineServer {
           }
           break;
         }
-        case "ship:accept": {
-          const acceptId = data.id as string;
-          this.shipManager.respondToAcceptanceTest(acceptId, true);
-          // Transactional: sync GitHub label before updating internal state
-          const acceptShip = this.shipManager.getShip(acceptId);
-          if (acceptShip) {
-            this.shipManager.clearAcceptanceTest(acceptId);
-            try {
-              await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");
-              this.shipManager.updateStatus(acceptId, "merging");
-            } catch (err) {
-              console.warn(`[ws-server] Failed to sync label for ship:accept #${acceptShip.issueNumber}:`, err);
-              // Still update internal state — the Ship already received the accept response
-              this.shipManager.updateStatus(acceptId, "merging");
-            }
-          }
-          break;
-        }
-        case "ship:reject": {
-          const rejectId = data.id as string;
-          this.shipManager.respondToAcceptanceTest(
-            rejectId,
-            false,
-            data.feedback as string,
-          );
-          // Transactional: sync GitHub label before updating internal state
-          const rejectShip = this.shipManager.getShip(rejectId);
-          if (rejectShip) {
-            this.shipManager.clearAcceptanceTest(rejectId);
-            try {
-              await this.statusManager.syncPhaseLabel(rejectShip.repo, rejectShip.issueNumber, "implementing");
-              this.shipManager.updateStatus(rejectId, "implementing");
-            } catch (err) {
-              console.warn(`[ws-server] Failed to sync label for ship:reject #${rejectShip.issueNumber}:`, err);
-              // Still update internal state — the Ship already received the reject response
-              this.shipManager.updateStatus(rejectId, "implementing");
-            }
-          }
-          break;
-        }
         case "ship:retry": {
           const retryId = data.id as string;
           const retryShip = this.shipManager.getShip(retryId);
-          if (!retryShip || retryShip.status !== "error") {
-            throw new Error(`Ship "${retryId}" is not in error state`);
+          if (!retryShip || retryShip.phase === "done" || this.processManager.isRunning(retryId)) {
+            throw new Error(`Ship "${retryId}" is not eligible for retry`);
           }
 
           // Load ship rules for re-sortie fallback
@@ -1129,18 +1032,18 @@ export class EngineServer {
       if (response.gate) {
         // Gate check required — initiate gate flow instead of writing response
         const planCommentUrl = request.request === "status-transition" ? request.planCommentUrl : undefined;
-        await this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl, response.gate.previousFeedback);
-        // Write a "pending" response so Ship knows to wait
-        await ShipRequestHandler.writeResponse(ship.worktreePath, {
+        await this.initiateGateCheck(shipId, response.gate.type, response.gate.gatePhase, planCommentUrl, response.gate.previousFeedback);
+        // Write a "pending" response to DB so Ship knows to wait
+        this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", {
           ok: false,
-          error: `Gate check initiated for ${response.gate.from} → ${response.gate.to}. Wait for gate-response.json.`,
+          error: `Gate check initiated for ${response.gate.gatePhase}. Poll DB for gate-response.`,
         });
         console.log(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check initiated: ${response.gate.from} → ${response.gate.to} (${response.gate.type})`,
+          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check initiated: ${response.gate.gatePhase} (${response.gate.type})`,
         );
       } else {
-        // Write response file so Ship CLI can poll for the result
-        await ShipRequestHandler.writeResponse(ship.worktreePath, response);
+        // Write response to DB so Ship CLI can poll for the result
+        this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", response as unknown as Record<string, unknown>);
 
         if (response.ok) {
           console.log(
@@ -1158,19 +1061,16 @@ export class EngineServer {
   private async initiateGateCheck(
     shipId: string,
     gateType: GateType,
-    from: ShipStatus,
-    to: ShipStatus,
+    gatePhase: GatePhase,
     planCommentUrl?: string,
     previousFeedback?: string,
   ): Promise<void> {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
-    const transition = `${from}→${to}` as GateTransition;
-
-    // Dedup guard: skip if a pending gate already exists for this transition
-    if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
-      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
+    // Dedup guard: skip if a pending gate already exists for this gate phase
+    if (ship.gateCheck?.gatePhase === gatePhase && ship.gateCheck.status === "pending") {
+      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${gatePhase} — skipping duplicate`);
       return;
     }
 
@@ -1201,25 +1101,14 @@ export class EngineServer {
 
 
     // Set gate check state on the ship
-    this.shipManager.setGateCheck(shipId, transition, gateType);
-
-    // Write gate-request.json for Ship to detect
-    const gateRequest: GateFileRequest = {
-      transition,
-      gateType,
-      message: `Gate check required: ${transition} (${gateType})`,
-    };
-    const claudeDir = join(ship.worktreePath, ".claude");
-    mkdir(claudeDir, { recursive: true })
-      .then(() => writeFile(join(claudeDir, "gate-request.json"), JSON.stringify(gateRequest, null, 2)))
-      .catch((err) => console.error(`[ws-server] Failed to write gate-request.json:`, err));
+    this.shipManager.setGateCheck(shipId, gatePhase, gateType);
 
     // Notify frontend
     this.broadcast({
       type: "ship:gate-pending",
       data: {
         id: shipId,
-        transition,
+        gatePhase,
         gateType,
         fleetId: ship.fleetId,
         issueNumber: ship.issueNumber,
@@ -1228,7 +1117,7 @@ export class EngineServer {
     });
 
     // Build gate check message for Bridge
-    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType, planCommentUrl, previousFeedback);
+    const gateMessage = this.buildGateCheckMessage(ship, gatePhase, gateType, planCommentUrl, previousFeedback);
 
     // Inject into Bridge chat
     const bridgeMsg = {
@@ -1239,7 +1128,7 @@ export class EngineServer {
         category: "gate-check-request" as const,
         issueNumber: ship.issueNumber,
         issueTitle: ship.issueTitle,
-        transition,
+        gatePhase,
         gateType,
       },
     };
@@ -1256,12 +1145,12 @@ export class EngineServer {
 
   private buildGateCheckMessage(
     ship: ShipProcess,
-    transition: GateTransition,
+    gatePhase: GatePhase,
     gateType: GateType,
     planCommentUrl?: string,
     previousFeedback?: string,
   ): string {
-    const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
+    const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${gatePhase}`;
     const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}\nWorktree: ${ship.worktreePath}\nShip log: ${ship.worktreePath}/.claude/ship-log.jsonl`;
     const escortLine = ship.escortAgentId
       ? `\nEscort agent ID: ${ship.escortAgentId}`
@@ -1288,7 +1177,7 @@ export class EngineServer {
     }
   }
 
-  private onGateApproved(shipId: string, transition: GateTransition): void {
+  private onGateApproved(shipId: string, gatePhase: GatePhase): void {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
@@ -1300,18 +1189,22 @@ export class EngineServer {
       type: "ship:gate-resolved",
       data: {
         id: shipId,
-        transition,
+        gatePhase,
         gateType,
         approved: true,
       },
     });
 
-    // Gate files (gate-request.json, gate-response.json) are cleaned up by Ship
-    // after it reads the response. Engine must not delete them here — Ship polls
-    // with `sleep 2` and may miss the file if it's removed too quickly.
+    // Write gate-response to DB so Ship can poll it
+    if (this.fleetDb) {
+      this.fleetDb.insertMessage(shipId, "gate-response", "engine", {
+        approved: true,
+        gatePhase,
+      });
+    }
   }
 
-  private onGateRejected(shipId: string, transition: GateTransition, feedback?: string): void {
+  private onGateRejected(shipId: string, gatePhase: GatePhase, feedback?: string): void {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
@@ -1323,12 +1216,21 @@ export class EngineServer {
       type: "ship:gate-resolved",
       data: {
         id: shipId,
-        transition,
+        gatePhase,
         gateType,
         approved: false,
         feedback,
       },
     });
+
+    // Write gate-response to DB so Ship can poll it
+    if (this.fleetDb) {
+      this.fleetDb.insertMessage(shipId, "gate-response", "engine", {
+        approved: false,
+        feedback,
+        gatePhase,
+      });
+    }
   }
 
   private runStartupReconciliation(): void {
@@ -1380,7 +1282,7 @@ export class EngineServer {
       type: "ship:status",
       data: {
         id,
-        status: ship.status,
+        status: ship.phase,
         detail: `PR created: ${prUrl}`,
         fleetId: ship.fleetId,
         repo: ship.repo,
@@ -1568,9 +1470,9 @@ export class EngineServer {
           ?? ship.gateCheck.requestedAt;
         if (now - new Date(reminderBase).getTime() <= EngineServer.GATE_REMINDER_INTERVAL_MS) continue;
 
-        const transition = ship.gateCheck.transition;
+        const gatePhase = ship.gateCheck.gatePhase;
         console.log(
-          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... pending (${transition}). Sending reminder to Bridge.`,
+          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... pending (${gatePhase}). Sending reminder to Bridge.`,
         );
 
         // Update lastRemindedAt to avoid spamming
@@ -1579,7 +1481,7 @@ export class EngineServer {
         // Re-send the gate check message to Bridge as a reminder
         const gateMessage = this.buildGateCheckMessage(
           ship,
-          transition,
+          gatePhase,
           ship.gateCheck.gateType,
           undefined,
           ship.gateCheck.feedback,
@@ -1588,6 +1490,19 @@ export class EngineServer {
         this.processManager.sendMessage(bridgeId, `[REMINDER] ${gateMessage}`);
       }
     }
+  }
+
+  private startProcessLivenessCheck(): void {
+    this.processLivenessTimer = setInterval(() => {
+      for (const ship of this.shipManager.getAllShips()) {
+        if (ship.phase !== "done" && !this.processManager.isRunning(ship.id)) {
+          if (!ship.processDead) {
+            this.shipManager.notifyProcessDead(ship.id);
+          }
+        }
+      }
+    }, 30_000);
+    this.processLivenessTimer.unref();
   }
 
   shutdown(): void {
@@ -1599,10 +1514,13 @@ export class EngineServer {
       clearInterval(this.questionTimeoutTimer);
       this.questionTimeoutTimer = null;
     }
+    if (this.processLivenessTimer) {
+      clearInterval(this.processLivenessTimer);
+      this.processLivenessTimer = null;
+    }
     this.shipManager.stopAll();
     this.bridgeManager.stopAll();
     this.processManager.killAll();
-    this.acceptanceWatcher.unwatchAll();
     this.fleetDb?.close();
     this.wss.close();
   }

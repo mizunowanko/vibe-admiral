@@ -58,7 +58,7 @@ STATEEOF
 if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキッ プ、ファイル伝言板方式
+- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキッ プ、DB メッセージボード方式
 - `VIBE_ADMIRAL_DISABLED`（スタンドアロン）: Worktree/ラベル管理をスキル内で実行
 
 ## ステータス遷移（admiral-request プロトコル）
@@ -73,28 +73,38 @@ if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "
 ```
 ````
 
-### Engine レスポンス待機
+### Engine レスポンス待機（DB ポーリング）
 
 ```bash
-while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
-RESPONSE=$(cat .claude/admiral-request-response.json)
-rm -f .claude/admiral-request-response.json
-echo "$RESPONSE"
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 1
+done
 ```
 
 - `ok: true` → 遷移確定
 - `ok: false` + "Gate check" → Gate 待機フロー
 
-### Gate 待機フロー
+### Gate 待機フロー（DB ポーリング）
 
 ```bash
 echo "Gate check initiated. Waiting for Bridge approval..."
-rm -f .claude/admiral-request-response.json
-while [ ! -f .claude/gate-response.json ]; do sleep 2; done
-GATE_RESULT=$(cat .claude/gate-response.json)
-rm -f .claude/gate-response.json
-rm -f .claude/gate-request.json
-echo "$GATE_RESULT"
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 2
+done
 ```
 
 - `approved: true` → 次の作業に進む
@@ -104,9 +114,9 @@ echo "$GATE_RESULT"
 
 | 遷移 | Gate タイプ | 内容 |
 |------|-----------|------|
-| `planning → implementing` | plan-review | Bridge が計画の妥当性を検 証 |
-| `implementing → acceptance-test` | code-review | Bridge が PR の品質を検証 |
-| `acceptance-test → merging` | playwright | Bridge が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
+| `planning → planning-gate` | plan-review | Bridge が計画の妥当性を検 証 |
+| `implementing → implementing-gate` | code-review | Bridge が PR の品質を検証 |
+| `acceptance-test → acceptance-test-gate` | playwright | Bridge が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
 
 ## Sub-Skill ルーティング
 

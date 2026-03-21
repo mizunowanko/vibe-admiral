@@ -51,24 +51,36 @@ PR 作成/push 完了後、`acceptance-test` への遷移を表明する。Engin
 ```
 ````
 
+Engine からの応答を DB でポーリング:
+
 ```bash
-while [ ! -f .claude/admiral-request-response.json ]; do sleep 1; done
-RESPONSE=$(cat .claude/admiral-request-response.json)
-rm -f .claude/admiral-request-response.json
-echo "$RESPONSE"
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 1
+done
 ```
 
 Gate 発動後、Bridge が自動で PR コードレビューを実施する。
-Ship は Gate 待機フローに従い `gate-response.json` を待機する:
+Ship は DB で Gate 応答を待機:
 
 ```bash
 echo "Gate check initiated. Waiting for Bridge approval..."
-rm -f .claude/admiral-request-response.json
-while [ ! -f .claude/gate-response.json ]; do sleep 2; done
-GATE_RESULT=$(cat .claude/gate-response.json)
-rm -f .claude/gate-response.json
-rm -f .claude/gate-request.json
-echo "$GATE_RESULT"
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 2
+done
 ```
 
 - `approved: true` → `/implement-merge` に進む

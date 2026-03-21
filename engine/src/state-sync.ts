@@ -4,12 +4,9 @@ import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import { parseDependsOnLabels } from "./github.js";
 
-/** status/* labels that indicate work-in-progress (not todo, not blocked). */
+/** The only active status label is "status/sortied". */
 export const ACTIVE_STATUS_LABELS = new Set([
-  "status/planning",
-  "status/implementing",
-  "status/acceptance-test",
-  "status/merging",
+  "status/sortied",
 ]);
 
 function sleep(ms: number): Promise<void> {
@@ -25,10 +22,6 @@ export class StateSync {
     this.statusManager = statusManager;
   }
 
-  /**
-   * Pre-sortie validation: check for duplicate ships, existing worktrees,
-   * and active status/* labels that indicate an issue is already in progress.
-   */
   async sortieGuard(
     repo: string,
     issueNumber: number,
@@ -38,7 +31,7 @@ export class StateSync {
     if (existing) {
       return {
         ok: false,
-        reason: `Issue #${issueNumber} already has an active Ship (${existing.id.slice(0, 8)}..., status: ${existing.status})`,
+        reason: `Issue #${issueNumber} already has an active Ship (${existing.id.slice(0, 8)}..., phase: ${existing.phase})`,
       };
     }
 
@@ -51,7 +44,7 @@ export class StateSync {
           reason: `Issue #${issueNumber} is already closed`,
         };
       }
-      if (status === "doing") {
+      if (status === "sortied") {
         return {
           ok: false,
           reason: `Issue #${issueNumber} already has an active status label`,
@@ -67,9 +60,6 @@ export class StateSync {
     return { ok: true };
   }
 
-  /**
-   * Rollback issue status to "status/todo" via StatusManager.
-   */
   async rollbackLabel(
     repo: string,
     issueNumber: number,
@@ -78,18 +68,11 @@ export class StateSync {
     await this.statusManager.rollback(repo, issueNumber, maxRetries);
   }
 
-  /**
-   * Remove worktree with retry, falling back to forceRemove on failure.
-   * Accepts an optional repoRoot so that removal works even if the
-   * worktree directory has already been deleted.
-   */
   async removeWorktreeWithRetry(
     worktreePath: string,
     maxRetries = 3,
     repoRoot?: string,
   ): Promise<void> {
-    // Pre-resolve repoRoot so that later retries and forceRemove
-    // don't fail if the worktree directory disappears mid-cleanup.
     const resolvedRoot = repoRoot ?? await worktree.getRepoRoot(worktreePath).catch(() => undefined);
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -123,6 +106,8 @@ export class StateSync {
 
   /**
    * Handle process exit: clean up worktree & labels based on success/failure.
+   * With the new phase model, there is no "error" phase.
+   * Process death is a derived state (phase ≠ done && process dead).
    */
   async onProcessExit(shipId: string, succeeded: boolean): Promise<void> {
     const ship = this.shipManager.getShip(shipId);
@@ -132,16 +117,13 @@ export class StateSync {
     ship.isCompacting = false;
 
     if (succeeded) {
-      // Update in-memory status immediately so ship-status queries return
-      // the correct state while async GitHub operations are in progress.
-      this.shipManager.updateStatus(shipId, "done");
+      this.shipManager.updatePhase(shipId, "done");
 
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
       // Skip markDone if Ship already handled issue closure (nothing-to-do case)
       if (!ship.nothingToDo) {
-        // Retry markDone with exponential backoff for consistency with failure path
         for (let attempt = 0; attempt <= 3; attempt++) {
           try {
             await this.statusManager.markDone(ship.repo, ship.issueNumber);
@@ -163,7 +145,6 @@ export class StateSync {
         }
       }
 
-      // Audit depends-on/ labels: unblock issues that depended on the closed issue
       try {
         await this.auditDependencies(ship.repo, ship.issueNumber);
       } catch (err) {
@@ -173,23 +154,21 @@ export class StateSync {
         );
       }
     } else {
-      // Update in-memory status immediately so ship-status queries return
-      // "error" while async GitHub operations (rescue check, label rollback)
-      // are in progress. May be overridden to "done" if rescue succeeds.
-      this.shipManager.updateStatus(shipId, "error", "Process exited");
+      // Process died without declaring done.
+      // With the new model, we do NOT set an "error" phase — the ship stays
+      // in its current phase. The UI derives "process dead" from phase ≠ done && no process.
+      // Notify the status change handler so Bridge gets notified.
+      this.shipManager.notifyProcessDead(shipId);
 
       // Check if the issue was already closed (PR merged) on GitHub.
-      // This handles the race where Ship merges the PR but exits before
-      // sending the "done" status-transition request.
       const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
       if (rescued) {
         console.log(
-          `[state-sync] Ship #${ship.issueNumber} exited as error but issue is already closed — treating as done`,
+          `[state-sync] Ship #${ship.issueNumber} exited but issue is already closed — treating as done`,
         );
         await this.removeWorktreeWithRetry(ship.worktreePath);
-        this.shipManager.updateStatus(shipId, "done");
+        this.shipManager.updatePhase(shipId, "done");
 
-        // Audit depends-on/ labels for rescued (already-closed) issues too
         try {
           await this.auditDependencies(ship.repo, ship.issueNumber);
         } catch (err) {
@@ -199,16 +178,12 @@ export class StateSync {
           );
         }
       } else {
-        // Genuinely failed: rollback doing→todo
+        // Genuinely failed: rollback sortied→todo
         await this.rollbackLabel(ship.repo, ship.issueNumber);
       }
     }
   }
 
-  /**
-   * Check if an issue is already closed on GitHub (indicating the PR was merged).
-   * If closed, clean up the status label. Returns true if rescued.
-   */
   private async rescueIfAlreadyDone(
     repo: string,
     issueNumber: number,
@@ -216,7 +191,6 @@ export class StateSync {
     try {
       const issue = await github.getIssue(repo, issueNumber);
       if (issue.state === "closed") {
-        // Issue is closed — remove any leftover status/* label
         const statusLabel = issue.labels.find((l) => l.startsWith("status/"));
         if (statusLabel) {
           try {
@@ -241,12 +215,6 @@ export class StateSync {
     return false;
   }
 
-  /**
-   * Audit depends-on/ labels after an issue is closed.
-   * Finds open issues that have a `depends-on/<closedIssueNumber>` label,
-   * removes that label, and transitions `status/blocked` → `status/todo`
-   * if all dependencies are now resolved.
-   */
   async auditDependencies(
     repo: string,
     closedIssueNumber: number,
@@ -257,7 +225,6 @@ export class StateSync {
     try {
       dependentIssues = await github.listIssues(repo, label);
     } catch {
-      // Label may not exist — that's fine, nothing to audit
       return;
     }
 
@@ -269,10 +236,8 @@ export class StateSync {
 
     for (const issue of dependentIssues) {
       try {
-        // Remove the resolved depends-on/ label
         await github.updateLabels(repo, issue.number, { remove: label });
 
-        // Check if all remaining depends-on/ labels are resolved
         const remainingDeps = parseDependsOnLabels(
           issue.labels.filter((l) => l !== label),
         );
@@ -287,14 +252,12 @@ export class StateSync {
                 break;
               }
             } catch {
-              // Can't verify — assume still blocking
               allResolved = false;
               break;
             }
           }
         }
 
-        // If all deps resolved and issue has status/blocked, transition to status/todo
         if (allResolved && issue.labels.includes("status/blocked")) {
           console.log(
             `[state-sync] All dependencies resolved for #${issue.number} — unblocking (status/blocked → status/todo)`,
@@ -313,21 +276,12 @@ export class StateSync {
     }
   }
 
-  /**
-   * Startup reconciliation: audit active status/* labels and orphan worktrees.
-   * Called once when Engine starts.
-   */
   async reconcileOnStartup(
     repos: Array<{ remote?: string; localPath: string }>,
   ): Promise<void> {
     console.log("[state-sync] Running startup reconciliation...");
 
-    // Restore persisted ships from disk before any cleanup.
-    // This ensures getActiveShipIssueNumbers() returns ships that were active
-    // when the Engine last shut down, preventing false orphan detection.
     await this.shipManager.restoreFromDisk();
-
-    // Purge completed/error ships with no running process (ghosts from previous runs)
     this.shipManager.purgeOrphanShips();
 
     const activeShips = this.shipManager.getActiveShipIssueNumbers();
@@ -338,10 +292,7 @@ export class StateSync {
       const isActive = (issueNumber: number) =>
         activeShips.some((s) => s.repo === repo.remote && s.issueNumber === issueNumber);
 
-      // 1. Audit active status/* labels: if no active Ship, roll back to "status/todo"
-      // Note: "status/blocked" is excluded — it is set manually by Bridge/human
-      // to indicate dependency blocks and should persist across Engine restarts.
-      // Parallelize all label queries with Promise.allSettled to reduce startup latency.
+      // 1. Audit active status/* labels
       const labelResults = await Promise.allSettled(
         [...ACTIVE_STATUS_LABELS].map(async (label) => {
           const labeledIssues = await github.listIssues(repo.remote!, label);
@@ -364,12 +315,29 @@ export class StateSync {
         }
       }
 
+      // Also clean up legacy per-phase labels from pre-refactoring
+      const legacyLabels = ["status/planning", "status/implementing", "status/acceptance-test", "status/merging"];
+      for (const label of legacyLabels) {
+        try {
+          const labeledIssues = await github.listIssues(repo.remote!, label);
+          for (const issue of labeledIssues) {
+            if (!isActive(issue.number)) {
+              console.warn(
+                `[state-sync] Legacy label "${label}" on #${issue.number} — rolling back to "status/todo"`,
+              );
+              await this.rollbackLabel(repo.remote!, issue.number);
+            }
+          }
+        } catch {
+          // Label may not exist
+        }
+      }
+
       // 2. Clean up orphan feature worktrees
       try {
         const repoRoot = await worktree.getRepoRoot(repo.localPath);
         const featureWorktrees = await worktree.listFeatureWorktrees(repoRoot);
         for (const wt of featureWorktrees) {
-          // Extract issue number from branch name: feature/<num>-<slug>
           const match = wt.branch?.match(/^feature\/(\d+)-/);
           if (!match) continue;
           const issueNum = Number(match[1]);
@@ -388,19 +356,18 @@ export class StateSync {
       }
     }
 
-    // 3. Mark restored ships (from disk) that have no running process as "error".
-    // Their worktrees and labels were protected during reconciliation above.
-    // Now mark them so the UI shows they were interrupted by an Engine restart.
+    // 3. Restored ships with no running process remain in their phase.
+    // The UI will show them as "process dead" based on the derived state.
+    // Notify for each so Bridge gets the process-dead notification.
     for (const ship of this.shipManager.getAllShips()) {
       if (
-        ship.status !== "done" &&
-        ship.status !== "error" &&
+        ship.phase !== "done" &&
         !this.shipManager.hasRunningProcess(ship.id)
       ) {
         console.warn(
-          `[state-sync] Ship #${ship.issueNumber} (${ship.id.slice(0, 8)}...) has no running process — marking as error`,
+          `[state-sync] Ship #${ship.issueNumber} (${ship.id.slice(0, 8)}...) has no running process — notifying as process dead`,
         );
-        this.shipManager.updateStatus(ship.id, "error", "Engine restarted — no running process");
+        this.shipManager.notifyProcessDead(ship.id);
       }
     }
 

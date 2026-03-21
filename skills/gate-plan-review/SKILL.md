@@ -7,12 +7,12 @@
 1. **Immediately send `gate-ack`** to reset the Engine's timeout window:
 
 ```admiral-request
-{ "request": "gate-ack", "shipId": "<ship-id>", "transition": "planning→implementing" }
+{ "request": "gate-ack", "shipId": "<ship-id>", "gatePhase": "planning-gate" }
 ```
 
 2. Call `ship-status` to verify the target Ship is still in expected state:
-   - If `error` or `done` → skip, log that gate was skipped
-   - If no pending gate for this transition → skip
+   - If process is dead or phase is `done` → skip, log that gate was skipped
+   - If no pending gate for this gate phase → skip
 
 3. Check if the gate message contains `Escort agent ID: <id>`:
    - **YES**: Resume the existing Escort via `Task(resume="<id>")` (preserves prior review context)
@@ -49,12 +49,12 @@ THEN: Perform plan-review:
 
 If approving:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "planning→implementing", "verdict": "approve" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "approve" }
 \`\`\`
 
 If rejecting:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "planning→implementing", "verdict": "reject", "feedback": "<what needs to be revised>" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "reject", "feedback": "<what needs to be revised>" }
 \`\`\`
 `)
 ```
@@ -83,12 +83,12 @@ Perform plan-review:
 
 If approving:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "planning→implementing", "verdict": "approve" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "approve" }
 \`\`\`
 
 If rejecting:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "planning→implementing", "verdict": "reject", "feedback": "<what needs to be revised>" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "planning-gate", "verdict": "reject", "feedback": "<what needs to be revised>" }
 \`\`\`
 `)
 ```

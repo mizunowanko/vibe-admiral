@@ -55,7 +55,7 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
             {ship.issueTitle || `Issue #${ship.issueNumber}`}
           </span>
           <Badge variant="outline" className="text-[10px] shrink-0">
-            {ship.status}
+            {ship.processDead ? "error" : ship.phase}
           </Badge>
           {ship.isCompacting && (
             <Badge className="text-[10px] bg-purple-500/20 text-purple-400 shrink-0">

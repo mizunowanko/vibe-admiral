@@ -3,9 +3,9 @@ import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn, isSafeUrl } from "@/lib/utils";
-import { STATUS_CONFIG } from "@/lib/ship-status";
-import { Square, ExternalLink } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { Square } from "lucide-react";
 
 interface BridgeShipBarProps {
   fleetId: string;
@@ -16,10 +16,9 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
-  const acceptTest = useShipStore((s) => s.acceptTest);
 
   const fleetShips = Array.from(ships.values()).filter(
-    (s) => s.fleetId === fleetId && s.status !== "done" && s.status !== "error",
+    (s) => s.fleetId === fleetId && s.phase !== "done" && !s.processDead,
   );
 
   if (fleetShips.length === 0) return null;
@@ -38,8 +37,10 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
       <ScrollArea className="flex-1">
         <div className="grid grid-cols-1 gap-2 p-3">
           {fleetShips.map((ship) => {
-            const config = STATUS_CONFIG[ship.status];
-            const isActive = ship.status !== "done" && ship.status !== "error";
+            const config = ship.processDead
+              ? PROCESS_DEAD_CONFIG
+              : STATUS_CONFIG[ship.phase];
+            const isActive = ship.phase !== "done" && !ship.processDead;
             const isSelected = ship.id === selectedShipId;
 
             return (
@@ -48,8 +49,6 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                 onClick={() => selectShip(isSelected ? null : ship.id)}
                 className={cn(
                   "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
-                  ship.status === "acceptance-test" &&
-                    "border-amber-500/50 ring-1 ring-amber-500/20",
                   ship.gateCheck?.status === "pending" &&
                     "border-sky-500/50 ring-1 ring-sky-500/20",
                   isSelected &&
@@ -100,39 +99,6 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                 <p className="truncate text-muted-foreground mt-0.5">
                   {ship.repo}
                 </p>
-
-                {/* Acceptance test action */}
-                {ship.status === "acceptance-test" && ship.acceptanceTest && (
-                  <div className="mt-1.5 pt-1.5 border-t border-border flex items-center gap-2">
-                    {isSafeUrl(ship.acceptanceTest.url) ? (
-                      <a
-                        href={ship.acceptanceTest.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-primary hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <ExternalLink className="h-2.5 w-2.5" />
-                        Test
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {ship.acceptanceTest.url}
-                      </span>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-5 text-[10px] px-1.5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        acceptTest(ship.id);
-                      }}
-                    >
-                      Accept
-                    </Button>
-                  </div>
-                )}
               </div>
             );
           })}

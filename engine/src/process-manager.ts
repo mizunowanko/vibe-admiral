@@ -43,6 +43,7 @@ export class ProcessManager extends EventEmitter {
     issueNumber: number,
     extraPrompt?: string,
     skill?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // See .claude/rules/cli-subprocess.md for full rationale.
     //
@@ -80,6 +81,8 @@ export class ProcessManager extends EventEmitter {
         env: {
           ...process.env,
           VIBE_ADMIRAL: "true",
+          VIBE_ADMIRAL_SHIP_ID: id,
+          ...extraEnv,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -227,6 +230,7 @@ export class ProcessManager extends EventEmitter {
     sessionId: string,
     message: string,
     cwd: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // Same stdio/disallowedTools constraints as sortie().
     // See .claude/rules/cli-subprocess.md for full rationale.
@@ -249,6 +253,8 @@ export class ProcessManager extends EventEmitter {
         env: {
           ...process.env,
           VIBE_ADMIRAL: "true",
+          VIBE_ADMIRAL_SHIP_ID: id,
+          ...extraEnv,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

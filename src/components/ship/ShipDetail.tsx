@@ -1,7 +1,6 @@
 import { useRef, useEffect } from "react";
 import { useShip } from "@/hooks/useShip";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { AcceptanceTestBanner } from "./AcceptanceTestBanner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +43,7 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
             {ship.issueTitle || `Issue #${ship.issueNumber}`}
           </span>
           <Badge variant="outline" className="text-[10px] shrink-0">
-            {ship.status}
+            {ship.processDead ? "error" : ship.phase}
           </Badge>
           {ship.isCompacting && (
             <Badge className="text-[10px] bg-purple-500/20 text-purple-400 shrink-0">
@@ -80,7 +79,7 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
                   : ship.gateCheck.status === "rejected" ? "text-red-400"
                     : "text-green-400"
               }`}>
-                Gate: {ship.gateCheck.transition}
+                Gate: {ship.gateCheck.gatePhase}
               </span>
               <span className="text-xs text-muted-foreground">
                 {ship.gateCheck.gateType} | {ship.gateCheck.status}
@@ -92,13 +91,6 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
               </p>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Acceptance Test Banner */}
-      {ship.status === "acceptance-test" && (
-        <div className="p-3">
-          <AcceptanceTestBanner ship={ship} />
         </div>
       )}
 
