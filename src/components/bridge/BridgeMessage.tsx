@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/components/chat/ChatMessage";
@@ -8,7 +9,7 @@ interface BridgeMessageProps {
   repeatCount?: number;
 }
 
-export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
+export const BridgeMessage = memo(function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
   const isSystem = message.type === "system";
 
   // System messages with structured metadata — render as compact 1-line card
@@ -81,4 +82,4 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
 
   // Delegate to shared ChatMessage for all other types
   return <ChatMessage message={message} repeatCount={repeatCount} />;
-}
+});

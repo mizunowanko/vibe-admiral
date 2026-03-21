@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect, useMemo, useState, useCallback } from "react";
+import { memo, useRef, useEffect, useLayoutEffect, useMemo, useState, useCallback } from "react";
 import { useBridge } from "@/hooks/useBridge";
 import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
@@ -40,6 +40,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
+  const savedScrollTopRef = useRef<number | null>(null);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
 
@@ -70,8 +71,20 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   }, [fleetId]);
 
   useEffect(() => {
-    const grew = messages.length > prevMessageCountRef.current;
-    prevMessageCountRef.current = messages.length;
+    const prevCount = prevMessageCountRef.current;
+    const curCount = messages.length;
+    prevMessageCountRef.current = curCount;
+
+    // History replacement: messages went from N to M where both > 0 and M < N
+    // or messages were completely replaced (reference changed but count similar).
+    // In either case, if user wasn't at bottom, save scroll position for restore.
+    const grew = curCount > prevCount;
+    const isHistoryReplace = prevCount > 0 && !grew && curCount > 0;
+
+    if (isHistoryReplace && !isAtBottomRef.current && scrollRef.current) {
+      // Save scroll position before React re-renders the DOM
+      savedScrollTopRef.current = scrollRef.current.scrollTop;
+    }
 
     if (isAtBottomRef.current) {
       if (scrollRef.current) {
@@ -81,6 +94,14 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
       setHasNewMessages(true);
     }
   }, [messages, isLoading]);
+
+  // Restore scroll position after DOM update when history was replaced
+  useLayoutEffect(() => {
+    if (savedScrollTopRef.current !== null && scrollRef.current) {
+      scrollRef.current.scrollTop = savedScrollTopRef.current;
+      savedScrollTopRef.current = null;
+    }
+  }, [messages]);
 
   if (!fleetId) {
     return (
@@ -129,7 +150,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
               </p>
             )}
             {displayMessages.map((msg, i) => (
-              <BridgeMessage key={i} message={msg} repeatCount={msg.repeatCount} />
+              <BridgeMessage key={msg.timestamp ?? i} message={msg} repeatCount={msg.repeatCount} />
             ))}
             {isLoading && (
               <div className="flex items-center gap-2 text-muted-foreground">

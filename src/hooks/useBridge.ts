@@ -7,6 +7,7 @@ export function useBridge(fleetId: string | null) {
   const [isLoading, setIsLoading] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const pendingToolUseId = useRef<string | null>(null);
+  const historyLoadedRef = useRef(false);
 
   useEffect(() => {
     if (!fleetId) {
@@ -14,8 +15,11 @@ export function useBridge(fleetId: string | null) {
       setIsLoading(false);
       setPendingQuestion(null);
       pendingToolUseId.current = null;
+      historyLoadedRef.current = false;
       return;
     }
+
+    historyLoadedRef.current = false;
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
       if (msg.type === "bridge:stream") {
@@ -27,6 +31,7 @@ export function useBridge(fleetId: string | null) {
                 data.message.content ?? "[]",
               ) as StreamMessage[];
               setMessages(history);
+              historyLoadedRef.current = true;
               // Restore pending question if the last history message is a question
               const last = history[history.length - 1];
               if (last?.type === "question") {
@@ -79,12 +84,16 @@ export function useBridge(fleetId: string | null) {
       }
     });
 
-    // Request history
+    // Request history on initial connect
     wsClient.send({ type: "bridge:history", data: { fleetId } });
 
-    // Re-fetch history on reconnect (Engine may have restarted with persisted data)
+    // Re-fetch history on reconnect only if we haven't loaded yet
+    // (Engine may have restarted — but if we already have live messages, skip
+    // the full history fetch to avoid scroll position reset)
     const unsubConnect = wsClient.onConnect(() => {
-      wsClient.send({ type: "bridge:history", data: { fleetId } });
+      if (!historyLoadedRef.current) {
+        wsClient.send({ type: "bridge:history", data: { fleetId } });
+      }
     });
 
     return () => {
