@@ -1,4 +1,8 @@
-import type { SystemMessageMeta, StreamMessageSubtype } from "@/types";
+import type {
+  SystemMessageMeta,
+  StreamMessageSubtype,
+  LookoutAlertType,
+} from "@/types";
 import { cn } from "@/lib/utils";
 
 const GATE_TYPE_LABELS: Record<string, string> = {
@@ -10,6 +14,21 @@ const GATE_TYPE_LABELS: Record<string, string> = {
 
 function gateLabel(gateType?: string): string {
   return gateType ? (GATE_TYPE_LABELS[gateType] ?? gateType) : "Gate";
+}
+
+const ALERT_TYPE_LABELS: Record<LookoutAlertType, string> = {
+  "no-output-stall": "no output",
+  "gate-wait-stall": "gate wait",
+  "excessive-retries": "retried",
+};
+
+function lookoutLabel(meta: SystemMessageMeta): string {
+  const issueRef = meta.issueNumber ? `#${meta.issueNumber}` : "";
+  const alertLabel = meta.alertType
+    ? ALERT_TYPE_LABELS[meta.alertType]
+    : "alert";
+  const detail = meta.branchName ? ` (${meta.branchName})` : "";
+  return `${issueRef} Lookout: ${alertLabel}${detail}`;
 }
 
 const STYLE: Record<
@@ -65,7 +84,7 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
         : `${issueRef} PR レビュー依頼`;
       break;
     case "lookout-alert":
-      label = `${issueRef} Lookout 異常検知`;
+      label = lookoutLabel(meta);
       break;
     default:
       return null;

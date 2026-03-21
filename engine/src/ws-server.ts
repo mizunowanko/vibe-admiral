@@ -412,6 +412,7 @@ export class EngineServer {
           issueTitle: alert.issueTitle,
           alertType: alert.alertType,
           shipId: alert.shipId,
+          branchName: ship.branchName,
         },
       };
 
