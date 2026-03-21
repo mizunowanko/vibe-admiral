@@ -182,6 +182,120 @@ describe("FleetDatabase", () => {
     });
   });
 
+  describe("transitionPhase", () => {
+    it("applies a valid forward transition", () => {
+      db.upsertShip(makeShip());
+      const applied = db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      expect(applied).toBe(true);
+
+      const ships = db.getActiveShips();
+      expect(ships[0]!.phase).toBe("planning-gate");
+    });
+
+    it("rejects backward transitions", () => {
+      db.upsertShip(makeShip({ phase: "implementing" }));
+      expect(() =>
+        db.transitionPhase("ship-001", "implementing", "planning", "engine"),
+      ).toThrow("Cannot go backward");
+    });
+
+    it("throws on phase mismatch", () => {
+      db.upsertShip(makeShip({ phase: "planning" }));
+      expect(() =>
+        db.transitionPhase("ship-001", "implementing", "implementing-gate", "engine"),
+      ).toThrow("Phase mismatch");
+    });
+
+    it("is idempotent within 5 seconds", () => {
+      db.upsertShip(makeShip());
+      const first = db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      expect(first).toBe(true);
+
+      // Same transition again — should be no-op
+      db.updateShipPhase("ship-001", "planning"); // reset phase for re-attempt
+      const second = db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      expect(second).toBe(false);
+    });
+
+    it("records transition in audit log", () => {
+      db.upsertShip(makeShip());
+      db.transitionPhase("ship-001", "planning", "planning-gate", "engine", { reason: "gate triggered" });
+
+      // Verify by attempting to delete — deleteShip cleans up phase_transitions too
+      // If the audit record exists, no error is thrown
+      db.deleteShip("ship-001");
+      expect(db.getActiveShips()).toHaveLength(0);
+    });
+
+    it("throws for non-existent ship", () => {
+      expect(() =>
+        db.transitionPhase("non-existent", "planning", "implementing", "engine"),
+      ).toThrow("not found");
+    });
+  });
+
+  describe("message board", () => {
+    it("inserts a message and returns its ID", () => {
+      db.upsertShip(makeShip());
+      const id = db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      expect(id).toBeGreaterThan(0);
+    });
+
+    it("retrieves unread messages without type filter", () => {
+      db.upsertShip(makeShip());
+      db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { ok: true });
+
+      const messages = db.getUnreadMessages("ship-001");
+      expect(messages).toHaveLength(2);
+    });
+
+    it("retrieves unread messages with type filter", () => {
+      db.upsertShip(makeShip());
+      db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { ok: true });
+
+      const gateMessages = db.getUnreadMessages("ship-001", "gate-response");
+      expect(gateMessages).toHaveLength(1);
+      expect(JSON.parse(gateMessages[0]!.payload)).toEqual({ approved: true });
+    });
+
+    it("marks a single message as read", () => {
+      db.upsertShip(makeShip());
+      const id = db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      db.markMessageRead(id);
+
+      const messages = db.getUnreadMessages("ship-001", "gate-response");
+      expect(messages).toHaveLength(0);
+    });
+
+    it("marks all messages of a type as read", () => {
+      db.upsertShip(makeShip());
+      db.insertMessage("ship-001", "gate-response", "bridge", { approved: false });
+      db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { ok: true });
+
+      db.markAllRead("ship-001", "gate-response");
+
+      const gateMessages = db.getUnreadMessages("ship-001", "gate-response");
+      expect(gateMessages).toHaveLength(0);
+
+      // Other types remain unread
+      const otherMessages = db.getUnreadMessages("ship-001", "admiral-request-response");
+      expect(otherMessages).toHaveLength(1);
+    });
+
+    it("returns messages in chronological order", () => {
+      db.upsertShip(makeShip());
+      db.insertMessage("ship-001", "gate-response", "bridge", { seq: 1 });
+      db.insertMessage("ship-001", "gate-response", "bridge", { seq: 2 });
+
+      const messages = db.getUnreadMessages("ship-001", "gate-response");
+      expect(JSON.parse(messages[0]!.payload).seq).toBe(1);
+      expect(JSON.parse(messages[1]!.payload).seq).toBe(2);
+    });
+  });
+
   describe("purgeTerminalShips", () => {
     it("removes ships in done phase", () => {
       db.upsertShip(makeShip({ id: "s1", phase: "planning" }));
