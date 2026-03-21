@@ -1,22 +1,34 @@
-// === Ship Status ===
-export type ShipStatus =
+// === Phase ===
+// Gate is a phase: planning → planning-gate → implementing → implementing-gate
+// → acceptance-test → acceptance-test-gate → merging → done
+// "error" is a derived state: phase ≠ done && process dead.
+export type Phase =
   | "planning"
+  | "planning-gate"
   | "implementing"
+  | "implementing-gate"
   | "acceptance-test"
+  | "acceptance-test-gate"
   | "merging"
-  | "done"
-  | "error";
+  | "done";
 
-/** Classification of Ship error cause. */
-export type ShipErrorType = "rate_limit" | "unknown";
+/** @deprecated Use Phase instead. Kept as alias for migration compatibility. */
+export type ShipStatus = Phase;
 
-// === Gate ===
+/** Ordered list of all phases for forward-only validation. */
+export const PHASE_ORDER: readonly Phase[] = [
+  "planning",
+  "planning-gate",
+  "implementing",
+  "implementing-gate",
+  "acceptance-test",
+  "acceptance-test-gate",
+  "merging",
+  "done",
+] as const;
 
-/** A transition key in the format "from→to" (using full-width arrow). */
-export type GateTransition =
-  | "planning→implementing"
-  | "implementing→acceptance-test"
-  | "acceptance-test→merging";
+/** Gate phases and their associated gate types. */
+export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
 
 /** Gate type determines which Dispatch sub-agent or mechanism handles the check. */
 export type GateType = "plan-review" | "code-review" | "playwright";
@@ -24,22 +36,41 @@ export type GateType = "plan-review" | "code-review" | "playwright";
 /** Per-gate configuration: true = default type, string = specific type, false = disabled. */
 export type GateConfig = boolean | GateType;
 
-/** Fleet-level gate settings. Omitted transitions use defaults. */
-export type FleetGateSettings = Partial<Record<GateTransition, GateConfig>>;
+/** Fleet-level gate settings. Omitted gate phases use defaults. */
+export type FleetGateSettings = Partial<Record<GatePhase, GateConfig>>;
 
-/** Default gate types for each transition. */
-export const DEFAULT_GATE_TYPES: Record<GateTransition, GateType> = {
-  "planning→implementing": "plan-review",
-  "implementing→acceptance-test": "code-review",
-  "acceptance-test→merging": "playwright",
+/** Default gate types for each gate phase. */
+export const DEFAULT_GATE_TYPES: Record<GatePhase, GateType> = {
+  "planning-gate": "plan-review",
+  "implementing-gate": "code-review",
+  "acceptance-test-gate": "playwright",
 };
+
+/** The phase that follows each gate phase when approved. */
+export const GATE_NEXT_PHASE: Record<GatePhase, Phase> = {
+  "planning-gate": "implementing",
+  "implementing-gate": "acceptance-test",
+  "acceptance-test-gate": "merging",
+};
+
+/** The phase preceding each gate phase (what triggers the gate). */
+export const GATE_PREV_PHASE: Record<GatePhase, Phase> = {
+  "planning-gate": "planning",
+  "implementing-gate": "implementing",
+  "acceptance-test-gate": "acceptance-test",
+};
+
+/** Check if a phase is a gate phase. */
+export function isGatePhase(phase: Phase): phase is GatePhase {
+  return phase === "planning-gate" || phase === "implementing-gate" || phase === "acceptance-test-gate";
+}
 
 /** Status of a pending gate check. */
 export type GateStatus = "pending" | "approved" | "rejected";
 
 /** Gate check state stored on a Ship. */
 export interface GateCheckState {
-  transition: GateTransition;
+  gatePhase: GatePhase;
   gateType: GateType;
   status: GateStatus;
   feedback?: string;
@@ -49,6 +80,9 @@ export interface GateCheckState {
   /** ISO timestamp when the last reminder was sent to Bridge. */
   lastRemindedAt?: string;
 }
+
+/** @deprecated Use GatePhase instead. Kept for backward compat in admiral-protocol. */
+export type GateTransition = GatePhase;
 
 // === Fleet ===
 export interface FleetRepo {
@@ -72,7 +106,7 @@ export interface Fleet {
   bridgeRulePaths?: string[];
   /** Rule files loaded only for Ship sessions (e.g. implementation constraints). */
   shipRulePaths?: string[];
-  /** Gate settings: which transition gates are enabled and their types. */
+  /** Gate settings: which gate phases are enabled and their types. */
   gates?: FleetGateSettings;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
@@ -89,24 +123,21 @@ export interface Ship {
   repo: string;
   issueNumber: number;
   issueTitle: string;
-  status: ShipStatus;
+  phase: Phase;
+  /** Whether the Ship process is dead (derived: phase ≠ done && process not running). */
+  processDead: boolean;
   isCompacting: boolean;
   branchName: string;
   worktreePath: string;
   sessionId: string | null;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
-  errorType: ShipErrorType | null;
+  escortAgentId: string | null;
   retryCount: number;
+  nothingToDo?: boolean;
+  nothingToDoReason?: string;
   createdAt: string;
-}
-
-export interface AcceptanceTestRequest {
-  url: string;
-  checks: string[];
 }
 
 // === Issue ===
@@ -123,7 +154,6 @@ export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
   | "bridge-status"
-  | "acceptance-test"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request"
@@ -135,7 +165,6 @@ export type StreamMessageSubtype =
 // === Lookout ===
 export type LookoutAlertType =
   | "gate-wait-stall"
-  | "acceptance-test-stall"
   | "no-output-stall"
   | "excessive-retries";
 
@@ -143,7 +172,7 @@ export interface SystemMessageMeta {
   category: StreamMessageSubtype;
   issueNumber?: number;
   issueTitle?: string;
-  transition?: string;
+  gatePhase?: GatePhase;
   gateType?: GateType;
   prNumber?: number;
   prUrl?: string;
@@ -164,7 +193,7 @@ export interface StreamMessage {
 }
 
 // === Issue Status (GitHub label-based) ===
-export type IssueStatus = "todo" | "doing" | "done";
+export type IssueStatus = "todo" | "sortied" | "done";
 
 // === Label Operations ===
 export interface LabelOps {
@@ -205,23 +234,22 @@ export type BridgeRequest =
   | { request: "ship-stop"; shipId: string }
   | { request: "ship-resume"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
-  | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
-  | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number }
+  | { request: "gate-result"; shipId: string; gatePhase: GatePhase; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
+  | { request: "gate-ack"; shipId: string; gatePhase: GatePhase; issueNumber?: number }
   | { request: "escort-registered"; shipId: string; agentId: string; issueNumber?: number };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
-  | { request: "status-transition"; status: ShipStatus; planCommentUrl?: string; qaRequired?: boolean }
+  | { request: "status-transition"; status: Phase; planCommentUrl?: string; qaRequired?: boolean }
   | { request: "nothing-to-do"; reason: string };
 
 // === Admiral Request (union of Bridge + Ship requests) ===
 export type AdmiralRequest = BridgeRequest | ShipRequest;
 
-// === Admiral Request Response (file-based IPC: Ship ← Engine) ===
-export interface AdmiralRequestResponse {
-  ok: boolean;
-  error?: string;
-}
+// === DB Message Types ===
+export type DbMessageType =
+  | "gate-response"
+  | "admiral-request-response";
 
 // === Ship Process Info ===
 export interface ShipProcess {
@@ -233,16 +261,13 @@ export interface ShipProcess {
   worktreePath: string;
   branchName: string;
   sessionId: string | null;
-  status: ShipStatus;
+  phase: Phase;
   isCompacting: boolean;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   /** Whether this Ship requires QA (Playwright) gate before merging. Determined by Ship during planning. Defaults to true. */
   qaRequired: boolean;
-  errorType: ShipErrorType | null;
   retryCount: number;
   nothingToDo?: boolean;
   nothingToDoReason?: string;
@@ -252,6 +277,8 @@ export interface ShipProcess {
   escortAgentId: string | null;
   /** Timestamp (ms epoch) of last stdout data from Ship process. Used by Lookout. */
   lastOutputAt: number | null;
+  /** Whether this Ship's process has died without reaching "done". Derived state. */
+  processDead?: boolean;
 }
 
 // === Persisted Bridge Session (disk persistence across Engine restarts) ===
@@ -259,16 +286,4 @@ export interface PersistedBridgeSession {
   fleetId: string;
   sessionId: string | null;
   createdAt: string;
-}
-
-// === Gate File IPC (Engine → Ship file message board) ===
-export interface GateFileRequest {
-  transition: GateTransition;
-  gateType: GateType;
-  message: string;
-}
-
-export interface GateFileResponse {
-  approved: boolean;
-  feedback?: string;
 }

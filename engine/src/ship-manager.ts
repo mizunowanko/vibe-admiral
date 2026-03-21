@@ -1,35 +1,31 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
-import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, ShipStatus, FleetSkillSources, GateTransition, GateType, GateFileResponse } from "./types.js";
+import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, DbMessageType } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
 export class ShipManager {
   private ships = new Map<string, ShipProcess>();
   private processManager: ProcessManager;
-  private acceptanceWatcher: AcceptanceWatcher;
   private statusManager: StatusManager;
   private fleetDb: FleetDatabase | null = null;
-  private onStatusChange:
-    | ((id: string, status: ShipStatus, detail?: string) => void)
+  private onPhaseChange:
+    | ((id: string, phase: Phase, detail?: string) => void)
     | null = null;
 
   constructor(
     processManager: ProcessManager,
-    acceptanceWatcher: AcceptanceWatcher,
     statusManager: StatusManager,
   ) {
     this.processManager = processManager;
-    this.acceptanceWatcher = acceptanceWatcher;
     this.statusManager = statusManager;
   }
 
@@ -37,10 +33,10 @@ export class ShipManager {
     this.fleetDb = db;
   }
 
-  setStatusChangeHandler(
-    handler: (id: string, status: ShipStatus, detail?: string) => void,
+  setPhaseChangeHandler(
+    handler: (id: string, phase: Phase, detail?: string) => void,
   ): void {
-    this.onStatusChange = handler;
+    this.onPhaseChange = handler;
   }
 
   async sortie(
@@ -52,9 +48,9 @@ export class ShipManager {
     extraPrompt?: string,
     skill?: string,
   ): Promise<ShipProcess> {
-    // Clean up all completed ships (done/error) on every new sortie
+    // Clean up all completed ships (done) on every new sortie
     for (const [id, ship] of this.ships) {
-      if (ship.status === "done" || ship.status === "error") {
+      if (ship.phase === "done") {
         this.ships.delete(id);
         this.fleetDb?.deleteShip(id);
       }
@@ -66,7 +62,7 @@ export class ShipManager {
     const issue = await github.getIssue(repo, issueNumber);
 
     // 2. Update issue status: todo → doing (via StatusManager)
-    await this.statusManager.markDoing(repo, issueNumber);
+    await this.statusManager.markSortied(repo, issueNumber);
 
     // 3. Create worktree
     const repoRoot = await worktree.getRepoRoot(localPath);
@@ -116,19 +112,16 @@ export class ShipManager {
       repo,
       issueNumber,
       issueTitle: issue.title,
-      status: "planning",
+      phase: "planning",
       isCompacting: false,
       branchName,
       worktreePath,
       sessionId: null,
       prUrl: existingPrUrl,
       prReviewStatus: existingPrReviewStatus,
-      acceptanceTest: null,
-      acceptanceTestApproved: false,
       gateCheck: null,
       qaRequired: true,
       escortAgentId: null,
-      errorType: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
       lastOutputAt: null,
@@ -144,23 +137,25 @@ export class ShipManager {
       ? `${extraPrompt}${prContext}`
       : prContext || undefined;
 
-    // 9. Launch Claude CLI process
-    this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill);
+    // 9. Launch Claude CLI process with DB path for message polling
+    const shipEnv: Record<string, string> = {
+      VIBE_ADMIRAL_MAIN_REPO: repo,
+    };
+    if (this.fleetDb) {
+      shipEnv.VIBE_ADMIRAL_DB_PATH = this.fleetDb.path;
+    }
+    this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
-    // 10. Start acceptance test watcher
-    this.acceptanceWatcher.watch(worktreePath, shipId);
-
-    this.updateStatus(shipId, "planning");
+    this.updatePhase(shipId, "planning");
     return ship;
   }
 
   stopShip(shipId: string): boolean {
     const killed = this.processManager.kill(shipId);
     if (killed) {
-      this.acceptanceWatcher.unwatch(shipId);
       const ship = this.ships.get(shipId);
       if (ship) ship.isCompacting = false;
-      this.updateStatus(shipId, "error", "Manually stopped");
+      this.updatePhase(shipId, "done", "Manually stopped");
     }
     return killed;
   }
@@ -192,7 +187,7 @@ export class ShipManager {
     // 3. issueNumber fallback (active ships only)
     if (issueNumber !== undefined) {
       for (const ship of this.ships.values()) {
-        if (ship.issueNumber === issueNumber && ship.status !== "done" && ship.status !== "error") {
+        if (ship.issueNumber === issueNumber && ship.phase !== "done") {
           return ship;
         }
       }
@@ -213,7 +208,7 @@ export class ShipManager {
 
   getShipByIssue(repo: string, issueNumber: number): ShipProcess | undefined {
     for (const ship of this.ships.values()) {
-      if (ship.repo === repo && ship.issueNumber === issueNumber && ship.status !== "done" && ship.status !== "error") {
+      if (ship.repo === repo && ship.issueNumber === issueNumber && ship.phase !== "done") {
         return ship;
       }
     }
@@ -223,7 +218,7 @@ export class ShipManager {
   getActiveShipIssueNumbers(): Array<{ repo: string; issueNumber: number }> {
     const active: Array<{ repo: string; issueNumber: number }> = [];
     for (const ship of this.ships.values()) {
-      if (ship.status !== "done" && ship.status !== "error") {
+      if (ship.phase !== "done") {
         active.push({ repo: ship.repo, issueNumber: ship.issueNumber });
       }
     }
@@ -234,23 +229,33 @@ export class ShipManager {
     return this.processManager.isRunning(shipId);
   }
 
-  updateStatus(id: string, status: ShipStatus, detail?: string): void {
+  /**
+   * Notify that a Ship's process has died without reaching "done".
+   * Sets processDead flag and triggers phase change notification so
+   * Bridge/frontend can display the derived "process dead" state.
+   */
+  notifyProcessDead(shipId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.processDead = true;
+    // Trigger notification without changing the phase — the UI derives
+    // "process dead" from phase ≠ done && processDead flag.
+    this.onPhaseChange?.(shipId, ship.phase, "Process dead");
+  }
+
+  updatePhase(id: string, phase: Phase, detail?: string): void {
     const ship = this.ships.get(id);
     if (ship) {
-      const previousStatus = ship.status;
-      // Defensive: clear acceptanceTest when leaving acceptance-test status
-      if (ship.status === "acceptance-test" && status !== "acceptance-test") {
-        ship.acceptanceTest = null;
-      }
-      ship.status = status;
-      if (status === "done" || status === "error") {
+      const previousPhase = ship.phase;
+      ship.phase = phase;
+      if (phase === "done") {
         ship.completedAt = Date.now();
         ship.escortAgentId = null;
       }
       // Note: GitHub label sync is now handled transactionally by ShipRequestHandler.
       // This method only updates in-memory state and notifies the frontend.
-      this.onStatusChange?.(id, status, detail);
-      this.persistToDb(ship, previousStatus);
+      this.onPhaseChange?.(id, phase, detail);
+      this.persistToDb(ship, previousPhase);
     }
   }
 
@@ -269,21 +274,6 @@ export class ShipManager {
     }
   }
 
-  setAcceptanceTest(
-    shipId: string,
-    request: { url: string; checks: string[] },
-  ): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-    ship.acceptanceTest = request;
-  }
-
-  clearAcceptanceTest(shipId: string): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-    ship.acceptanceTest = null;
-  }
-
   respondToPRReview(
     shipId: string,
     result: { verdict: "approve" | "request-changes"; comments?: string },
@@ -294,37 +284,15 @@ export class ShipManager {
       result.verdict === "approve" ? "approved" : "changes-requested";
   }
 
-  respondToAcceptanceTest(
-    shipId: string,
-    accepted: boolean,
-    feedback?: string,
-  ): void {
-    const ship = this.ships.get(shipId);
-    if (!ship) return;
-
-    if (accepted) {
-      ship.acceptanceTestApproved = true;
-    }
-
-    this.acceptanceWatcher
-      .respond(ship.worktreePath, { accepted, feedback })
-      .catch((err) => {
-        console.error(
-          `Failed to write acceptance test response for ${shipId}:`,
-          err,
-        );
-      });
-  }
-
   setGateCheck(
     shipId: string,
-    transition: GateTransition,
+    gatePhase: GatePhase,
     gateType: GateType,
   ): void {
     const ship = this.ships.get(shipId);
     if (!ship) return;
     ship.gateCheck = {
-      transition,
+      gatePhase,
       gateType,
       status: "pending",
       requestedAt: new Date().toISOString(),
@@ -352,25 +320,17 @@ export class ShipManager {
     ship.escortAgentId = null;
   }
 
-  async respondToGate(
+  writeDbMessage(
     shipId: string,
-    approved: boolean,
-    feedback?: string,
-  ): Promise<void> {
-    const ship = this.ships.get(shipId);
-    if (!ship || !ship.gateCheck) return;
-
-    ship.gateCheck.status = approved ? "approved" : "rejected";
-    if (feedback) ship.gateCheck.feedback = feedback;
-
-    // Write gate-response.json for Ship CLI to poll
-    const claudeDir = join(ship.worktreePath, ".claude");
-    await mkdir(claudeDir, { recursive: true });
-    const response: GateFileResponse = { approved, feedback };
-    await writeFile(
-      join(claudeDir, "gate-response.json"),
-      JSON.stringify(response, null, 2),
-    );
+    type: DbMessageType,
+    sender: string,
+    payload: Record<string, unknown>,
+  ): void {
+    if (!this.fleetDb) {
+      console.warn("[ship-manager] Cannot write DB message: no database");
+      return;
+    }
+    this.fleetDb.insertMessage(shipId, type, sender, payload);
   }
 
   private async deploySkills(
@@ -430,14 +390,14 @@ export class ShipManager {
   }
 
   /**
-   * Remove completed/error Ships that have no running process.
+   * Remove completed Ships that have no running process.
    * Called during startup reconciliation to clear ghosts from previous runs.
    */
   purgeOrphanShips(): number {
     let purged = 0;
     for (const [id, ship] of this.ships) {
       if (
-        (ship.status === "done" || ship.status === "error") &&
+        ship.phase === "done" &&
         !this.processManager.isRunning(id)
       ) {
         this.ships.delete(id);
@@ -452,8 +412,9 @@ export class ShipManager {
   }
 
   /**
-   * Retry an errored Ship. If the Ship has a sessionId, resume the session.
+   * Retry a dead Ship. If the Ship has a sessionId, resume the session.
    * Otherwise, re-sortie from scratch.
+   * Retryable condition: phase !== "done" && process is dead.
    * Returns the resumed/re-launched ShipProcess, or null if not retryable.
    */
   retryShip(
@@ -462,10 +423,23 @@ export class ShipManager {
     skill?: string,
   ): ShipProcess | null {
     const ship = this.ships.get(shipId);
-    if (!ship || ship.status !== "error") return null;
+    if (!ship) return null;
+
+    // Only retry if the process is dead and phase is not terminal
+    if (ship.phase === "done" || this.processManager.isRunning(shipId)) {
+      return null;
+    }
 
     ship.retryCount++;
-    ship.errorType = null;
+    ship.processDead = false;
+
+    // Build extra env vars for the Ship process
+    const shipEnv: Record<string, string> = {
+      VIBE_ADMIRAL_MAIN_REPO: ship.repo,
+    };
+    if (this.fleetDb) {
+      shipEnv.VIBE_ADMIRAL_DB_PATH = this.fleetDb.path;
+    }
 
     if (ship.sessionId) {
       // Resume existing session
@@ -474,8 +448,9 @@ export class ShipManager {
         ship.sessionId,
         "The previous session was interrupted. Continue from where you left off.",
         ship.worktreePath,
+        shipEnv,
       );
-      this.updateStatus(shipId, "implementing", "Resumed from session");
+      this.updatePhase(shipId, "implementing", "Resumed from session");
     } else {
       // No session to resume — re-sortie
       this.processManager.sortie(
@@ -484,11 +459,11 @@ export class ShipManager {
         ship.issueNumber,
         extraPrompt,
         skill,
+        shipEnv,
       );
-      this.updateStatus(shipId, "planning", "Re-sortied");
+      this.updatePhase(shipId, "planning", "Re-sortied");
     }
 
-    this.acceptanceWatcher.watch(ship.worktreePath, shipId);
     return ship;
   }
 
@@ -496,22 +471,21 @@ export class ShipManager {
     for (const [id] of this.ships) {
       this.processManager.kill(id);
     }
-    this.acceptanceWatcher.unwatchAll();
   }
 
   /**
-   * Persist a ship's state to the database after a status change.
+   * Persist a ship's state to the database after a phase change.
    * Records the phase transition in the audit log.
    */
-  private persistToDb(ship: ShipProcess, previousStatus?: ShipStatus): void {
+  private persistToDb(ship: ShipProcess, previousPhase?: Phase): void {
     if (!this.fleetDb) return;
     try {
       this.fleetDb.upsertShip(ship);
-      if (previousStatus && previousStatus !== ship.status) {
+      if (previousPhase && previousPhase !== ship.phase) {
         this.fleetDb.recordPhaseTransition(
           ship.id,
-          previousStatus,
-          ship.status,
+          previousPhase,
+          ship.phase,
           "engine",
         );
       }

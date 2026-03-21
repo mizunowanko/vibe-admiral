@@ -71,7 +71,22 @@ gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
 
 **`VIBE_ADMIRAL` 設定時**: `implementing` への遷移を表明。これは `plan-review` Gate をトリガーする。
 
-Gate 待機フローに従い、`.claude/gate-response.json` を待機する。
+Gate 待機フロー: DB の `messages` テーブルをポーリングして Gate 応答を待つ。
+
+```bash
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+echo "Gate check initiated. Waiting for Bridge approval..."
+while true; do
+  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
+  if [ -n "$ROW" ]; then
+    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
+    echo "$ROW"
+    break
+  fi
+  sleep 2
+done
+```
 
 - `approved: true` → `/implement-code` に進む
 - `approved: false` → フィードバックを確認して計画を修正、再度遷移を表明

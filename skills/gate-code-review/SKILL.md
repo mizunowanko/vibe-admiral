@@ -7,12 +7,12 @@
 1. **Immediately send `gate-ack`** to reset the Engine's timeout window:
 
 ```admiral-request
-{ "request": "gate-ack", "shipId": "<ship-id>", "transition": "implementing→acceptance-test" }
+{ "request": "gate-ack", "shipId": "<ship-id>", "gatePhase": "implementing-gate" }
 ```
 
 2. Call `ship-status` to verify the target Ship is still in expected state:
-   - If `error` or `done` → skip, log that gate was skipped
-   - If no pending gate for this transition → skip
+   - If process is dead or phase is `done` → skip, log that gate was skipped
+   - If no pending gate for this gate phase → skip
 
 3. Check if the gate message contains `Escort agent ID: <id>`:
    - **YES**: Resume the existing Escort via `Task(resume="<id>")` (preserves plan-review context)
@@ -52,12 +52,12 @@ THEN: Perform code-review:
 
 If approving:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "implementing→acceptance-test", "verdict": "approve" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "implementing-gate", "verdict": "approve" }
 \`\`\`
 
 If rejecting:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "implementing→acceptance-test", "verdict": "reject", "feedback": "<what needs fixing>" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "implementing-gate", "verdict": "reject", "feedback": "<what needs fixing>" }
 \`\`\`
 `)
 ```
@@ -91,12 +91,12 @@ Perform code-review:
 
 If approving:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "implementing→acceptance-test", "verdict": "approve" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "implementing-gate", "verdict": "approve" }
 \`\`\`
 
 If rejecting:
 \`\`\`admiral-request
-{ "request": "gate-result", "shipId": "<ship-id>", "transition": "implementing→acceptance-test", "verdict": "reject", "feedback": "<what needs fixing>" }
+{ "request": "gate-result", "shipId": "<ship-id>", "gatePhase": "implementing-gate", "verdict": "reject", "feedback": "<what needs fixing>" }
 \`\`\`
 `)
 ```

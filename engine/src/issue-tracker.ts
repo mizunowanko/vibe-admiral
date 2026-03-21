@@ -102,7 +102,7 @@ export function getActiveShips(
 ): Map<number, ShipProcess> {
   const active = new Map<number, ShipProcess>();
   for (const [, ship] of ships) {
-    if (ship.status !== "done" && ship.status !== "error") {
+    if (ship.phase !== "done" && !ship.processDead) {
       active.set(ship.issueNumber, ship);
     }
   }

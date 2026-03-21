@@ -1,5 +1,5 @@
 import * as github from "./github.js";
-import type { IssueStatus, ShipStatus } from "./types.js";
+import type { IssueStatus } from "./types.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -7,42 +7,33 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Mapping between internal IssueStatus and GitHub label names.
+ * Only two labels exist: status/todo and status/sortied.
+ * "done" has no label — the issue is simply closed.
  */
 const STATUS_TO_LABEL: ReadonlyMap<IssueStatus, string> = new Map([
   ["todo", "status/todo"],
-  ["doing", "status/planning"],
+  ["sortied", "status/sortied"],
   ["done", ""], // done = issue closed, no label
 ]);
 
 /**
- * Mapping from ShipStatus (phase) to GitHub label name.
- * Phases that don't map to a label are omitted.
- */
-const PHASE_TO_LABEL: ReadonlyMap<ShipStatus, string> = new Map([
-  ["planning", "status/planning"],
-  ["implementing", "status/implementing"],
-  ["acceptance-test", "status/acceptance-test"],
-  ["merging", "status/merging"],
-]);
-
-/**
- * Allowed transitions: todo → doing → done, and doing → todo (rollback).
+ * Allowed transitions: todo → sortied → done, and sortied → todo (rollback).
  */
 const VALID_TRANSITIONS: ReadonlyMap<IssueStatus, readonly IssueStatus[]> =
   new Map([
-    ["todo", ["doing"]],
-    ["doing", ["done", "todo"]],
+    ["todo", ["sortied"]],
+    ["sortied", ["done", "todo"]],
     ["done", []],
   ]);
 
 /**
  * Centralized status manager for GitHub Issue labels.
  *
- * All status changes (todo/doing/done) MUST go through this manager.
+ * All status changes (todo/sortied/done) MUST go through this manager.
  * The GitHub Issue label is the single source of truth for issue status.
  *
- * Labels use the `status/` prefix (e.g. `status/todo`, `status/implementing`).
- * Ship phase changes are synced to GitHub via `syncPhaseLabel()`.
+ * Labels use the `status/` prefix: `status/todo` and `status/sortied`.
+ * Per-phase labels have been removed — Ship phase is tracked in the local DB only.
  */
 export class StatusManager {
   /** Guard against concurrent transitions for the same issue. */
@@ -79,9 +70,10 @@ export class StatusManager {
     const issue = await github.getIssue(repo, issueNumber);
     const currentLabel = issue.labels.find((l) => l.startsWith("status/"));
     if (issue.state === "closed") return { status: "done", currentLabel };
-    if (currentLabel === "status/todo") return { status: "todo", currentLabel };
-    if (currentLabel) return { status: "doing", currentLabel };
-    return { status: "todo", currentLabel: undefined };
+    if (currentLabel === "status/sortied")
+      return { status: "sortied", currentLabel };
+    // Any other status/* label or no label → treat as todo
+    return { status: "todo", currentLabel: currentLabel ?? undefined };
   }
 
   /**
@@ -122,10 +114,10 @@ export class StatusManager {
   }
 
   /**
-   * Mark an issue as "doing" (sortie). Convenience wrapper around transition.
+   * Mark an issue as "sortied" (sortie started). Convenience wrapper around transition.
    */
-  async markDoing(repo: string, issueNumber: number): Promise<void> {
-    await this.transition(repo, issueNumber, "doing");
+  async markSortied(repo: string, issueNumber: number): Promise<void> {
+    await this.transition(repo, issueNumber, "sortied");
   }
 
   /**
@@ -136,7 +128,7 @@ export class StatusManager {
   }
 
   /**
-   * Rollback an issue from "doing" to "todo" with exponential backoff retry.
+   * Rollback an issue from "sortied" to "todo" with exponential backoff retry.
    */
   async rollback(
     repo: string,
@@ -165,36 +157,37 @@ export class StatusManager {
   }
 
   /**
-   * Check if an issue has "doing" status (any active status/* label except status/todo).
+   * Check if an issue has "sortied" status (active sortie in progress).
    * Used by sortie guard.
    */
-  async isDoing(repo: string, issueNumber: number): Promise<boolean> {
+  async isSortied(repo: string, issueNumber: number): Promise<boolean> {
     const status = await this.getStatus(repo, issueNumber);
-    return status === "doing";
+    return status === "sortied";
   }
 
   /**
-   * Sync Ship phase to GitHub Issue label.
-   * Replaces the current status/* label with the one matching the new phase.
-   *
-   * Throws on failure so callers (e.g. ShipRequestHandler) can enforce
-   * transactional guarantees — internal state is only updated after label sync succeeds.
+   * Non-blocking label sync helper.
+   * Applies a label to an issue, logging but not throwing on failure.
+   * Useful for best-effort label updates that should not block the main flow.
    */
-  async syncPhaseLabel(
+  async syncLabel(
     repo: string,
     issueNumber: number,
-    phase: ShipStatus,
+    label: string,
   ): Promise<void> {
-    const newLabel = PHASE_TO_LABEL.get(phase);
-    if (!newLabel) return; // done/error don't get a phase label
-
-    const currentLabel = await this.getCurrentStatusLabel(repo, issueNumber);
-    if (currentLabel === newLabel) return; // already correct
-
-    await github.updateLabels(repo, issueNumber, {
-      remove: currentLabel,
-      add: newLabel,
-    });
+    try {
+      const currentLabel = await this.getCurrentStatusLabel(repo, issueNumber);
+      if (currentLabel === label) return;
+      await github.updateLabels(repo, issueNumber, {
+        remove: currentLabel,
+        add: label,
+      });
+    } catch (err) {
+      console.warn(
+        `[status-manager] Non-blocking label sync failed for #${issueNumber} (label=${label}):`,
+        err,
+      );
+    }
   }
 
   private async applyTransition(
@@ -204,16 +197,16 @@ export class StatusManager {
     currentLabel: string | undefined,
   ): Promise<void> {
     switch (to) {
-      case "doing": {
-        // todo → doing: remove "status/todo", add "status/planning"
+      case "sortied": {
+        // todo → sortied: remove "status/todo", add "status/sortied"
         await github.updateLabels(repo, issueNumber, {
           remove: currentLabel,
-          add: STATUS_TO_LABEL.get("doing"),
+          add: STATUS_TO_LABEL.get("sortied"),
         });
         break;
       }
       case "todo": {
-        // doing → todo (rollback): remove current status/* label, add "status/todo"
+        // sortied → todo (rollback): remove current status/* label, add "status/todo"
         await github.updateLabels(repo, issueNumber, {
           remove: currentLabel,
           add: STATUS_TO_LABEL.get("todo"),
@@ -221,7 +214,7 @@ export class StatusManager {
         break;
       }
       case "done": {
-        // doing → done: remove current status/* label and close issue
+        // sortied → done: remove current status/* label and close issue
         if (currentLabel) {
           await github.updateLabels(repo, issueNumber, {
             remove: currentLabel,

@@ -1,5 +1,5 @@
-import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus, GateTransition } from "./types.js";
-import { GATE_TRANSITIONS } from "./gate-config.js";
+import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, Phase, GatePhase } from "./types.js";
+import { GATE_PHASES } from "./gate-config.js";
 
 interface ContentBlock {
   type: string;
@@ -176,8 +176,8 @@ export function parseStreamMessage(
 const REQUEST_BLOCK_RE = /```admiral-request\n([\s\S]*?)```/g;
 const REPO_PATTERN_REQ = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
-/** Valid statuses that Ship can request via status-transition. */
-const TRANSITION_TARGETS: ReadonlySet<ShipStatus> = new Set([
+/** Valid phases that Ship can request via status-transition. */
+const VALID_PHASES: ReadonlySet<Phase> = new Set([
   "planning",
   "implementing",
   "acceptance-test",
@@ -223,12 +223,12 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
 
     case "gate-result": {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
+      if (typeof r.gatePhase !== "string" || !GATE_PHASES.includes(r.gatePhase as GatePhase)) return null;
       if (r.verdict !== "approve" && r.verdict !== "reject") return null;
-      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number } = {
+      const gateResult: { request: "gate-result"; shipId: string; gatePhase: GatePhase; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number } = {
         request: "gate-result",
         shipId: r.shipId,
-        transition: r.transition as GateTransition,
+        gatePhase: r.gatePhase as GatePhase,
         verdict: r.verdict,
       };
       if (typeof r.feedback === "string") gateResult.feedback = r.feedback;
@@ -238,11 +238,11 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
 
     case "gate-ack": {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
-      const gateAck: { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number } = {
+      if (typeof r.gatePhase !== "string" || !GATE_PHASES.includes(r.gatePhase as GatePhase)) return null;
+      const gateAck: { request: "gate-ack"; shipId: string; gatePhase: GatePhase; issueNumber?: number } = {
         request: "gate-ack",
         shipId: r.shipId,
-        transition: r.transition as GateTransition,
+        gatePhase: r.gatePhase as GatePhase,
       };
       if (typeof r.issueNumber === "number") gateAck.issueNumber = r.issueNumber;
       return gateAck;
@@ -262,12 +262,13 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
 
     case "status-transition": {
       const status = r.status as string | undefined;
-      if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;
-      const transition: { request: "status-transition"; status: ShipStatus; planCommentUrl?: string } = {
+      if (typeof status !== "string" || !VALID_PHASES.has(status as Phase)) return null;
+      const transition: { request: "status-transition"; status: Phase; planCommentUrl?: string; qaRequired?: boolean } = {
         request: "status-transition",
-        status: status as ShipStatus,
+        status: status as Phase,
       };
       if (typeof r.planCommentUrl === "string") transition.planCommentUrl = r.planCommentUrl;
+      if (typeof r.qaRequired === "boolean") transition.qaRequired = r.qaRequired;
       return transition;
     }
 

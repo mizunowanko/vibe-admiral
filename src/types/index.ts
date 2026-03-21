@@ -1,14 +1,22 @@
-// === Ship Status ===
-export type ShipStatus =
-  | "planning" // 計画中（調査 + 計画）
-  | "implementing" // 実装中（コーディング + テスト）
-  | "acceptance-test" // 受け入れテスト中（PR レビュー + QA）
-  | "merging" // マージ中
-  | "done" // 完了
-  | "error"; // エラー
+// === Phase (Ship lifecycle) ===
+// Gate is a phase: planning → planning-gate → implementing → implementing-gate
+// → acceptance-test → acceptance-test-gate → merging → done
+// "error" is a derived state: phase ≠ done && process dead.
+export type Phase =
+  | "planning"
+  | "planning-gate"
+  | "implementing"
+  | "implementing-gate"
+  | "acceptance-test"
+  | "acceptance-test-gate"
+  | "merging"
+  | "done";
 
-/** Classification of Ship error cause. */
-export type ShipErrorType = "rate_limit" | "unknown";
+/** @deprecated Use Phase instead. Kept for migration compatibility. */
+export type ShipStatus = Phase;
+
+/** Gate phases where Bridge review is required. */
+export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
 
 // === Fleet ===
 export interface FleetRepo {
@@ -38,16 +46,11 @@ export interface Fleet {
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
 // === Gate ===
-export type GateTransition =
-  | "planning→implementing"
-  | "implementing→acceptance-test"
-  | "acceptance-test→merging";
-
 export type GateType = "plan-review" | "code-review" | "playwright";
 export type GateStatus = "pending" | "approved" | "rejected";
 
 export interface GateCheckState {
-  transition: GateTransition;
+  gatePhase: GatePhase;
   gateType: GateType;
   status: GateStatus;
   feedback?: string;
@@ -60,28 +63,22 @@ export interface Ship {
   repo: string;
   issueNumber: number;
   issueTitle: string;
-  status: ShipStatus;
+  phase: Phase;
+  /** Whether the Ship process has died (derived: phase ≠ done && process not running). */
+  processDead?: boolean;
   isCompacting: boolean;
   branchName: string;
   worktreePath: string;
   sessionId: string | null;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
   /** Agent ID of the persistent Escort sub-agent for this Ship's gate checks. */
   escortAgentId: string | null;
-  errorType: ShipErrorType | null;
   retryCount: number;
   nothingToDo?: boolean;
   nothingToDoReason?: string;
   createdAt: string;
-}
-
-export interface AcceptanceTestRequest {
-  url: string;
-  checks: string[];
 }
 
 // === Issue ===
@@ -98,7 +95,6 @@ export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
   | "bridge-status"
-  | "acceptance-test"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request"
@@ -110,15 +106,14 @@ export type StreamMessageSubtype =
 // === Lookout ===
 export type LookoutAlertType =
   | "gate-wait-stall"
-  | "acceptance-test-stall"
   | "no-output-stall"
   | "excessive-retries";
 
 export interface SystemMessageMeta {
-  category: StreamMessageSubtype | "dispatch-log" | "escort-log";
+  category: StreamMessageSubtype;
   issueNumber?: number;
   issueTitle?: string;
-  transition?: string;
+  gatePhase?: string;
   gateType?: GateType;
   prNumber?: number;
   prUrl?: string;
@@ -183,8 +178,6 @@ export type ClientMessage =
       data: { fleetId: string; issueNumber: number; repo: string };
     }
   | { type: "ship:chat"; data: { id: string; message: string } }
-  | { type: "ship:accept"; data: { id: string } }
-  | { type: "ship:reject"; data: { id: string; feedback: string } }
   | { type: "ship:retry"; data: { id: string } }
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
@@ -206,15 +199,11 @@ export type ServerMessage =
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
       type: "ship:status";
-      data: { id: string; status: ShipStatus; detail?: string; nothingToDo?: boolean; nothingToDoReason?: string };
+      data: { id: string; phase: Phase; detail?: string; nothingToDo?: boolean; nothingToDoReason?: string };
     }
   | {
       type: "ship:compacting";
       data: { id: string; isCompacting: boolean };
-    }
-  | {
-      type: "ship:acceptance-test";
-      data: { id: string; url: string; checks: string[] };
     }
   | {
       type: "ship:created";
@@ -224,7 +213,7 @@ export type ServerMessage =
         repo: string;
         issueNumber: number;
         issueTitle: string;
-        status: ShipStatus;
+        phase: Phase;
         branchName: string;
       };
     }
@@ -236,7 +225,7 @@ export type ServerMessage =
       type: "ship:gate-pending";
       data: {
         id: string;
-        transition: GateTransition;
+        gatePhase: GatePhase;
         gateType: GateType;
         fleetId: string;
         issueNumber: number;
@@ -247,7 +236,7 @@ export type ServerMessage =
       type: "ship:gate-resolved";
       data: {
         id: string;
-        transition: GateTransition;
+        gatePhase: GatePhase;
         gateType: GateType;
         approved: boolean;
         feedback?: string;

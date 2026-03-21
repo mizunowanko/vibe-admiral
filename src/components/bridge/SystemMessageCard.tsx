@@ -28,12 +28,6 @@ const STYLE: Record<
     bg: "bg-sky-500/10",
     text: "text-sky-300",
   },
-  "acceptance-test": {
-    icon: "🧪",
-    border: "border-amber-500/30",
-    bg: "bg-amber-500/10",
-    text: "text-amber-300",
-  },
   "lookout-alert": {
     icon: "⚠️",
     border: "border-orange-500/30",
@@ -70,9 +64,6 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
       label = meta.prNumber
         ? `${issueRef} PR #${meta.prNumber} レビュー依頼`
         : `${issueRef} PR レビュー依頼`;
-      break;
-    case "acceptance-test":
-      label = `${issueRef} 受け入れテスト依頼`;
       break;
     case "lookout-alert":
       label = `${issueRef} Lookout 異常検知`;

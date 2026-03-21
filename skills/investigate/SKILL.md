@@ -89,7 +89,7 @@ Do NOT create issues or make any changes. Only investigate and report.
 
 ## Ship Error Recovery Flow
 
-When a Ship enters `error` status, Bridge receives a system message with resume eligibility:
+When a Ship's process dies (processDead), Bridge receives a system message with resume eligibility:
 1. Receive Ship error notification (Ship ID + resume info)
 2. Launch a Dispatch (using diagnosis template above)
 3. Based on diagnosis, use `ship-resume` (Request #7) if recoverable.

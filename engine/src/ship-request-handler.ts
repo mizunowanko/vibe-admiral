@@ -1,43 +1,68 @@
-import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import type { ShipManager } from "./ship-manager.js";
-import type { StatusManager } from "./status-manager.js";
-import type { ShipRequest, AdmiralRequestResponse, ShipStatus, FleetGateSettings, GateType } from "./types.js";
-import { resolveGate } from "./gate-config.js";
+import type {
+  ShipRequest,
+  Phase,
+  GatePhase,
+  GateType,
+  FleetGateSettings,
+} from "./types.js";
+import { PHASE_ORDER, GATE_PREV_PHASE, GATE_NEXT_PHASE, isGatePhase } from "./types.js";
+import { resolveGateType, getNextPhaseAfterGate } from "./gate-config.js";
 import * as github from "./github.js";
+
+/** Simple ok/error response for admiral requests. */
+export interface AdmiralRequestResponse {
+  ok: boolean;
+  error?: string;
+}
 
 /**
  * Extended response that indicates whether a gate check was triggered.
- * When `gate` is set, the caller should NOT write the response file immediately —
- * instead, it should initiate the gate check flow and write the response later.
+ * When `gate` is set, the caller should initiate the gate check flow
+ * and write the response to the DB via fleetDb.insertMessage().
  */
 export interface StatusTransitionResult extends AdmiralRequestResponse {
   gate?: {
     type: GateType;
-    from: ShipStatus;
-    to: ShipStatus;
+    gatePhase: GatePhase;
+    /** The work phase to advance to after gate approval. */
+    targetPhase: Phase;
     /** Feedback from the previous rejected gate check (for retry awareness). */
     previousFeedback?: string;
   };
 }
 
 /**
+ * Find the gate phase that sits between the current work phase and its target.
+ * Returns undefined if the current phase doesn't map to any gate.
+ */
+function findGatePhaseForWorkPhase(currentPhase: Phase): GatePhase | undefined {
+  for (const [gatePhase, prevPhase] of Object.entries(GATE_PREV_PHASE)) {
+    if (prevPhase === currentPhase) {
+      return gatePhase as GatePhase;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Handles admiral-request blocks from Ship processes.
  *
  * Supports:
- * - `status-transition`: Transactional phase change —
- *   validates the transition, checks for gate requirements,
- *   updates GitHub label synchronously, and confirms the new status internally.
+ * - `status-transition`: Phase-model transition —
+ *   Ship requests a target work phase, Engine determines if a gate phase
+ *   is needed first, checks gate settings/state, and advances accordingly.
  * - `nothing-to-do`: Ship determined there is no work to do —
  *   posts a comment on the issue, closes it, and marks the Ship as done.
+ *
+ * Response delivery: the caller (ws-server) writes the response to the DB
+ * via fleetDb.insertMessage() instead of writing files.
  */
 export class ShipRequestHandler {
   private shipManager: ShipManager;
-  private statusManager: StatusManager;
 
-  constructor(shipManager: ShipManager, statusManager: StatusManager) {
+  constructor(shipManager: ShipManager) {
     this.shipManager = shipManager;
-    this.statusManager = statusManager;
   }
 
   /**
@@ -62,9 +87,28 @@ export class ShipRequestHandler {
     }
   }
 
+  /**
+   * Phase-model transition handler.
+   *
+   * 1. Ship requests target phase (e.g. "implementing")
+   * 2. Map from current work phase to the gate phase that precedes the target:
+   *    - planning → planning-gate (to go to implementing)
+   *    - implementing → implementing-gate (to go to acceptance-test)
+   *    - acceptance-test → acceptance-test-gate (to go to merging)
+   * 3. Check if gate is enabled for that gate phase via resolveGateType()
+   * 4. If gate enabled:
+   *    - Check if ship is already in the gate phase:
+   *      - approved: advance to target work phase
+   *      - pending: return "waiting for approval"
+   *      - rejected: clear, return gate info for re-initiation
+   *    - If not in gate phase yet: return gate info for initiation
+   * 5. If gate disabled: advance directly to target work phase
+   * 6. For "done": handle directly (terminal state)
+   * 7. Label sync is non-blocking (failure doesn't block phase transition)
+   */
   private async handleStatusTransition(
     shipId: string,
-    targetStatus: ShipStatus,
+    targetPhase: Phase,
     gateSettings?: FleetGateSettings,
   ): Promise<StatusTransitionResult> {
     const ship = this.shipManager.getShip(shipId);
@@ -73,87 +117,100 @@ export class ShipRequestHandler {
     }
 
     // Handle "done" specially — it's a terminal state, not a phase label
-    if (targetStatus === "done") {
-      this.shipManager.updateStatus(shipId, "done");
+    if (targetPhase === "done") {
+      this.shipManager.updatePhase(shipId, "done");
       return { ok: true };
     }
 
     // Validate forward-only phase advancement
-    const phaseOrder: ShipStatus[] = [
-      "planning", "implementing", "acceptance-test", "merging",
-    ];
-    const currentIdx = phaseOrder.indexOf(ship.status);
-    const targetIdx = phaseOrder.indexOf(targetStatus);
+    const currentIdx = PHASE_ORDER.indexOf(ship.phase);
+    const targetIdx = PHASE_ORDER.indexOf(targetPhase);
 
     if (targetIdx < 0) {
-      return { ok: false, error: `Invalid target status: ${targetStatus}` };
+      return { ok: false, error: `Invalid target phase: ${targetPhase}` };
+    }
+    if (currentIdx < 0) {
+      return { ok: false, error: `Ship in unknown phase: ${ship.phase}` };
     }
     if (targetIdx <= currentIdx) {
       return {
         ok: false,
-        error: `Cannot go backward: ${ship.status} → ${targetStatus}`,
+        error: `Cannot go backward: ${ship.phase} → ${targetPhase}`,
       };
     }
 
-    // Check for gate on direct transition (from current → target)
-    let gateType = resolveGate(ship.status, targetStatus, gateSettings);
+    // Determine the gate phase that precedes the target work phase.
+    // If the ship is currently in a gate phase (e.g. planning-gate) and requesting
+    // the next work phase (e.g. implementing), check the gate state directly.
+    // If the ship is in a work phase (e.g. planning), find the gate that sits between.
+    let gatePhase: GatePhase | undefined;
 
-    // Skip playwright gate when Ship determined QA is not required
-    if (gateType === "playwright" && ship.qaRequired === false) {
-      gateType = null;
-    }
-
-    if (gateType) {
-      // If there's already a pending/approved gate for this exact transition, check it
-      if (ship.gateCheck?.transition === `${ship.status}→${targetStatus}`) {
-        if (ship.gateCheck.status === "approved") {
-          // Gate was approved — proceed with the transition
-          this.shipManager.clearGateCheck(shipId);
-        } else if (ship.gateCheck.status === "pending") {
-          // Gate is still pending — reject with a message
-          return {
-            ok: false,
-            error: `Gate check pending for ${ship.status} → ${targetStatus}. Waiting for Bridge approval.`,
-          };
-        } else if (ship.gateCheck.status === "rejected") {
-          // Gate was rejected — Ship should have acted on the feedback
-          // Capture the previous feedback before clearing
-          const prevFeedback = ship.gateCheck.feedback;
-          // Clear the rejection and let them re-request
-          this.shipManager.clearGateCheck(shipId);
-          // Fall through to initiate a new gate check with previous context
-          return {
-            ok: false,
-            gate: { type: gateType, from: ship.status, to: targetStatus, previousFeedback: prevFeedback },
-            error: `Gate check required for ${ship.status} → ${targetStatus}. Initiating review.`,
-          };
-        }
+    if (isGatePhase(ship.phase)) {
+      // Ship is already in a gate phase — check if the target matches
+      const expectedTarget = GATE_NEXT_PHASE[ship.phase];
+      if (expectedTarget === targetPhase) {
+        gatePhase = ship.phase;
       } else {
-        // No gate check yet — initiate one
         return {
           ok: false,
-          gate: { type: gateType, from: ship.status, to: targetStatus },
-          error: `Gate check required for ${ship.status} → ${targetStatus}. Initiating review.`,
+          error: `Ship in gate phase ${ship.phase}, expected target ${expectedTarget} but got ${targetPhase}`,
         };
+      }
+    } else {
+      // Ship is in a work phase — find the gate that sits between current and target
+      gatePhase = findGatePhaseForWorkPhase(ship.phase);
+    }
+
+    if (gatePhase) {
+      let gateType = resolveGateType(gatePhase, gateSettings);
+
+      // Skip playwright gate when Ship determined QA is not required
+      if (gateType === "playwright" && ship.qaRequired === false) {
+        gateType = null;
+      }
+
+      if (gateType) {
+        // Check if ship is already in this gate phase (has an active gateCheck)
+        if (ship.gateCheck?.gatePhase === gatePhase) {
+          if (ship.gateCheck.status === "approved") {
+            // Gate was approved — clear and proceed to target work phase
+            this.shipManager.clearGateCheck(shipId);
+            // Fall through to advance below
+          } else if (ship.gateCheck.status === "pending") {
+            // Gate is still pending — tell Ship to wait
+            return {
+              ok: false,
+              error: `Gate check pending for ${gatePhase}. Waiting for Bridge approval.`,
+            };
+          } else if (ship.gateCheck.status === "rejected") {
+            // Gate was rejected — capture feedback, clear, return gate info for re-initiation
+            const prevFeedback = ship.gateCheck.feedback;
+            this.shipManager.clearGateCheck(shipId);
+            return {
+              ok: false,
+              gate: {
+                type: gateType,
+                gatePhase,
+                targetPhase,
+                previousFeedback: prevFeedback,
+              },
+              error: `Gate check required for ${gatePhase}. Initiating review.`,
+            };
+          }
+        } else {
+          // Not in gate phase yet — return gate info for initiation
+          return {
+            ok: false,
+            gate: { type: gateType, gatePhase, targetPhase },
+            error: `Gate check required for ${gatePhase}. Initiating review.`,
+          };
+        }
       }
     }
 
-    // Transactional: sync GitHub label FIRST, then update internal state
-    try {
-      await this.statusManager.syncPhaseLabel(
-        ship.repo,
-        ship.issueNumber,
-        targetStatus,
-      );
-    } catch (err) {
-      return {
-        ok: false,
-        error: `GitHub label sync failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-
-    // Label update succeeded — now confirm the status internally
-    this.shipManager.updateStatus(shipId, targetStatus);
+    // No gate (or gate approved) — advance to target work phase
+    // Per-phase labels abolished — only status/sortied exists (set at sortie time)
+    this.shipManager.updatePhase(shipId, targetPhase);
     return { ok: true };
   }
 
@@ -196,7 +253,7 @@ export class ShipRequestHandler {
 
     // Mark Ship as done with nothingToDo flag
     this.shipManager.setNothingToDo(shipId, reason);
-    this.shipManager.updateStatus(shipId, "done");
+    this.shipManager.updatePhase(shipId, "done");
 
     return { ok: true };
   }
@@ -204,46 +261,23 @@ export class ShipRequestHandler {
   /**
    * Execute a transition that was previously gated and is now approved.
    * Called by the gate result handler after Bridge approves.
+   *
+   * Advances from gate phase to the next work phase.
+   * Label sync is non-blocking (try/catch, warn on failure, don't block).
    */
   async executeGatedTransition(
     shipId: string,
-    targetStatus: ShipStatus,
+    gatePhase: GatePhase,
   ): Promise<AdmiralRequestResponse> {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) {
       return { ok: false, error: `Ship ${shipId} not found` };
     }
 
-    // Transactional: sync GitHub label FIRST, then update internal state
-    try {
-      await this.statusManager.syncPhaseLabel(
-        ship.repo,
-        ship.issueNumber,
-        targetStatus,
-      );
-    } catch (err) {
-      return {
-        ok: false,
-        error: `GitHub label sync failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
+    const targetPhase = getNextPhaseAfterGate(gatePhase);
 
-    this.shipManager.updateStatus(shipId, targetStatus);
+    this.shipManager.updatePhase(shipId, targetPhase);
     return { ok: true };
   }
 
-  /**
-   * Write the response file so Ship can poll for the result.
-   */
-  static async writeResponse(
-    worktreePath: string,
-    response: AdmiralRequestResponse,
-  ): Promise<void> {
-    const claudeDir = join(worktreePath, ".claude");
-    await mkdir(claudeDir, { recursive: true });
-    await writeFile(
-      join(claudeDir, "admiral-request-response.json"),
-      JSON.stringify(response, null, 2),
-    );
-  }
 }
