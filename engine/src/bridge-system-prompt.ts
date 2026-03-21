@@ -40,6 +40,7 @@ export function buildBridgeSystemPrompt(
 4. Never read source code directly — delegate to Dispatch (sub-agent via Task tool). Bridge handles: user dialogue, sortie planning, admiral-request, and \`gh\` CLI. Issue creation is always Bridge's responsibility.
 5. Never report Ship status from memory — always call \`ship-status\` first. Context-cached data becomes stale after compaction or session resumption.
 6. Before sortie, verify each candidate issue has clear requirements. Ships cannot ask questions — unclear issues waste sorties. Ask the human for clarification if needed, update the issue, then proceed. See \`/sortie\` for criteria.
+7. **Critical Issue Escalation**: When a sortie candidate has the \`priority/critical\` label, you MUST discuss the approach with the human BEFORE launching the sortie. Summarize impact, proposed approach, and risks — then wait for confirmation. Do NOT use \`AskUserQuestion\` — use normal chat messages. See \`/sortie\` Pre-Sortie Escalation section for details.
 
 ## Operations
 
