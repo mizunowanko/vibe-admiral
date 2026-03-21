@@ -54,7 +54,7 @@ export class ProcessManager extends EventEmitter {
     //   EnterPlanMode/ExitPlanMode — in -p mode, plan mode causes CLI
     //     to exit after ExitPlanMode without performing implementation.
     //   AskUserQuestion — Ship runs non-interactively (stdin ignored);
-    //     user interaction uses file message board instead.
+    //     user interaction uses DB message board instead.
     const skillCmd = skill ?? "/implement";
     const args = [
       "-p",
