@@ -60,6 +60,8 @@ export class BridgeRequestHandler {
         return this.handleGateResult(request);
       case "gate-ack":
         return this.handleGateAck(request);
+      case "escort-registered":
+        return this.handleEscortRegistered(request);
     }
   }
 
@@ -231,6 +233,18 @@ export class BridgeRequestHandler {
       `[bridge-request] Gate ACK received for Ship #${ship.issueNumber}: ${request.transition} — acknowledged`,
     );
     return `[Gate ACK] Ship #${ship.issueNumber}: ${request.transition} acknowledged`;
+  }
+
+  private handleEscortRegistered(
+    request: Extract<BridgeRequest, { request: "escort-registered" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId, request.issueNumber);
+    if (!ship) {
+      return `[Escort Registration Failed] Ship ${request.shipId} not found`;
+    }
+
+    this.shipManager.setEscortAgentId(ship.id, request.agentId);
+    return `[Escort Registered] Ship #${ship.issueNumber}: agent ${request.agentId}`;
   }
 
   private async handleGateResult(

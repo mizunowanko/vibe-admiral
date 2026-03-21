@@ -129,7 +129,8 @@ export type StreamMessageSubtype =
   | "gate-check-request"
   | "lookout-alert"
   | "task-notification"
-  | "dispatch-log";
+  | "dispatch-log"
+  | "escort-log";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -205,7 +206,8 @@ export type BridgeRequest =
   | { request: "ship-resume"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
   | { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number }
-  | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number };
+  | { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number }
+  | { request: "escort-registered"; shipId: string; agentId: string; issueNumber?: number };
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
@@ -246,6 +248,8 @@ export interface ShipProcess {
   nothingToDoReason?: string;
   createdAt: string;
   completedAt?: number;
+  /** Agent ID of the persistent Escort sub-agent for this Ship's gate checks. */
+  escortAgentId: string | null;
   /** Timestamp (ms epoch) of last stdout data from Ship process. Used by Lookout. */
   lastOutputAt: number | null;
 }

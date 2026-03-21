@@ -234,6 +234,18 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return gateAck;
     }
 
+    case "escort-registered": {
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      if (typeof r.agentId !== "string" || !r.agentId) return null;
+      const escortReg: { request: "escort-registered"; shipId: string; agentId: string; issueNumber?: number } = {
+        request: "escort-registered",
+        shipId: r.shipId,
+        agentId: r.agentId,
+      };
+      if (typeof r.issueNumber === "number") escortReg.issueNumber = r.issueNumber;
+      return escortReg;
+    }
+
     case "status-transition": {
       const status = r.status as string | undefined;
       if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;

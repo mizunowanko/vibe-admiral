@@ -13,7 +13,7 @@ For operations that ONLY the Engine can perform (Ship management), use `admiral-
 
 The Engine intercepts these blocks, executes them, and returns results to you.
 
-## Bridge Requests (7 total)
+## Bridge Requests (8 total)
 
 ### 1. sortie
 Launch Ships (Claude Code implementation sessions) for issues.
@@ -74,6 +74,17 @@ Resume an errored Ship.
 
 - Only works on Ships in `error` status.
 - Preferred over re-sortie because it preserves context.
+
+### 8. escort-registered
+Register an Escort (persistent sub-agent) for a Ship. Sent by the Escort itself on first launch.
+
+```admiral-request
+{ "request": "escort-registered", "shipId": "uuid-of-ship", "agentId": "agent-id-from-task" }
+```
+
+- Engine stores the agent ID on the Ship for subsequent gate checks.
+- Future gate messages include `Escort agent ID: <id>` so Bridge can resume the same agent via `Task(resume="<id>")`.
+- Optional `issueNumber` field for fallback Ship resolution.
 
 ## Ship Requests (2 total)
 

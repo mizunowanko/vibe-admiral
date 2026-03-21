@@ -201,6 +201,43 @@ export function ChatMessage({ message, repeatCount }: ChatMessageProps) {
     );
   }
 
+  // Escort/Dispatch log — sub-agent messages routed to Ship
+  if (isSystem && (message.meta?.category === "escort-log" || message.meta?.category === "dispatch-log")) {
+    const isEscort = message.meta.category === "escort-log";
+    const label = isEscort ? "Escort" : "Dispatch";
+    return (
+      <div className="flex w-full justify-start">
+        <div
+          className={cn(
+            "max-w-[90%] rounded-lg px-3 py-2 text-sm border",
+            isEscort
+              ? "border-cyan-500/20 bg-cyan-500/5"
+              : "border-amber-500/20 bg-amber-500/5",
+          )}
+        >
+          <span
+            className={cn(
+              "text-xs font-mono block mb-1",
+              isEscort ? "text-cyan-400/70" : "text-amber-400/70",
+            )}
+          >
+            [{label}]
+          </span>
+          <div className="bridge-markdown break-words text-card-foreground">
+            <ReactMarkdown
+              remarkPlugins={REMARK_PLUGINS}
+              components={MARKDOWN_COMPONENTS}
+              disallowedElements={["img"]}
+              unwrapDisallowed
+            >
+              {message.content ?? ""}
+            </ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Fall-through for unhandled system subtypes — return null so caller can handle
   if (isSystem) {
     return null;

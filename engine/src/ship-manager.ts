@@ -123,6 +123,7 @@ export class ShipManager {
       acceptanceTestApproved: false,
       gateCheck: null,
       qaRequired: true,
+      escortAgentId: null,
       errorType: null,
       retryCount: 0,
       createdAt: new Date().toISOString(),
@@ -238,6 +239,7 @@ export class ShipManager {
       ship.status = status;
       if (status === "done" || status === "error") {
         ship.completedAt = Date.now();
+        ship.escortAgentId = null;
       }
       // Note: GitHub label sync is now handled transactionally by ShipRequestHandler.
       // This method only updates in-memory state and notifies the frontend.
@@ -327,6 +329,21 @@ export class ShipManager {
     const ship = this.ships.get(shipId);
     if (!ship) return;
     ship.gateCheck = null;
+  }
+
+  setEscortAgentId(shipId: string, agentId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.escortAgentId = agentId;
+    console.log(
+      `[ship-manager] Escort registered for Ship #${ship.issueNumber}: ${agentId}`,
+    );
+  }
+
+  clearEscortAgentId(shipId: string): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.escortAgentId = null;
   }
 
   async respondToGate(
@@ -543,6 +560,7 @@ export class ShipManager {
           acceptanceTestApproved: false,
           gateCheck: null,
           qaRequired: true,
+          escortAgentId: null,
           errorType: null,
           retryCount: 0,
           createdAt: ps.createdAt,
