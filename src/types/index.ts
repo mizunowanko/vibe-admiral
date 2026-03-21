@@ -81,8 +81,6 @@ export interface Ship {
   prReviewStatus: PRReviewStatus | null;
   gateCheck: GateCheckState | null;
   retryCount: number;
-  nothingToDo?: boolean;
-  nothingToDoReason?: string;
   createdAt: string;
 }
 
@@ -224,7 +222,7 @@ export type ServerMessage =
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
       type: "ship:status";
-      data: { id: string; phase: Phase; detail?: string; nothingToDo?: boolean; nothingToDoReason?: string };
+      data: { id: string; phase: Phase; detail?: string };
     }
   | {
       type: "ship:compacting";

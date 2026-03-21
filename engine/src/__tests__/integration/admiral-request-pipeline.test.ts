@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   extractRequests,
   isBridgeRequest,
-  isShipRequest,
   stripRequestBlocks,
   parseStreamMessage,
   extractSessionId,
@@ -12,15 +11,18 @@ import {
  * Integration test: admiral-request pipeline
  *
  * Tests the full flow of:
- *   Bridge/Ship stdout text → extractRequests() → validateRequest() →
- *   isBridgeRequest() / isShipRequest() routing
+ *   Flagship stdout text → extractRequests() → validateRequest() →
+ *   isBridgeRequest() routing
  *
- * This exercises stream-parser + gate-config (GATE_TRANSITIONS) together,
+ * This exercises stream-parser together with request validation,
  * ensuring that well-formed admiral-request blocks are correctly parsed,
  * validated, classified, and that malformed ones are silently rejected.
+ *
+ * Note: Ship requests (nothing-to-do, status-transition) were removed in #439/#442.
+ * All admiral-requests are now Flagship-only.
  */
 describe("admiral-request pipeline (integration)", () => {
-  describe("sortie requests from Bridge", () => {
+  describe("sortie requests from Flagship", () => {
     it("parses a valid sortie request block", () => {
       const text = `I'll launch a sortie now.
 
@@ -34,7 +36,6 @@ That should do it.`;
       expect(requests).toHaveLength(1);
       expect(requests[0]!.request).toBe("sortie");
       expect(isBridgeRequest(requests[0]!)).toBe(true);
-      expect(isShipRequest(requests[0]!)).toBe(false);
     });
 
     it("parses sortie with multiple items and skill", () => {
@@ -74,8 +75,8 @@ That should do it.`;
     });
   });
 
-  describe("status-transition requests (removed in #439)", () => {
-    it("rejects status-transition requests (no longer valid)", () => {
+  describe("removed request types", () => {
+    it("rejects status-transition requests (removed in #439)", () => {
       const text = `\`\`\`admiral-request
 { "request": "status-transition", "status": "implementing" }
 \`\`\``;
@@ -83,25 +84,10 @@ That should do it.`;
       const requests = extractRequests(text);
       expect(requests).toHaveLength(0);
     });
-  });
 
-  describe("nothing-to-do requests from Ship", () => {
-    it("parses nothing-to-do with reason", () => {
+    it("rejects nothing-to-do requests (removed in #442)", () => {
       const text = `\`\`\`admiral-request
-{ "request": "nothing-to-do", "reason": "Issue already resolved in a previous commit" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      expect(isShipRequest(requests[0]!)).toBe(true);
-      if (requests[0]!.request === "nothing-to-do") {
-        expect(requests[0]!.reason).toContain("already resolved");
-      }
-    });
-
-    it("rejects nothing-to-do without reason", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "nothing-to-do" }
+{ "request": "nothing-to-do", "reason": "Issue already resolved" }
 \`\`\``;
 
       const requests = extractRequests(text);
@@ -139,13 +125,13 @@ And also:
 \`\`\`
 
 \`\`\`admiral-request
-{ "request": "nothing-to-do", "reason": "already done" }
+{ "request": "ship-stop", "shipId": "x" }
 \`\`\``;
 
       const requests = extractRequests(text);
       expect(requests).toHaveLength(2);
       expect(requests[0]!.request).toBe("ship-status");
-      expect(requests[1]!.request).toBe("nothing-to-do");
+      expect(requests[1]!.request).toBe("ship-stop");
     });
   });
 
@@ -205,8 +191,8 @@ Goodbye`;
   });
 
   describe("request routing classification", () => {
-    it("classifies all Bridge request types correctly", () => {
-      const bridgeTypes = [
+    it("classifies all Flagship request types as bridge requests", () => {
+      const flagshipTypes = [
         `{ "request": "sortie", "items": [{ "repo": "o/r", "issueNumber": 1 }] }`,
         `{ "request": "ship-status" }`,
         `{ "request": "ship-stop", "shipId": "x" }`,
@@ -214,26 +200,11 @@ Goodbye`;
         `{ "request": "pr-review-result", "shipId": "x", "prNumber": 1, "verdict": "approve" }`,
       ];
 
-      for (const json of bridgeTypes) {
+      for (const json of flagshipTypes) {
         const text = `\`\`\`admiral-request\n${json}\n\`\`\``;
         const requests = extractRequests(text);
         expect(requests.length).toBeGreaterThan(0);
         expect(isBridgeRequest(requests[0]!)).toBe(true);
-        expect(isShipRequest(requests[0]!)).toBe(false);
-      }
-    });
-
-    it("classifies all Ship request types correctly", () => {
-      const shipTypes = [
-        `{ "request": "nothing-to-do", "reason": "done" }`,
-      ];
-
-      for (const json of shipTypes) {
-        const text = `\`\`\`admiral-request\n${json}\n\`\`\``;
-        const requests = extractRequests(text);
-        expect(requests.length).toBeGreaterThan(0);
-        expect(isShipRequest(requests[0]!)).toBe(true);
-        expect(isBridgeRequest(requests[0]!)).toBe(false);
       }
     });
   });

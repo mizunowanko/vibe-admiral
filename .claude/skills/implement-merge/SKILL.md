@@ -108,26 +108,24 @@ COMMIT;
 
 Ship 自身が Escort (sub-agent) を起動して playwright テストを実施する。
 
-Engine が Escort を起動済み。Escort が完了すると DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
+Engine が Escort を起動済み。Escort が完了すると DB の `phases` テーブルが直接更新される。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-Gate 承認後、`merging` に直接 DB 更新して遷移後、マージを実行:
+- `merging` に遷移済み → Escort が承認し phase を更新済み。マージを実行
+- `acceptance-test` に戻された → Escort が reject した。`phase_transitions` からフィードバックを取得して修正:
+  ```bash
+  FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+    SELECT json_extract(metadata, '$.feedback')
+    FROM phase_transitions
+    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
+    ORDER BY created_at DESC LIMIT 1
+  ")
+  ```
 
-```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'merging', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'merging'
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'acceptance-test-gate';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'acceptance-test-gate', 'merging', 'ship', '{}');
-COMMIT;
-"
-```
+Gate 承認後（`merging` phase）、マージを実行:
 
 マージを実行:
 

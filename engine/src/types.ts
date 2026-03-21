@@ -135,8 +135,6 @@ export interface Ship {
   prReviewStatus: PRReviewStatus | null;
   gateCheck: GateCheckState | null;
   retryCount: number;
-  nothingToDo?: boolean;
-  nothingToDoReason?: string;
   createdAt: string;
 }
 
@@ -239,16 +237,10 @@ export type FlagshipRequest =
 /** @deprecated Use FlagshipRequest instead. Kept for backward compat. */
 export type BridgeRequest = FlagshipRequest;
 
-// === Ship Requests (Ship → Engine via admiral-request) ===
-export type ShipRequest =
-  | { request: "nothing-to-do"; reason: string };
-
-// === Admiral Request (union of Flagship + Ship requests) ===
-export type AdmiralRequest = FlagshipRequest | ShipRequest;
-
-// === DB Message Types ===
-export type DbMessageType =
-  | "admiral-request-response";
+// === Admiral Request ===
+// Note: ShipRequest type was removed in #442. Ships no longer issue admiral-requests.
+// Only Flagship can issue requests (sortie, ship-status, ship-stop, ship-resume, pr-review-result).
+export type AdmiralRequest = FlagshipRequest;
 
 // === Ship Process Info ===
 export interface ShipProcess {
@@ -268,8 +260,6 @@ export interface ShipProcess {
   /** Whether this Ship requires QA (Playwright) gate before merging. Determined by Ship during planning. Defaults to true. */
   qaRequired: boolean;
   retryCount: number;
-  nothingToDo?: boolean;
-  nothingToDoReason?: string;
   createdAt: string;
   completedAt?: number;
   /** Timestamp (ms epoch) of last stdout data from Ship process. Used by Lookout. */

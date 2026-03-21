@@ -1,4 +1,4 @@
-import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest } from "./types.js";
+import type { StreamMessage, StreamMessageSubtype, FlagshipRequest, AdmiralRequest } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -211,11 +211,6 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return { request: "sortie", items };
     }
 
-    case "nothing-to-do": {
-      if (typeof r.reason !== "string" || !r.reason) return null;
-      return { request: "nothing-to-do", reason: r.reason };
-    }
-
     case "pr-review-result": {
       if (typeof r.shipId !== "string" || !r.shipId) return null;
       if (typeof r.prNumber !== "number" || !Number.isInteger(r.prNumber) || r.prNumber <= 0) return null;
@@ -237,7 +232,7 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
 
 /**
  * Extract AdmiralRequest objects from ```admiral-request ... ``` fenced blocks.
- * Returns both BridgeRequest and ShipRequest types — callers must filter by source.
+ * All requests are Flagship requests (Ship requests were removed in #442).
  */
 export function extractRequests(text: string): AdmiralRequest[] {
   const requests: AdmiralRequest[] = [];
@@ -255,16 +250,10 @@ export function extractRequests(text: string): AdmiralRequest[] {
   return requests;
 }
 
-const SHIP_REQUEST_TYPES = new Set(["nothing-to-do"]);
-
-/** Type guard: check if a request is a Bridge-only request. */
-export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
-  return !SHIP_REQUEST_TYPES.has(req.request);
-}
-
-/** Type guard: check if a request is a Ship request. */
-export function isShipRequest(req: AdmiralRequest): req is ShipRequest {
-  return SHIP_REQUEST_TYPES.has(req.request);
+/** Type guard: check if a request is a Flagship request.
+ * After #442, all admiral-requests are Flagship requests. */
+export function isBridgeRequest(_req: AdmiralRequest): _req is FlagshipRequest {
+  return true;
 }
 
 /**
