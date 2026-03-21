@@ -110,7 +110,10 @@ export async function list(repoRoot: string): Promise<Worktree[]> {
 
 export async function listFeatureWorktrees(repoRoot: string): Promise<Worktree[]> {
   const all = await list(repoRoot);
-  return all.filter((w) => w.branch?.startsWith("feature/"));
+  // First entry is always the main working tree — skip it to avoid
+  // misidentifying the main repo as an orphan worktree when it happens
+  // to be on a feature/ branch. See #328.
+  return all.slice(1).filter((w) => w.branch?.startsWith("feature/"));
 }
 
 export async function forceRemove(worktreePath: string, knownRepoRoot?: string): Promise<void> {

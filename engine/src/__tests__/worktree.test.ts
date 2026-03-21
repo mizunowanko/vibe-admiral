@@ -123,6 +123,24 @@ describe("worktree", () => {
       expect(result).toHaveLength(1);
       expect(result[0]!.branch).toBe("feature/42-test");
     });
+
+    it("excludes main working tree even when on a feature/ branch (#328)", async () => {
+      const porcelain = [
+        "worktree /repo",
+        "HEAD abc",
+        "branch refs/heads/feature/201-some-work",
+        "",
+        "worktree /repo/.worktrees/feature/42-test",
+        "HEAD def",
+        "branch refs/heads/feature/42-test",
+        "",
+      ].join("\n");
+
+      mockExecFileResult(porcelain);
+      const result = await listFeatureWorktrees("/repo");
+      expect(result).toHaveLength(1);
+      expect(result[0]!.branch).toBe("feature/42-test");
+    });
   });
 
   describe("toKebabCase", () => {
