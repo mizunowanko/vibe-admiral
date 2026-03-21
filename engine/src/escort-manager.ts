@@ -26,8 +26,8 @@ export interface EscortInfo {
  * 1. Engine detects gate phase via ShipRequestHandler
  * 2. EscortManager.launchEscort() spawns a Claude CLI process with the
  *    appropriate gate skill (e.g. /gate-plan-review)
- * 3. Escort performs review, writes gate-response to DB
- * 4. Ship polls DB for gate-response
+ * 3. Escort performs review, directly updates phases table and phase_transitions
+ * 4. Ship polls phases table for phase changes
  * 5. On Escort process exit, EscortManager cleans up tracking state
  */
 export class EscortManager {

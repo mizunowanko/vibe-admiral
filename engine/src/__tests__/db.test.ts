@@ -237,13 +237,13 @@ describe("FleetDatabase", () => {
   describe("message board", () => {
     it("inserts a message and returns its ID", () => {
       db.upsertShip(makeShip());
-      const id = db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      const id = db.insertMessage("ship-001", "admiral-request-response", "engine", { approved: true });
       expect(id).toBeGreaterThan(0);
     });
 
     it("retrieves unread messages without type filter", () => {
       db.upsertShip(makeShip());
-      db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { approved: true });
       db.insertMessage("ship-001", "admiral-request-response", "engine", { ok: true });
 
       const messages = db.getUnreadMessages("ship-001");
@@ -252,45 +252,40 @@ describe("FleetDatabase", () => {
 
     it("retrieves unread messages with type filter", () => {
       db.upsertShip(makeShip());
-      db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
-      db.insertMessage("ship-001", "admiral-request-response", "engine", { ok: true });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { approved: true });
+      db.insertMessage("ship-001", "admiral-request-response" as any, "engine", { ok: true });
 
-      const gateMessages = db.getUnreadMessages("ship-001", "gate-response");
-      expect(gateMessages).toHaveLength(1);
-      expect(JSON.parse(gateMessages[0]!.payload)).toEqual({ approved: true });
+      const filtered = db.getUnreadMessages("ship-001", "admiral-request-response");
+      expect(filtered).toHaveLength(2);
+      expect(JSON.parse(filtered[0]!.payload)).toEqual({ approved: true });
     });
 
     it("marks a single message as read", () => {
       db.upsertShip(makeShip());
-      const id = db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
+      const id = db.insertMessage("ship-001", "admiral-request-response", "engine", { approved: true });
       db.markMessageRead(id);
 
-      const messages = db.getUnreadMessages("ship-001", "gate-response");
+      const messages = db.getUnreadMessages("ship-001", "admiral-request-response");
       expect(messages).toHaveLength(0);
     });
 
     it("marks all messages of a type as read", () => {
       db.upsertShip(makeShip());
-      db.insertMessage("ship-001", "gate-response", "bridge", { approved: false });
-      db.insertMessage("ship-001", "gate-response", "bridge", { approved: true });
-      db.insertMessage("ship-001", "admiral-request-response", "engine", { ok: true });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { approved: false });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { approved: true });
 
-      db.markAllRead("ship-001", "gate-response");
+      db.markAllRead("ship-001", "admiral-request-response");
 
-      const gateMessages = db.getUnreadMessages("ship-001", "gate-response");
-      expect(gateMessages).toHaveLength(0);
-
-      // Other types remain unread
-      const otherMessages = db.getUnreadMessages("ship-001", "admiral-request-response");
-      expect(otherMessages).toHaveLength(1);
+      const markedMessages = db.getUnreadMessages("ship-001", "admiral-request-response");
+      expect(markedMessages).toHaveLength(0);
     });
 
     it("returns messages in chronological order", () => {
       db.upsertShip(makeShip());
-      db.insertMessage("ship-001", "gate-response", "bridge", { seq: 1 });
-      db.insertMessage("ship-001", "gate-response", "bridge", { seq: 2 });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { seq: 1 });
+      db.insertMessage("ship-001", "admiral-request-response", "engine", { seq: 2 });
 
-      const messages = db.getUnreadMessages("ship-001", "gate-response");
+      const messages = db.getUnreadMessages("ship-001", "admiral-request-response");
       expect(JSON.parse(messages[0]!.payload).seq).toBe(1);
       expect(JSON.parse(messages[1]!.payload).seq).toBe(2);
     });

@@ -60,31 +60,22 @@ COMMIT;
 
 Ship 自身が Escort (sub-agent) を起動して code-review を実施する。`/gate-code-review` スキルを参照して Escort を Task tool で起動する。
 
-Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
+Escort が完了すると、DB の `phases` テーブルが直接更新される。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null); case "$PHASE" in acceptance-test) echo "Gate approved"; break ;; implementing) echo "Gate rejected"; break ;; implementing-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-- `approved: true` → `acceptance-test` に直接 DB 更新して遷移、`/implement-merge` に進む
-- `approved: false` → PR レビューコメントを確認し修正 → commit & push → 再度 gate に遷移 → Escort 起動ループ
-
-#### Gate 承認後の遷移
-
-Gate 承認後、`acceptance-test` に直接 DB 更新:
-
-```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'acceptance-test', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'acceptance-test'
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'implementing-gate';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'implementing-gate', 'acceptance-test', 'ship', '{}');
-COMMIT;
-"
-```
+- `acceptance-test` に遷移済み → Escort が承認し phase を更新済み。`/implement-merge` に進む
+- `implementing` に戻された → Escort が reject した。`phase_transitions` からフィードバックを取得し、PR レビューコメントを確認して修正 → commit & push → 再度 gate に遷移 → Escort 起動ループ:
+  ```bash
+  FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+    SELECT json_extract(metadata, '$.feedback')
+    FROM phase_transitions
+    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
+    ORDER BY created_at DESC LIMIT 1
+  ")
+  ```
 
 ### VIBE_ADMIRAL 未設定時
 
