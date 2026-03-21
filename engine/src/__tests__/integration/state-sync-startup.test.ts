@@ -31,7 +31,8 @@ type MockShipManager = {
   getShipByIssue: ReturnType<typeof vi.fn>;
   getActiveShipIssueNumbers: ReturnType<typeof vi.fn>;
   hasRunningProcess: ReturnType<typeof vi.fn>;
-  updateStatus: ReturnType<typeof vi.fn>;
+  updatePhase: ReturnType<typeof vi.fn>;
+  notifyProcessDead: ReturnType<typeof vi.fn>;
   purgeOrphanShips: ReturnType<typeof vi.fn>;
   restoreFromDisk: ReturnType<typeof vi.fn>;
 };
@@ -91,7 +92,8 @@ describe("StateSync startup reconciliation (integration)", () => {
       getShipByIssue: vi.fn(),
       getActiveShipIssueNumbers: vi.fn().mockReturnValue([]),
       hasRunningProcess: vi.fn().mockReturnValue(false),
-      updateStatus: vi.fn(),
+      updatePhase: vi.fn(),
+      notifyProcessDead: vi.fn(),
       purgeOrphanShips: vi.fn().mockReturnValue(0),
       restoreFromDisk: vi.fn().mockResolvedValue(0),
     };
@@ -126,9 +128,9 @@ describe("StateSync startup reconciliation (integration)", () => {
       expect(result.reason).toContain("active Ship");
     });
 
-    it("blocks sortie when issue has an active status label (doing)", async () => {
+    it("blocks sortie when issue has an active status label (sortied)", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(undefined);
-      mockStatusManager.getStatus.mockResolvedValue("doing");
+      mockStatusManager.getStatus.mockResolvedValue("sortied");
 
       const result = await stateSync.sortieGuard("owner/repo", 42);
       expect(result.ok).toBe(false);
@@ -162,21 +164,20 @@ describe("StateSync startup reconciliation (integration)", () => {
 
       await stateSync.onProcessExit("ship-1", true);
       // First call is the immediate "done" update
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith("ship-1", "done");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("ship-1", "done");
     });
 
-    it("marks Ship as error and rollbacks label on failed exit", async () => {
+    it("notifies process dead and rollbacks label on failed exit", async () => {
       const ship = makeShip({ phase: "implementing" });
       mockShipManager.getShip.mockReturnValue(ship);
       // rescueIfAlreadyDone will call getIssue — issue is open, so not rescued
       vi.mocked(github.getIssue).mockResolvedValue(
-        makeIssue({ number: 42, state: "open", labels: ["status/implementing"] }),
+        makeIssue({ number: 42, state: "open", labels: ["status/sortied"] }),
       );
 
       await stateSync.onProcessExit("ship-1", false);
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
-        "ship-1", "error", "Process exited",
-      );
+      // No "error" phase — process dead is a derived state
+      expect(mockShipManager.notifyProcessDead).toHaveBeenCalledWith("ship-1");
       // rollbackLabel delegates to rollback with default maxRetries=3
       expect(mockStatusManager.rollback).toHaveBeenCalledWith("owner/repo", 42, 3);
     });
@@ -185,21 +186,23 @@ describe("StateSync startup reconciliation (integration)", () => {
       const ship = makeShip({ phase: "implementing" });
       mockShipManager.getShip.mockReturnValue(ship);
       vi.mocked(github.getIssue).mockResolvedValue(
-        makeIssue({ number: 42, state: "closed", labels: ["status/implementing"] }),
+        makeIssue({ number: 42, state: "closed", labels: ["status/sortied"] }),
       );
       vi.mocked(github.updateLabels).mockResolvedValue(undefined);
       vi.mocked(worktree.remove).mockResolvedValue(undefined);
       vi.mocked(worktree.getRepoRoot).mockResolvedValue("/repo");
 
       await stateSync.onProcessExit("ship-1", false);
-      // Should be rescued: first error, then done
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith("ship-1", "done");
+      // Process dead notified, then rescued to done
+      expect(mockShipManager.notifyProcessDead).toHaveBeenCalledWith("ship-1");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("ship-1", "done");
     });
 
     it("skips cleanup for unknown ships", async () => {
       mockShipManager.getShip.mockReturnValue(undefined);
       await stateSync.onProcessExit("unknown", false);
-      expect(mockShipManager.updateStatus).not.toHaveBeenCalled();
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
+      expect(mockShipManager.notifyProcessDead).not.toHaveBeenCalled();
     });
   });
 
@@ -214,9 +217,9 @@ describe("StateSync startup reconciliation (integration)", () => {
       // No active ships — so any doing issue is orphaned
       mockShipManager.getActiveShipIssueNumbers.mockReturnValue([]);
 
-      // Repo has an issue with status/implementing but no ship
+      // Repo has an issue with status/sortied but no ship
       vi.mocked(github.listIssues).mockResolvedValue([
-        makeIssue({ number: 50, labels: ["status/implementing"] }),
+        makeIssue({ number: 50, labels: ["status/sortied"] }),
       ]);
       vi.mocked(worktree.getRepoRoot).mockResolvedValue("/repo");
       vi.mocked(worktree.listFeatureWorktrees).mockResolvedValue([]);
