@@ -1,9 +1,15 @@
-# /implement-review — Commit, PR & Code Review (Steps 9-10)
+---
+name: implement-review
+description: /implement のサブスキル — コードレビュー準備
+user-invocable: false
+---
 
-> **CRITICAL: Step 9 → Step 10 の順序は絶対にスキップ・逆転してはならない。**
+# /implement-review — Commit, PR & Code Review
+
+> **CRITICAL: Step 1 → Step 2 の順序は絶対にスキップ・逆転してはならない。**
 > code-review Gate が承認されてから次の sub-skill に進む。
 
-## Step 9: コミット & PR 作成
+## Step 1: コミット & PR 作成
 
 まず `gh pr list --head $(git branch --show-current) --json number --jq '.[0].number'` で既存 PR の有無を確認する。
 
@@ -37,72 +43,59 @@
 
 PR URL をユーザーに報告する。
 
-## Step 10: code-review Gate
+## Step 2: code-review Gate
 
 > **このステップで code-review Gate が承認されるまで、次の sub-skill (`/implement-merge`) に進んではならない。**
 
 ### VIBE_ADMIRAL 設定時（Ship Escort 方式）
 
-PR 作成/push 完了後、`acceptance-test` への遷移を表明する。Engine はこの遷移に対して **code-review Gate** 情報を返す:
-
-````
-```admiral-request
-{ "request": "status-transition", "status": "acceptance-test" }
-```
-````
-
-Engine からの応答を DB でポーリング:
+PR 作成/push 完了後、`implementing-gate` に直接 DB 更新で遷移し、**code-review Gate** を開始する:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"
-SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 1
-done
+sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+BEGIN;
+  UPDATE phases SET phase = 'implementing-gate', updated_at = datetime('now')
+    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
+  UPDATE ships SET phase = 'implementing-gate'
+    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'implementing';
+  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
+    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'implementing', 'implementing-gate', 'ship', '{}');
+COMMIT;
+"
 ```
 
-応答に `gate` フィールドが含まれる場合、Ship 自身が Escort (sub-agent) を起動して code-review を実施する。`/gate-code-review` スキルを参照して Escort を Task tool で起動する。
+Ship 自身が Escort (sub-agent) を起動して code-review を実施する。`/gate-code-review` スキルを参照して Escort を Task tool で起動する。
 
-Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得:
+Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
 
 ```bash
-echo "Waiting for Escort code review..."
-while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 2
-done
+DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-- `approved: true` → 再度 `status-transition` を表明して Engine に gate 完了を通知、`/implement-merge` に進む
-- `approved: false` → PR レビューコメントを確認し修正 → commit & push → 再度 `status-transition` → Escort 起動ループ
+- `approved: true` → `acceptance-test` に直接 DB 更新して遷移、`/implement-merge` に進む
+- `approved: false` → PR レビューコメントを確認し修正 → commit & push → 再度 gate に遷移 → Escort 起動ループ
 
-#### Gate 完了通知
+#### Gate 承認後の遷移
 
-Gate 承認後、再度 `status-transition` を表明して Engine に gate 完了を通知:
+Gate 承認後、`acceptance-test` に直接 DB 更新:
 
-````
-```admiral-request
-{ "request": "status-transition", "status": "acceptance-test" }
+```bash
+sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+BEGIN;
+  UPDATE phases SET phase = 'acceptance-test', updated_at = datetime('now')
+    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
+  UPDATE ships SET phase = 'acceptance-test'
+    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'implementing-gate';
+  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
+    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'implementing-gate', 'acceptance-test', 'ship', '{}');
+COMMIT;
+"
 ```
-````
-
-Engine からの `{ok: true}` 応答を DB でポーリングして確認。
 
 ### VIBE_ADMIRAL 未設定時
 
 1. `/review-pr` スキルをバックグラウンドで起動（Task ツール `run_in_background: true`）
-2. `/implement-merge` に進む（レビュー結果は Step 14 で対応）
+2. `/implement-merge` に進む（レビュー結果は `/implement-merge` Step 4 で対応）
 
 ## 完了後
 
