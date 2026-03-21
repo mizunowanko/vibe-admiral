@@ -2,21 +2,38 @@
 
 ## Step 3: 調査
 
-**`VIBE_ADMIRAL` 設定時**: Issue body は prompt の `[Issue Context]` ブロックに含まれている。body の再取得は不要。comments のみ取得して追加指示を確認する:
+> **Issue 読み取りは `/read-issue` スキルの手順に準拠する。**
+> コマンドやフィールドを変更する場合は `/read-issue` (skills/read-issue/SKILL.md) と同期すること。
+
+### 3a. Issue 全コンテキスト取得
+
 ```bash
-gh issue view <ISSUE_NUMBER> --repo "$REPO" --json comments --jq '.comments'
+REPO="${REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+gh issue view <ISSUE_NUMBER> --repo "$REPO" --json number,title,body,labels,state,comments
 ```
 
-**`VIBE_ADMIRAL` 未設定時**: Issue の body と全 comments を読んで要件を完全に把握する:
-```bash
-gh issue view <ISSUE_NUMBER> --repo "$REPO" --json body,comments
-```
+**`VIBE_ADMIRAL` 設定時**: Issue body は prompt の `[Issue Context]` ブロックにも含まれているが、comments・labels・state の最新情報を取得するために上記コマンドを実行する。
 
-特に以下を確認する:
+### 3b. Comments の解析
+
+全コメントを読み、以下を抽出する:
 - 人間からの追加指示やポリシー変更
 - 依存関係の追加・変更
 - 優先度の変更や要件の追加・修正
 - 前回の plan-review で reject された場合のフィードバック
+
+### 3c. 関連 PR の確認
+
+```bash
+gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,url
+```
+
+### 3d. Dependencies の解析
+
+- `depends-on/<N>` ラベルの確認（labels フィールドから抽出）
+- body 内の "## Dependencies" セクションの解析
+
+### 3e. コード調査
 
 その上で:
 - Task ツールで並列調査する（影響範囲の特定）
