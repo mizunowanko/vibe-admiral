@@ -29,10 +29,10 @@ import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
+import { getAdmiralHome } from "./admiral-home.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipRequest } from "./types.js";
 
-const FLEETS_DIR =
-  join(process.env.HOME ?? "~", ".vibe-admiral");
+const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
 
 export class EngineServer {
@@ -1059,8 +1059,7 @@ export class EngineServer {
 
   private async initDatabase(): Promise<void> {
     try {
-      const dbDir = join(process.env.HOME ?? homedir(), ".vibe-admiral");
-      this.fleetDb = await initFleetDatabase(dbDir);
+      this.fleetDb = await initFleetDatabase(getAdmiralHome());
       this.shipManager.setDatabase(this.fleetDb);
       this.shipRequestHandler.setDatabase(this.fleetDb);
       console.log("[engine] Fleet database initialized");

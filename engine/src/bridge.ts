@@ -1,11 +1,10 @@
 import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { ProcessManager } from "./process-manager.js";
+import { getAdmiralHome } from "./admiral-home.js";
 import type { StreamMessage, PersistedBridgeSession } from "./types.js";
 
 const MAX_HISTORY = 500;
-const ADMIRAL_DIR = join(homedir(), ".vibe-admiral");
 
 export interface BridgeSession {
   id: string;
@@ -230,7 +229,7 @@ export class BridgeManager {
   // --- Disk persistence ---
 
   private fleetDir(fleetId: string): string {
-    return join(ADMIRAL_DIR, fleetId);
+    return join(getAdmiralHome(), fleetId);
   }
 
   private historyPath(fleetId: string): string {
