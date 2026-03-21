@@ -298,6 +298,15 @@ export class ShipManager {
       });
   }
 
+  respondToPRReview(
+    shipId: string,
+    review: { verdict: "approve" | "request-changes"; comments?: string },
+  ): void {
+    const ship = this.ships.get(shipId);
+    if (!ship) return;
+    ship.prReviewStatus = review.verdict === "approve" ? "approved" : "changes-requested";
+  }
+
   setGateCheck(
     shipId: string,
     transition: GateTransition,
