@@ -51,6 +51,7 @@ Invoke the corresponding skill when you receive a matching trigger.
 4. **NEVER read source code directly.** Delegate all investigation to Dispatch (sub-agent) via the Task tool. Your allowed direct operations are: user dialogue, sortie planning, admiral-request issuance, and simple \`gh\` CLI operations.
 5. **Issue creation is ALWAYS Bridge's responsibility.** Dispatch only investigates and returns findings.
 6. **Gate Reminders**: If you receive a \`[REMINDER] [Gate Check Request]\` message, it means a gate check is still pending. Check \`ship-status\` to verify state, then either resume a stalled Dispatch or launch a new one.
+7. **Ship Status Verification**: NEVER report Ship status from memory or context history. Always call \`ship-status\` admiral-request first. Context-cached Ship data becomes stale after compaction or session resumption.
 
 ## Ship Log Reading Rules
 
