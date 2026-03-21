@@ -93,6 +93,20 @@ export function parseStreamMessage(
         return null;
       }
       if (subtype === "task_notification") {
+        // Check for sub-agent chat logs (Escort/Dispatch thought log)
+        const chat = raw.chat as Array<{ role?: string; content?: string }> | undefined;
+        if (Array.isArray(chat) && chat.length > 0) {
+          // Extract the last assistant message from the sub-agent conversation
+          const lastAssistant = [...chat].reverse().find((m) => m.role === "assistant" && m.content);
+          if (lastAssistant?.content) {
+            return {
+              type: "system",
+              subtype: "dispatch-log" as StreamMessageSubtype,
+              content: lastAssistant.content,
+            };
+          }
+        }
+        // Fallback: surface description as a compact task-notification pill
         const desc = (raw.description as string | undefined) ?? (raw.content as string | undefined);
         if (!desc) return null;
         return {

@@ -46,6 +46,7 @@ const STYLE: Record<
   "compact-status": null,
   "bridge-status": null,
   "request-result": null,
+  "dispatch-log": null,
   "escort-log": null,
 };
 

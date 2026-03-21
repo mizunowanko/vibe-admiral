@@ -41,9 +41,11 @@ const MARKDOWN_COMPONENTS = {
 interface ChatMessageProps {
   message: StreamMessage;
   repeatCount?: number;
+  /** Rendering context: "ship" enables LINE-style layout (assistant right-aligned). */
+  context?: "bridge" | "ship";
 }
 
-export function ChatMessage({ message, repeatCount }: ChatMessageProps) {
+export function ChatMessage({ message, repeatCount, context }: ChatMessageProps) {
   const [toolExpanded, setToolExpanded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
   const imageUrls = useImageObjectUrls(message.images);
@@ -244,18 +246,21 @@ export function ChatMessage({ message, repeatCount }: ChatMessageProps) {
   }
 
   const content = message.content ?? "";
+  // In Ship context, assistant messages are right-aligned (LINE-style: Ship speaks on the right)
+  const isShipAssistant = context === "ship" && message.type === "assistant";
+  const isRightAligned = isUser || isShipAssistant;
 
   return (
     <div
       className={cn(
         "flex w-full",
-        isUser ? "justify-end" : "justify-start",
+        isRightAligned ? "justify-end" : "justify-start",
       )}
     >
       <div
         className={cn(
           "max-w-[80%] rounded-lg px-3 py-2 text-sm",
-          isUser
+          isUser || isShipAssistant
             ? "bg-primary text-primary-foreground"
             : isError
               ? "bg-destructive/10 text-destructive-foreground border border-destructive/20"
@@ -299,7 +304,10 @@ export function ChatMessage({ message, repeatCount }: ChatMessageProps) {
           </div>
         )}
         {message.timestamp && (
-          <span className="block text-[10px] text-slate-400 mt-1 text-right">
+          <span className={cn(
+            "block text-[10px] mt-1 text-right",
+            isRightAligned ? "text-primary-foreground/60" : "text-slate-400",
+          )}>
             {formatTime(message.timestamp)}
           </span>
         )}
