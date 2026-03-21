@@ -177,7 +177,7 @@ export interface PRStatus {
   number: number;
   state: string;
   mergeable: boolean;
-  checksStatus: string;
+  checksStatus: "passed" | "failed" | "pending" | "no-checks";
 }
 
 // === Worktree ===

@@ -291,16 +291,30 @@ export async function getPRStatus(
     number: number;
     state: string;
     mergeable: string;
-    statusCheckRollup: Array<{ status: string }>;
+    statusCheckRollup: Array<{
+      status: string;
+      conclusion: string;
+    }> | null;
   };
-  const allPassed = pr.statusCheckRollup?.every(
-    (c) => c.status === "COMPLETED",
-  );
+
+  const checks = pr.statusCheckRollup;
+  let checksStatus: PRStatus["checksStatus"];
+
+  if (!checks || checks.length === 0) {
+    checksStatus = "no-checks";
+  } else if (checks.some((c) => c.conclusion === "FAILURE" || c.conclusion === "TIMED_OUT" || c.conclusion === "CANCELLED")) {
+    checksStatus = "failed";
+  } else if (checks.every((c) => c.status === "COMPLETED")) {
+    checksStatus = "passed";
+  } else {
+    checksStatus = "pending";
+  }
+
   return {
     number: pr.number,
     state: pr.state,
     mergeable: pr.mergeable === "MERGEABLE",
-    checksStatus: allPassed ? "passed" : "pending",
+    checksStatus,
   };
 }
 
