@@ -102,7 +102,7 @@ COMMIT;
 
 Ship 自身が Escort (sub-agent) を起動して playwright テストを実施する。
 
-Escort が完了すると、DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
+Engine が Escort を起動済み。Escort が完了すると DB に `gate-response` が書き込まれる。ポーリングして結果を取得（タイムアウト付き単一コマンド）:
 
 ```bash
 DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='gate-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"

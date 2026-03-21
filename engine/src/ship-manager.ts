@@ -53,6 +53,11 @@ export class ShipManager {
     this.fleetDb = db;
   }
 
+  /** Get the fleet database path (used by EscortManager for Escort env vars). */
+  getDbPath(): string | undefined {
+    return this.fleetDb?.path;
+  }
+
   setPhaseChangeHandler(
     handler: (id: string, phase: Phase, detail?: string) => void,
   ): void {
@@ -417,7 +422,7 @@ export class ShipManager {
       "implement-code",
       "implement-review",
       "implement-merge",
-      // Gate skills (Ship launches its own Escort sub-agents)
+      // Gate skills (deployed to worktree; Engine launches Escort processes that use these)
       "gate-plan-review",
       "gate-code-review",
       // Shared skills (Bridge/Ship common)

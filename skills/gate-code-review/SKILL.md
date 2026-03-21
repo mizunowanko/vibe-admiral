@@ -1,46 +1,74 @@
-# /gate-code-review — Code Review Gate (Ship Escort)
+# /gate-code-review — Code Review Gate (Engine Escort)
 
-Ship が code-review gate に到達したとき、Ship 自身がこのスキルを参照して Escort (sub-agent) を Task tool で起動する。
+Engine が code-review gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 
-## Escort Template
+## 引数
 
-Ship は以下のテンプレートで Escort を起動する:
+- Issue 番号（例: `42`）
 
-```
-Task(description="Escort: code-review #<issue>", subagent_type="general-purpose", prompt=`
-You are an Escort agent performing a code-review gate check for Ship #<issue>.
+## 環境変数
 
-Ship ID: <ship-id>
-Repo: <repo>
-DB path: <db-path>
-PR: <pr-url>
-Ship log: <worktree>/.claude/ship-log.jsonl
+- `VIBE_ADMIRAL_SHIP_ID`: レビュー対象の Ship ID
+- `VIBE_ADMIRAL_DB_PATH`: Fleet SQLite データベースパス
+- `VIBE_ADMIRAL_MAIN_REPO`: リポジトリ（owner/repo）
 
-Perform code-review:
-0. If PR is "not yet created", run: gh pr list --head <branch-name> --repo <repo> --json number,url --jq '.[0]'
-   If a PR is found, use its number and URL. If not found, reject the gate with feedback "PR not found".
-1. Read the Ship's implementation log:
-   Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30
-2. Run: gh pr view <number> --repo <repo> --json title,body,reviews,comments
-3. Check for previous review history — if there are existing "request-changes" reviews, note what was flagged
-4. Run: gh pr diff <number> --repo <repo>
-5. Review against: issue requirements, coding conventions, security, scope, test coverage. Use the Ship's log to understand implementation choices. If re-review, verify previous issues were addressed
-6. IMPORTANT: Record your review on GitHub:
-   - If approving: gh pr review <number> --repo <repo> --approve --body "<review summary>"
-   - If rejecting: gh pr review <number> --repo <repo> --request-changes --body "<detailed feedback>"
-7. Write the gate-response to the DB:
+## Procedure
 
-If approving:
-\`\`\`bash
-sqlite3 "<db-path>" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('<ship-id>', 'gate-response', 'escort', '{\"approved\":true,\"gatePhase\":\"implementing-gate\"}')"
-\`\`\`
+1. リポ情報を取得:
+   ```bash
+   REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+   DB_PATH="$VIBE_ADMIRAL_DB_PATH"
+   BRANCH_NAME=$(git branch --show-current)
+   ```
 
-If rejecting:
-\`\`\`bash
-sqlite3 "<db-path>" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('<ship-id>', 'gate-response', 'escort', '{\"approved\":false,\"gatePhase\":\"implementing-gate\",\"feedback\":\"<what needs fixing>\"}')"
-\`\`\`
-`)
-```
+2. PR を特定:
+   ```bash
+   PR_JSON=$(gh pr list --head "$BRANCH_NAME" --repo "$REPO" --json number,url --jq '.[0]')
+   ```
+   PR が見つからない場合は、gate を reject して feedback "PR not found" を書き込む。
+
+3. Ship の実装ログを確認:
+   ```bash
+   tail -n 300 .claude/ship-log.jsonl 2>/dev/null | grep '"type":"assistant"' | tail -n 30
+   ```
+
+4. PR の詳細を取得:
+   ```bash
+   gh pr view <PR_NUMBER> --repo "$REPO" --json title,body,reviews,comments
+   ```
+
+5. レビュー履歴を確認:
+   - 既存の "request-changes" レビューがあれば、何が指摘されたか把握
+
+6. diff を取得:
+   ```bash
+   gh pr diff <PR_NUMBER> --repo "$REPO"
+   ```
+
+7. レビュー:
+   - Issue 要件の充足
+   - コーディング規約の遵守
+   - セキュリティリスク
+   - スコープの妥当性
+   - テストカバレッジ
+   - re-review の場合、前回の指摘が修正されているか
+
+8. **GitHub にレビュー結果を記録**:
+   - 承認: `gh pr review <PR_NUMBER> --repo "$REPO" --approve --body "<review summary>"`
+   - 拒否: `gh pr review <PR_NUMBER> --repo "$REPO" --request-changes --body "<detailed feedback>"`
+
+9. DB に gate-response を書き込み:
+
+   承認の場合:
+   ```bash
+   sqlite3 "$DB_PATH" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('$SHIP_ID', 'gate-response', 'escort', '{\"approved\":true,\"gatePhase\":\"implementing-gate\"}')"
+   ```
+
+   拒否の場合:
+   ```bash
+   sqlite3 "$DB_PATH" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('$SHIP_ID', 'gate-response', 'escort', '{\"approved\":false,\"gatePhase\":\"implementing-gate\",\"feedback\":\"<修正すべき点>\"}')"
+   ```
 
 ## Review Guidelines
 
