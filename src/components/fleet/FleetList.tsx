@@ -38,7 +38,7 @@ function FleetItem({
 }: FleetItemProps) {
   const ships = useShipsByFleet(fleetId);
   const activeCount = ships.filter(
-    (s) => s.phase !== "done" && !s.processDead,
+    (s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead,
   ).length;
 
   return (

@@ -27,11 +27,11 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const [showCompleted, setShowCompleted] = useState(false);
 
   const activeShips = useMemo(
-    () => ships.filter((s) => s.phase !== "done" && !s.processDead),
+    () => ships.filter((s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead),
     [ships],
   );
   const completedShips = useMemo(
-    () => ships.filter((s) => s.phase === "done" || s.processDead),
+    () => ships.filter((s) => s.phase === "done" || s.phase === "stopped" || s.processDead),
     [ships],
   );
 

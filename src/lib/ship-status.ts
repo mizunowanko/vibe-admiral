@@ -16,6 +16,7 @@ export const STATUS_CONFIG: Record<Phase, StatusConfig> = {
   "acceptance-test-gate": { label: "QA Gate", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
   merging: { label: "Merging", color: "bg-emerald-500/20 text-emerald-400", textColor: "text-emerald-400", animate: true },
   done: { label: "Done", color: "bg-green-500/20 text-green-400", textColor: "text-green-400" },
+  stopped: { label: "Stopped", color: "bg-gray-500/20 text-gray-400", textColor: "text-gray-400" },
 };
 
 /** Config for the derived "process dead" state (not a real phase). */

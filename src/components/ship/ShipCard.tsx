@@ -18,7 +18,7 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
     : ship.processDead
       ? PROCESS_DEAD_CONFIG
       : STATUS_CONFIG[ship.phase];
-  const isActive = ship.phase !== "done" && !ship.processDead;
+  const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
 
   return (
     <div
