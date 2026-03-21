@@ -185,8 +185,8 @@ export class EngineServer {
             const toolUseId = parsed.toolUseId as string | undefined;
             if (prompt && toolUseId) {
               const shipIdMatch = prompt.match(/Ship ID: ([a-f0-9-]{36})/i);
-              if (shipIdMatch) {
-                this.bridgeActiveTasks.set(toolUseId, shipIdMatch[1]!);
+              if (shipIdMatch?.[1]) {
+                this.bridgeActiveTasks.set(toolUseId, shipIdMatch[1]);
               }
             }
             // Normal bridge broadcast
