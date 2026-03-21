@@ -49,19 +49,15 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test",
-    status: "implementing",
+    phase: "implementing",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/repo/.worktrees/feature/42-test",
     sessionId: null,
     prUrl: null,
     prReviewStatus: null,
-    acceptanceTest: null,
-    acceptanceTestApproved: false,
     gateCheck: null,
     qaRequired: true,
-    escortAgentId: null,
-    errorType: null,
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
@@ -122,7 +118,7 @@ describe("StateSync startup reconciliation (integration)", () => {
 
     it("blocks sortie when a Ship already exists for this issue", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(
-        makeShip({ status: "implementing" }),
+        makeShip({ phase: "implementing" }),
       );
 
       const result = await stateSync.sortieGuard("owner/repo", 42);
@@ -159,7 +155,7 @@ describe("StateSync startup reconciliation (integration)", () => {
 
   describe("onProcessExit", () => {
     it("marks Ship as done on successful exit", async () => {
-      const ship = makeShip({ status: "merging" });
+      const ship = makeShip({ phase: "merging" });
       mockShipManager.getShip.mockReturnValue(ship);
       vi.mocked(worktree.remove).mockResolvedValue(undefined);
       vi.mocked(worktree.getRepoRoot).mockResolvedValue("/repo");
@@ -170,7 +166,7 @@ describe("StateSync startup reconciliation (integration)", () => {
     });
 
     it("marks Ship as error and rollbacks label on failed exit", async () => {
-      const ship = makeShip({ status: "implementing" });
+      const ship = makeShip({ phase: "implementing" });
       mockShipManager.getShip.mockReturnValue(ship);
       // rescueIfAlreadyDone will call getIssue — issue is open, so not rescued
       vi.mocked(github.getIssue).mockResolvedValue(
@@ -186,7 +182,7 @@ describe("StateSync startup reconciliation (integration)", () => {
     });
 
     it("rescues Ship as done if issue is already closed on GitHub", async () => {
-      const ship = makeShip({ status: "implementing" });
+      const ship = makeShip({ phase: "implementing" });
       mockShipManager.getShip.mockReturnValue(ship);
       vi.mocked(github.getIssue).mockResolvedValue(
         makeIssue({ number: 42, state: "closed", labels: ["status/implementing"] }),
