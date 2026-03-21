@@ -45,7 +45,7 @@ export function useEngine() {
           const created = msg.data as unknown as { id: string; fleets: Fleet[] };
           setFleets(created.fleets);
           selectFleet(created.id);
-          setMainView("bridge");
+          setMainView("command");
           break;
         }
 
@@ -149,8 +149,9 @@ export function useEngine() {
           break;
         }
 
-        case "bridge:stream":
-          // Bridge messages are handled by useBridge hook
+        case "flagship:stream":
+        case "dock:stream":
+          // Commander messages are handled by useCommander hook
           break;
 
         case "issue:data":

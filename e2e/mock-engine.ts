@@ -78,9 +78,11 @@ export class MockEngine {
         this.sendTo(ws, { type: "fleet:data", data: this.fleets });
         break;
       }
-      case "bridge:history": {
+      case "flagship:history":
+      case "dock:history": {
+        const historyRole = msg.type.startsWith("flagship") ? "flagship" : "dock";
         this.sendTo(ws, {
-          type: "bridge:stream",
+          type: `${historyRole}:stream`,
           data: {
             fleetId: data.fleetId,
             message: { type: "history", content: "[]" },
@@ -88,11 +90,13 @@ export class MockEngine {
         });
         break;
       }
-      case "bridge:send": {
+      case "flagship:send":
+      case "dock:send": {
+        const sendRole = msg.type.startsWith("flagship") ? "flagship" : "dock";
         // Echo back an assistant response after a short delay
         setTimeout(() => {
           this.sendTo(ws, {
-            type: "bridge:stream",
+            type: `${sendRole}:stream`,
             data: {
               fleetId: data.fleetId,
               message: {

@@ -36,12 +36,18 @@ export interface Fleet {
   repos: FleetRepo[];
   skillSources?: FleetSkillSources;
   sharedRulePaths?: string[];
+  flagshipRulePaths?: string[];
+  dockRulePaths?: string[];
+  /** @deprecated Use flagshipRulePaths instead. */
   bridgeRulePaths?: string[];
   shipRulePaths?: string[];
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
 }
+
+// === Commander (Dock/Flagship shared role type) ===
+export type CommanderRole = "dock" | "flagship";
 
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
@@ -93,7 +99,7 @@ export interface Issue {
 export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
-  | "bridge-status"
+  | "commander-status"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request"
@@ -163,15 +169,19 @@ export type ClientMessage =
         repos?: FleetRepo[];
         skillSources?: FleetSkillSources;
         sharedRulePaths?: string[];
-        bridgeRulePaths?: string[];
+        flagshipRulePaths?: string[];
+        dockRulePaths?: string[];
         shipRulePaths?: string[];
         maxConcurrentSorties?: number;
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
-  | { type: "bridge:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
-  | { type: "bridge:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
-  | { type: "bridge:history"; data: { fleetId: string } }
+  | { type: "flagship:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
+  | { type: "flagship:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
+  | { type: "flagship:history"; data: { fleetId: string } }
+  | { type: "dock:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
+  | { type: "dock:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
+  | { type: "dock:history"; data: { fleetId: string } }
   | {
       type: "ship:sortie";
       data: { fleetId: string; issueNumber: number; repo: string };
@@ -188,12 +198,28 @@ export type ClientMessage =
 // === WebSocket Messages: Engine → Frontend ===
 export type ServerMessage =
   | {
-      type: "bridge:stream";
+      type: "flagship:stream";
       data: { fleetId: string; message: StreamMessage };
     }
   | {
-      type: "bridge:question";
+      type: "flagship:question";
       data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "flagship:question-timeout";
+      data: { fleetId: string };
+    }
+  | {
+      type: "dock:stream";
+      data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "dock:question";
+      data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "dock:question-timeout";
+      data: { fleetId: string };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
@@ -251,9 +277,5 @@ export type ServerMessage =
         path: string;
         entries: Array<{ name: string; isDirectory: boolean }>;
       };
-    }
-  | {
-      type: "bridge:question-timeout";
-      data: { fleetId: string };
     }
   | { type: "error"; data: { source: string; message: string } };

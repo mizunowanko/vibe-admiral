@@ -9,7 +9,7 @@ See `engine/src/process-manager.ts` for the implementation.
   - stdin MUST be `'ignore'`. Claude CLI is built on Bun, which replaces pipe FDs with Unix sockets when stdin is a pipe, breaking stdout capture.
   - Ships receive their full prompt via `-p` and don't need stdin.
 
-- **Bridge**: `stdio: ['pipe', 'pipe', 'pipe']`
+- **Commander (Dock / Flagship)**: `stdio: ['pipe', 'pipe', 'pipe']`
   - stdin is a pipe for sending interactive messages via `--input-format stream-json`.
   - MUST write to stdin immediately after spawn. Do NOT wait for an init message.
   - Bun blocks stdout when stdin pipe is idle, so waiting for init creates a deadlock.
@@ -20,8 +20,8 @@ See `engine/src/process-manager.ts` for the implementation.
   - `EnterPlanMode` / `ExitPlanMode`: In `-p` (prompt) mode, plan mode causes the CLI to exit after `ExitPlanMode` without performing the implementation. There is no human to approve the plan in non-interactive mode.
   - `AskUserQuestion`: Ship runs non-interactively with stdin ignored. User interaction uses the DB message board (`messages` table in fleet.db).
 
-- **Bridge allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
-  - Bridge is restricted to read-only and analysis tools (no Write/Edit).
+- **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
+  - Commanders are restricted to read-only and analysis tools (no Write/Edit).
   - `AskUserQuestion` is allowed; the Engine intercepts it, forwards to the frontend, and returns the answer via stdin `tool_result`.
 
 ## VIBE_ADMIRAL Environment Variable
@@ -53,9 +53,9 @@ When the CLI compacts its context, two system messages are emitted:
 
 The Engine detects these to update Ship `isCompacting` state and notify the frontend.
 
-## Stdin Message Format (Bridge Only)
+## Stdin Message Format (Commander Only)
 
-Messages to Bridge stdin use `--input-format stream-json`:
+Messages to Commander (Dock/Flagship) stdin use `--input-format stream-json`:
 
 ```
 {"type":"user","message":{"role":"user","content":"message text"}}\n

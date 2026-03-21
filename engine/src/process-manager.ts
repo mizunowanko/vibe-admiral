@@ -93,7 +93,11 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  launchBridge(
+  /**
+   * Launch an interactive commander session (Dock or Flagship).
+   * Both roles use the same CLI config — they differ only in system prompt and skills.
+   */
+  launchCommander(
     id: string,
     fleetPath: string,
     additionalDirs: string[],
@@ -105,7 +109,7 @@ export class ProcessManager extends EventEmitter {
     // MUST write to stdin immediately after spawn — Bun blocks stdout
     // when stdin pipe is idle, creating a deadlock if you wait for init.
     //
-    // allowedTools: Bridge is read-only (no Write/Edit). AskUserQuestion
+    // allowedTools: Commanders are read-only (no Write/Edit). AskUserQuestion
     // is allowed — Engine intercepts it and forwards to frontend.
     const args = [
       "-p",
@@ -130,6 +134,16 @@ export class ProcessManager extends EventEmitter {
 
     this.setupProcess(id, proc);
     return proc;
+  }
+
+  /** @deprecated Use launchCommander instead. */
+  launchBridge(
+    id: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+  ): ChildProcess {
+    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt);
   }
 
   sendMessage(
@@ -188,18 +202,17 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  resumeBridge(
+  /**
+   * Resume an interactive commander session (Dock or Flagship).
+   * --resume without -p: keeps the session interactive (stdin-driven).
+   */
+  resumeCommander(
     id: string,
     sessionId: string,
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
   ): ChildProcess {
-    // Resume a Bridge session with interactive stdin.
-    // Combines --resume with Bridge's interactive stdio config.
-    // --resume without -p: keeps the session interactive (stdin-driven).
-    // -p "" would put CLI into non-interactive prompt mode, causing it to
-    // process the empty prompt and exit instead of waiting for stdin.
     const args = [
       "--resume",
       sessionId,
@@ -223,6 +236,17 @@ export class ProcessManager extends EventEmitter {
 
     this.setupProcess(id, proc);
     return proc;
+  }
+
+  /** @deprecated Use resumeCommander instead. */
+  resumeBridge(
+    id: string,
+    sessionId: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+  ): ChildProcess {
+    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt);
   }
 
   resumeSession(

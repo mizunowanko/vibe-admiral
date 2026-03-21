@@ -5,7 +5,7 @@ import type { ToolUseGroupItem } from "@/lib/group-tool-messages";
 
 interface ToolUseGroupProps {
   group: ToolUseGroupItem;
-  context?: "bridge" | "ship";
+  context?: "command" | "bridge" | "ship";
 }
 
 export function ToolUseGroup({ group, context }: ToolUseGroupProps) {

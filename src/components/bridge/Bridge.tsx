@@ -1,17 +1,18 @@
 import { memo, useRef, useEffect, useLayoutEffect, useMemo, useState, useCallback } from "react";
-import { useBridge } from "@/hooks/useBridge";
+import { useCommander } from "@/hooks/useCommander";
 import { useUIStore } from "@/stores/uiStore";
 import { BridgeMessage } from "./BridgeMessage";
 import { BridgeInput } from "./BridgeInput";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageSquare, Loader2, ArrowDown, HelpCircle } from "lucide-react";
+import { Loader2, ArrowDown, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { StreamMessage } from "@/types";
+import type { StreamMessage, CommanderRole } from "@/types";
 import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
 import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 
-interface BridgeProps {
+interface CommanderChatProps {
   fleetId: string | null;
+  role: CommanderRole;
 }
 
 type DisplayMessage = StreamMessage & { repeatCount?: number };
@@ -36,8 +37,23 @@ function collapseShipStatus(msgs: StreamMessage[]): DisplayMessage[] {
   return result;
 }
 
-export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
-  const { messages, sendMessage, answerQuestion, pendingQuestion, isLoading } = useBridge(fleetId);
+const ROLE_CONFIG = {
+  flagship: {
+    label: "Flagship",
+    description: "Ship management — sortie, monitor, stop, resume",
+    emptyMessage: "Flagship is ready. Send a command to manage ships.",
+    inputPlaceholder: "Send a command to Flagship...",
+  },
+  dock: {
+    label: "Dock",
+    description: "Issue management — triage, clarity, priority",
+    emptyMessage: "Dock is ready. Send a command to manage issues.",
+    inputPlaceholder: "Send a command to Dock...",
+  },
+} as const;
+
+export const Bridge = memo(function Bridge({ fleetId, role }: CommanderChatProps) {
+  const { messages, sendMessage, answerQuestion, pendingQuestion, isLoading } = useCommander(fleetId, role);
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -47,6 +63,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
     () => groupToolMessages(collapseShipStatus(messages)),
     [messages],
   );
+  const config = ROLE_CONFIG[role];
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -67,12 +84,12 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
     setHasNewMessages(false);
   }, []);
 
-  // Reset scroll state when fleet changes
+  // Reset scroll state when fleet or role changes
   useEffect(() => {
     setHasNewMessages(false);
     isAtBottomRef.current = true;
     prevMessageCountRef.current = 0;
-  }, [fleetId]);
+  }, [fleetId, role]);
 
   // Unified scroll management — runs before paint so scroll position is
   // preserved across DOM updates without visible flicker.
@@ -85,47 +102,22 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
     if (!el) return;
 
     if (isAtBottomRef.current) {
-      // Auto-scroll to bottom when user is already there
       el.scrollTop = el.scrollHeight;
     } else if (curCount > prevCount) {
-      // New messages arrived while user is scrolled up — show indicator
       setHasNewMessages(true);
     }
-    // For history replacement (count shrank or stayed same), scroll position
-    // is naturally preserved because we no longer replace messages mid-session
-    // (the historyLoadedRef guard in useBridge prevents it).
   }, [messages, isLoading]);
 
   if (!fleetId) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        Select a fleet to open the Bridge
+        Select a fleet to open {config.label}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <MessageSquare className="h-4 w-4 text-primary" />
-        <h2 className="text-sm font-semibold">Bridge</h2>
-        <span className="text-xs text-muted-foreground">
-          Central command for issue management and ship coordination
-        </span>
-        <div className="ml-auto flex items-center gap-1.5">
-          <div
-            className={cn(
-              "h-2 w-2 rounded-full",
-              engineConnected ? "bg-green-500" : "bg-red-500",
-            )}
-          />
-          <span className="text-xs text-muted-foreground">
-            {engineConnected ? "Connected" : "Disconnected"}
-          </span>
-        </div>
-      </div>
-
+    <div className="flex flex-1 flex-col min-h-0">
       {/* Disconnected Banner */}
       {!engineConnected && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-center text-xs text-destructive">
@@ -139,7 +131,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
           <div className="space-y-3">
             {messages.length === 0 && (
               <p className="text-center text-sm text-muted-foreground py-8">
-                Bridge is ready. Send a command to manage issues and coordinate ships.
+                {config.emptyMessage}
               </p>
             )}
             {displayItems.map((item, i) =>
@@ -152,7 +144,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
             {isLoading && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span className="text-xs">Bridge is thinking...</span>
+                <span className="text-xs">{config.label} is thinking...</span>
               </div>
             )}
           </div>
@@ -163,7 +155,11 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
           <button
             type="button"
             onClick={scrollToBottom}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-opacity hover:opacity-90"
+            className={cn(
+              "absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5",
+              "rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground",
+              "shadow-lg transition-opacity hover:opacity-90",
+            )}
           >
             <ArrowDown className="h-3 w-3" />
             New messages
@@ -176,7 +172,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
         <div className="flex items-start gap-2 border-t border-blue-500/20 bg-blue-500/5 px-4 py-2.5">
           <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-blue-500">Bridge is asking:</p>
+            <p className="text-xs font-medium text-blue-500">{config.label} is asking:</p>
             <p className="mt-0.5 text-sm text-foreground">{pendingQuestion}</p>
           </div>
         </div>
@@ -191,7 +187,7 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
             ? "Engine disconnected"
             : pendingQuestion
               ? "Type your answer..."
-              : "Send a command to the Bridge..."
+              : config.inputPlaceholder
         }
       />
     </div>

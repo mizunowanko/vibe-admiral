@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { BridgeRequestHandler } from "../../bridge-request-handler.js";
-import type { ShipProcess, FleetRepo, BridgeRequest } from "../../types.js";
+import { FlagshipRequestHandler } from "../../bridge-request-handler.js";
+import type { ShipProcess, FleetRepo, FlagshipRequest } from "../../types.js";
 
 // === Mock types (real classes wired together, only I/O mocked) ===
 
@@ -48,8 +48,8 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
   };
 }
 
-describe("BridgeRequestHandler (integration)", () => {
-  let handler: BridgeRequestHandler;
+describe("FlagshipRequestHandler (integration)", () => {
+  let handler: FlagshipRequestHandler;
   let mockShipManager: MockShipManager;
   let mockStateSync: MockStateSync;
 
@@ -80,9 +80,9 @@ describe("BridgeRequestHandler (integration)", () => {
     };
 
     // Wire real handler classes together (integration point)
-    handler = new BridgeRequestHandler(
-      mockShipManager as unknown as ConstructorParameters<typeof BridgeRequestHandler>[0],
-      mockStateSync as unknown as ConstructorParameters<typeof BridgeRequestHandler>[1],
+    handler = new FlagshipRequestHandler(
+      mockShipManager as unknown as ConstructorParameters<typeof FlagshipRequestHandler>[0],
+      mockStateSync as unknown as ConstructorParameters<typeof FlagshipRequestHandler>[1],
     );
   });
 
@@ -91,7 +91,7 @@ describe("BridgeRequestHandler (integration)", () => {
       const ship = makeShip();
       mockShipManager.sortie.mockResolvedValue(ship);
 
-      const request: BridgeRequest = {
+      const request: FlagshipRequest = {
         request: "sortie",
         items: [{ repo: "owner/repo", issueNumber: 42 }],
       };
@@ -106,7 +106,7 @@ describe("BridgeRequestHandler (integration)", () => {
     });
 
     it("rejects sortie when repo is not in fleet", async () => {
-      const request: BridgeRequest = {
+      const request: FlagshipRequest = {
         request: "sortie",
         items: [{ repo: "other/repo", issueNumber: 99 }],
       };
@@ -120,7 +120,7 @@ describe("BridgeRequestHandler (integration)", () => {
         reason: "Ship already active for this issue",
       });
 
-      const request: BridgeRequest = {
+      const request: FlagshipRequest = {
         request: "sortie",
         items: [{ repo: "owner/repo", issueNumber: 42 }],
       };
@@ -137,7 +137,7 @@ describe("BridgeRequestHandler (integration)", () => {
       ];
       mockShipManager.getShipsByFleet.mockReturnValue(activeShips);
 
-      const request: BridgeRequest = {
+      const request: FlagshipRequest = {
         request: "sortie",
         items: [{ repo: "owner/repo", issueNumber: 42 }],
       };
@@ -159,7 +159,7 @@ describe("BridgeRequestHandler (integration)", () => {
         { localPath: "/home/user/repo", remote: "owner/repo" },
         { localPath: "/home/user/repo2", remote: "owner/repo2" },
       ];
-      const request: BridgeRequest = {
+      const request: FlagshipRequest = {
         request: "sortie",
         items: [
           { repo: "owner/repo", issueNumber: 42 },

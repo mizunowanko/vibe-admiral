@@ -42,7 +42,7 @@ interface ChatMessageProps {
   message: StreamMessage;
   repeatCount?: number;
   /** Rendering context: "ship" enables LINE-style layout (assistant right-aligned). */
-  context?: "bridge" | "ship";
+  context?: "command" | "bridge" | "ship";
 }
 
 export function ChatMessage({ message, repeatCount, context }: ChatMessageProps) {
