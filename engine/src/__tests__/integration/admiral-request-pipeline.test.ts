@@ -74,39 +74,10 @@ That should do it.`;
     });
   });
 
-  describe("status-transition requests from Ship", () => {
-    it("parses valid status-transition to implementing", () => {
+  describe("status-transition requests (removed in #439)", () => {
+    it("rejects status-transition requests (no longer valid)", () => {
       const text = `\`\`\`admiral-request
-{ "request": "status-transition", "status": "implementing", "planCommentUrl": "https://github.com/o/r/issues/1#comment-123", "qaRequired": false }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      const req = requests[0]!;
-      expect(req.request).toBe("status-transition");
-      expect(isShipRequest(req)).toBe(true);
-      expect(isBridgeRequest(req)).toBe(false);
-      if (req.request === "status-transition") {
-        expect(req.status).toBe("implementing");
-        expect(req.planCommentUrl).toBe("https://github.com/o/r/issues/1#comment-123");
-      }
-    });
-
-    it("parses status-transition to done", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "status-transition", "status": "done" }
-\`\`\``;
-
-      const requests = extractRequests(text);
-      expect(requests).toHaveLength(1);
-      if (requests[0]!.request === "status-transition") {
-        expect(requests[0]!.status).toBe("done");
-      }
-    });
-
-    it("rejects invalid target status", () => {
-      const text = `\`\`\`admiral-request
-{ "request": "status-transition", "status": "invalid" }
+{ "request": "status-transition", "status": "implementing" }
 \`\`\``;
 
       const requests = extractRequests(text);
@@ -168,13 +139,13 @@ And also:
 \`\`\`
 
 \`\`\`admiral-request
-{ "request": "status-transition", "status": "done" }
+{ "request": "nothing-to-do", "reason": "already done" }
 \`\`\``;
 
       const requests = extractRequests(text);
       expect(requests).toHaveLength(2);
       expect(requests[0]!.request).toBe("ship-status");
-      expect(requests[1]!.request).toBe("status-transition");
+      expect(requests[1]!.request).toBe("nothing-to-do");
     });
   });
 
@@ -254,7 +225,6 @@ Goodbye`;
 
     it("classifies all Ship request types correctly", () => {
       const shipTypes = [
-        `{ "request": "status-transition", "status": "implementing" }`,
         `{ "request": "nothing-to-do", "reason": "done" }`,
       ];
 

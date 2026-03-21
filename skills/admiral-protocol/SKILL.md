@@ -57,20 +57,11 @@ Resume a Ship with a dead process.
 - Only works on Ships whose process has died (processDead).
 - Preferred over re-sortie because it preserves context.
 
-## Ship Requests (2 total)
+## Ship Requests (1 total)
 
-### 1. status-transition
-Request a phase transition.
+Note: `status-transition` was removed in #439. Ships now update the `phases` table directly via `sqlite3` CLI.
 
-```admiral-request
-{ "request": "status-transition", "status": "implementing", "planCommentUrl": "https://...", "qaRequired": true }
-```
-
-- `status` field: the target phase (e.g. `"implementing"`, `"acceptance-test"`, `"merging"`, `"done"`)
-- Optional `planCommentUrl`: URL of the plan comment (when transitioning to `implementing`)
-- Optional `qaRequired`: whether Playwright QA is needed (when transitioning to `implementing`)
-
-### 2. nothing-to-do
+### 1. nothing-to-do
 Signal that no actionable work was found.
 
 ```admiral-request
@@ -96,13 +87,13 @@ In Admiral mode, Ship processes communicate with the Engine via a SQLite `messag
 
 ### Gate Flow (Ship Escort Model)
 
-Gate checks are handled autonomously by Ships:
+Gate checks are handled autonomously by Ships via direct DB updates:
 
-1. Ship requests `status-transition` → Engine responds with `{ok: false, gate: {type, gatePhase, ...}}`
+1. Ship directly updates `phases` table to gate phase (e.g. `planning` → `planning-gate`) via `sqlite3`
 2. Ship launches Escort sub-agent via Task tool (see `/gate-plan-review`, `/gate-code-review`)
 3. Escort performs review, records on GitHub, writes `gate-response` to DB via `sqlite3`
 4. Ship polls DB for `gate-response`, reads result
-5. Ship re-requests `status-transition` → Engine checks DB for gate-response, advances phase
+5. On approval: Ship directly updates `phases` table to next work phase (e.g. `planning-gate` → `implementing`)
 
 ### Polling Pattern
 ```bash

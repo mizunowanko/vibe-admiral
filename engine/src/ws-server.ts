@@ -25,7 +25,7 @@ import {
   isShipRequest,
 } from "./stream-parser.js";
 import { ShipRequestHandler } from "./ship-request-handler.js";
-import type { StatusTransitionResult } from "./ship-request-handler.js";
+import type { AdmiralRequestResponse } from "./ship-request-handler.js";
 import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
 import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { Lookout } from "./lookout.js";
@@ -1028,90 +1028,20 @@ export class EngineServer {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
-    // Load fleet gate settings for this ship
-    const fleets = await this.loadFleets();
-    const fleet = fleets.find((f) => f.id === ship.fleetId);
-
     for (const request of requests) {
-      // Capture pre-request gate state to detect gate resolution
-      const preGateCheck = ship.gateCheck;
+      const response: AdmiralRequestResponse = await this.shipRequestHandler.handle(shipId, request);
 
-      const response: StatusTransitionResult = await this.shipRequestHandler.handle(shipId, request, fleet?.gates);
+      // Write response to DB so Ship CLI can poll for the result
+      this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", response as unknown as Record<string, unknown>);
 
-      if (response.gate) {
-        // Gate check required — set gate state and tell Ship to handle it
-        this.shipManager.setGateCheck(shipId, response.gate.gatePhase, response.gate.type);
-
-        // Notify frontend of pending gate
-        this.broadcast({
-          type: "ship:gate-pending",
-          data: {
-            id: shipId,
-            gatePhase: response.gate.gatePhase,
-            gateType: response.gate.type,
-            fleetId: ship.fleetId,
-            issueNumber: ship.issueNumber,
-            issueTitle: ship.issueTitle,
-          },
-        });
-
-        // Inject gate notification into Flagship chat (Ship management is Flagship's domain)
-        const gateMsg = {
-          type: "system" as const,
-          subtype: "gate-check-request" as const,
-          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${response.gate.gatePhase} gate pending — Ship will handle review autonomously`,
-          meta: {
-            category: "gate-check-request" as const,
-            issueNumber: ship.issueNumber,
-            issueTitle: ship.issueTitle,
-            gatePhase: response.gate.gatePhase,
-            gateType: response.gate.type,
-          },
-        };
-        this.flagshipManager.addToHistory(ship.fleetId, gateMsg);
-        this.broadcast({
-          type: "flagship:stream",
-          data: { fleetId: ship.fleetId, message: gateMsg },
-        });
-
-        // Write response to DB so Ship knows to launch its own Escort
-        this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", {
-          ok: false,
-          gate: {
-            type: response.gate.type,
-            gatePhase: response.gate.gatePhase,
-            previousFeedback: response.gate.previousFeedback,
-          },
-          error: `Gate check required for ${response.gate.gatePhase}. Launch Escort sub-agent.`,
-        });
+      if (response.ok) {
         console.log(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check required: ${response.gate.gatePhase} (${response.gate.type}) — Ship will handle`,
+          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
         );
       } else {
-        // Write response to DB so Ship CLI can poll for the result
-        this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", response as unknown as Record<string, unknown>);
-
-        if (response.ok) {
-          // If a gate was previously pending and now resolved, broadcast gate-resolved
-          if (preGateCheck && preGateCheck.status === "pending" && !ship.gateCheck) {
-            this.broadcast({
-              type: "ship:gate-resolved",
-              data: {
-                id: shipId,
-                gatePhase: preGateCheck.gatePhase,
-                gateType: preGateCheck.gateType,
-                approved: true,
-              },
-            });
-          }
-          console.log(
-            `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
-          );
-        } else {
-          console.warn(
-            `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
-          );
-        }
+        console.warn(
+          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
+        );
       }
     }
   }
@@ -1132,7 +1062,6 @@ export class EngineServer {
     try {
       this.fleetDb = await initFleetDatabase(getAdmiralHome());
       this.shipManager.setDatabase(this.fleetDb);
-      this.shipRequestHandler.setDatabase(this.fleetDb);
       console.log("[engine] Fleet database initialized");
     } catch (err) {
       console.warn("[engine] Failed to initialize fleet database:", err);

@@ -241,7 +241,6 @@ export type BridgeRequest = FlagshipRequest;
 
 // === Ship Requests (Ship → Engine via admiral-request) ===
 export type ShipRequest =
-  | { request: "status-transition"; status: Phase; planCommentUrl?: string; qaRequired?: boolean }
   | { request: "nothing-to-do"; reason: string };
 
 // === Admiral Request (union of Flagship + Ship requests) ===
