@@ -83,7 +83,7 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
             </p>
           )}
           {tailLogs.map((log, i) => (
-            <ChatMessage key={baseIndex + i} message={log} />
+            <ChatMessage key={baseIndex + i} message={log} context="ship" />
           ))}
           {tailLogs.length === 0 && (
             <p className="text-center text-muted-foreground py-4">

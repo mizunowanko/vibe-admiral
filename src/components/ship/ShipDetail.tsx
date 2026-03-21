@@ -106,7 +106,7 @@ export function ShipDetail({ shipId, onClose }: ShipDetailProps) {
       <ScrollArea ref={scrollRef} className="flex-1 p-4">
         <div className="space-y-1">
           {logs.map((log, i) => (
-            <ChatMessage key={i} message={log} />
+            <ChatMessage key={i} message={log} context="ship" />
           ))}
           {logs.length === 0 && (
             <p className="text-center text-muted-foreground py-4">
