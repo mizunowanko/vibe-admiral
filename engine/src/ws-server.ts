@@ -28,6 +28,8 @@ import type { StatusTransitionResult } from "./ship-request-handler.js";
 import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
+import { initFleetDatabase } from "./db.js";
+import type { FleetDatabase } from "./db.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
 
 const FLEETS_DIR =
@@ -54,6 +56,7 @@ export class EngineServer {
   private shipRequestLocks = new Map<string, Promise<void>>();
   /** Maps task toolUseId to shipId for dispatch-log routing. */
   private bridgeActiveTasks = new Map<string, string>();
+  private fleetDb: FleetDatabase | null = null;
 
   /** Interval after which a pending gate check triggers a reminder to Bridge (ms). */
   private static readonly GATE_REMINDER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -1329,7 +1332,8 @@ export class EngineServer {
   }
 
   private runStartupReconciliation(): void {
-    this.loadFleets()
+    this.initDatabase()
+      .then(() => this.loadFleets())
       .then((fleets) => {
         const allRepos = fleets.flatMap((f) => f.repos);
         return this.stateSync.reconcileOnStartup(allRepos);
@@ -1337,6 +1341,17 @@ export class EngineServer {
       .catch((err) => {
         console.warn("[engine] Startup reconciliation failed:", err);
       });
+  }
+
+  private async initDatabase(): Promise<void> {
+    try {
+      const dbDir = join(process.env.HOME ?? homedir(), ".vibe-admiral");
+      this.fleetDb = await initFleetDatabase(dbDir);
+      this.shipManager.setDatabase(this.fleetDb);
+      console.log("[engine] Fleet database initialized");
+    } catch (err) {
+      console.warn("[engine] Failed to initialize fleet database:", err);
+    }
   }
 
   private detectPRCreation(
@@ -1588,6 +1603,7 @@ export class EngineServer {
     this.bridgeManager.stopAll();
     this.processManager.killAll();
     this.acceptanceWatcher.unwatchAll();
+    this.fleetDb?.close();
     this.wss.close();
   }
 }

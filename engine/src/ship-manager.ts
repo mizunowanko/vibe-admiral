@@ -1,17 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { ProcessManager } from "./process-manager.js";
 import { AcceptanceWatcher } from "./acceptance-watcher.js";
 import type { StatusManager } from "./status-manager.js";
+import type { FleetDatabase } from "./db.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, ShipStatus, FleetSkillSources, GateTransition, GateType, GateFileResponse, PersistedShip } from "./types.js";
-
-const SHIPS_FILE = join(homedir(), ".vibe-admiral", "ships.json");
+import type { ShipProcess, ShipStatus, FleetSkillSources, GateTransition, GateType, GateFileResponse } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +18,7 @@ export class ShipManager {
   private processManager: ProcessManager;
   private acceptanceWatcher: AcceptanceWatcher;
   private statusManager: StatusManager;
+  private fleetDb: FleetDatabase | null = null;
   private onStatusChange:
     | ((id: string, status: ShipStatus, detail?: string) => void)
     | null = null;
@@ -32,6 +31,10 @@ export class ShipManager {
     this.processManager = processManager;
     this.acceptanceWatcher = acceptanceWatcher;
     this.statusManager = statusManager;
+  }
+
+  setDatabase(db: FleetDatabase): void {
+    this.fleetDb = db;
   }
 
   setStatusChangeHandler(
@@ -53,6 +56,7 @@ export class ShipManager {
     for (const [id, ship] of this.ships) {
       if (ship.status === "done" || ship.status === "error") {
         this.ships.delete(id);
+        this.fleetDb?.deleteShip(id);
       }
     }
 
@@ -130,6 +134,7 @@ export class ShipManager {
       lastOutputAt: null,
     };
     this.ships.set(shipId, ship);
+    this.persistToDb(ship);
 
     // 8. Build extra context for Ship if there's an existing PR
     const prContext = existingPrUrl
@@ -232,6 +237,7 @@ export class ShipManager {
   updateStatus(id: string, status: ShipStatus, detail?: string): void {
     const ship = this.ships.get(id);
     if (ship) {
+      const previousStatus = ship.status;
       // Defensive: clear acceptanceTest when leaving acceptance-test status
       if (ship.status === "acceptance-test" && status !== "acceptance-test") {
         ship.acceptanceTest = null;
@@ -244,7 +250,7 @@ export class ShipManager {
       // Note: GitHub label sync is now handled transactionally by ShipRequestHandler.
       // This method only updates in-memory state and notifies the frontend.
       this.onStatusChange?.(id, status, detail);
-      this.persistToDisk();
+      this.persistToDb(ship, previousStatus);
     }
   }
 
@@ -435,12 +441,12 @@ export class ShipManager {
         !this.processManager.isRunning(id)
       ) {
         this.ships.delete(id);
+        this.fleetDb?.deleteShip(id);
         purged++;
       }
     }
     if (purged > 0) {
       console.log(`[ship-manager] Purged ${purged} orphan ship(s)`);
-      this.persistToDisk();
     }
     return purged;
   }
@@ -494,87 +500,51 @@ export class ShipManager {
   }
 
   /**
-   * Persist active ships to disk so reconcileOnStartup can identify
-   * genuinely active ships after an Engine restart.
-   * Only ships with non-terminal statuses are persisted.
+   * Persist a ship's state to the database after a status change.
+   * Records the phase transition in the audit log.
    */
-  private persistToDisk(): void {
-    const active: PersistedShip[] = [];
-    for (const ship of this.ships.values()) {
-      if (ship.status !== "done" && ship.status !== "error") {
-        active.push({
-          id: ship.id,
-          fleetId: ship.fleetId,
-          repo: ship.repo,
-          issueNumber: ship.issueNumber,
-          issueTitle: ship.issueTitle,
-          worktreePath: ship.worktreePath,
-          branchName: ship.branchName,
-          sessionId: ship.sessionId,
-          status: ship.status,
-          createdAt: ship.createdAt,
-        });
+  private persistToDb(ship: ShipProcess, previousStatus?: ShipStatus): void {
+    if (!this.fleetDb) return;
+    try {
+      this.fleetDb.upsertShip(ship);
+      if (previousStatus && previousStatus !== ship.status) {
+        this.fleetDb.recordPhaseTransition(
+          ship.id,
+          previousStatus,
+          ship.status,
+          "engine",
+        );
       }
+    } catch (err) {
+      console.warn("[ship-manager] Failed to persist ship to database:", err);
     }
-    // Fire-and-forget: persistence is best-effort, don't block the caller
-    const dir = join(homedir(), ".vibe-admiral");
-    mkdir(dir, { recursive: true })
-      .then(() => writeFile(SHIPS_FILE, JSON.stringify(active, null, 2)))
-      .catch((err) => {
-        console.warn("[ship-manager] Failed to persist ships to disk:", err);
-      });
   }
 
   /**
-   * Restore ships from disk persistence file.
+   * Restore ships from the database.
    * Called during startup reconciliation to recover active ship data
    * that was lost when the Engine process restarted.
    * Restored ships are added to the in-memory Map so that
    * getActiveShipIssueNumbers() returns them during reconciliation.
    */
   async restoreFromDisk(): Promise<number> {
+    if (!this.fleetDb) return 0;
     try {
-      const content = await readFile(SHIPS_FILE, "utf-8");
-      const persisted = JSON.parse(content) as PersistedShip[];
+      const persisted = this.fleetDb.getActiveShips();
       let restored = 0;
-      for (const ps of persisted) {
+      for (const ship of persisted) {
         // Skip if a ship with this ID already exists in memory
-        if (this.ships.has(ps.id)) continue;
-        // Only restore ships that had active (non-terminal) statuses
-        if (ps.status === "done" || ps.status === "error") continue;
+        if (this.ships.has(ship.id)) continue;
 
-        const ship: ShipProcess = {
-          id: ps.id,
-          fleetId: ps.fleetId,
-          repo: ps.repo,
-          issueNumber: ps.issueNumber,
-          issueTitle: ps.issueTitle,
-          worktreePath: ps.worktreePath,
-          branchName: ps.branchName,
-          sessionId: ps.sessionId,
-          status: ps.status,
-          isCompacting: false,
-          prUrl: null,
-          prReviewStatus: null,
-          acceptanceTest: null,
-          acceptanceTestApproved: false,
-          gateCheck: null,
-          qaRequired: true,
-          escortAgentId: null,
-          errorType: null,
-          retryCount: 0,
-          createdAt: ps.createdAt,
-          lastOutputAt: null,
-        };
-        this.ships.set(ps.id, ship);
+        this.ships.set(ship.id, ship);
         restored++;
       }
       if (restored > 0) {
-        console.log(`[ship-manager] Restored ${restored} ship(s) from disk`);
+        console.log(`[ship-manager] Restored ${restored} ship(s) from database`);
       }
       return restored;
-    } catch {
-      // File doesn't exist or is invalid — normal on first run
+    } catch (err) {
+      console.warn("[ship-manager] Failed to restore ships from database:", err);
       return 0;
     }
   }

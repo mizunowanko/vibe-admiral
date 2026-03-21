@@ -254,20 +254,6 @@ export interface ShipProcess {
   lastOutputAt: number | null;
 }
 
-// === Persisted Ship (subset for disk persistence across Engine restarts) ===
-export interface PersistedShip {
-  id: string;
-  fleetId: string;
-  repo: string;
-  issueNumber: number;
-  issueTitle: string;
-  worktreePath: string;
-  branchName: string;
-  sessionId: string | null;
-  status: ShipStatus;
-  createdAt: string;
-}
-
 // === Persisted Bridge Session (disk persistence across Engine restarts) ===
 export interface PersistedBridgeSession {
   fleetId: string;

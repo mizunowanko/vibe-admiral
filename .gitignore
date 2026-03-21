@@ -15,6 +15,9 @@ engine/dist/
 # Test
 test-results/
 
+# Admiral local data
+.vibe-admiral/
+
 # Environment
 .env
 .env.*
