@@ -100,10 +100,10 @@ done
 
 1. Ship が直接 DB で gate phase に遷移（例: `planning` → `planning-gate`）
 2. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
-3. Escort がレビュー実施 → GitHub に記録 → DB に `gate-response` を書き込み
+3. Escort がレビュー実施 → GitHub に記録 → DB の `phases` テーブルを直接更新（phase 遷移 + `phase_transitions` に結果記録）
 4. Ship が `phases` テーブルをポーリングして phase 変更を検知
-5. `approved: true` → Escort が phase を次の作業 phase に更新 → Ship が検知して次の作業を開始
-6. `approved: false` → GitHub でフィードバックを確認、修正して再度 gate phase に遷移 → Escort 起動ループ
+5. approved → Escort が phase を次の作業 phase に更新済み → Ship が検知して次の作業を開始
+6. rejected → `phase_transitions` からフィードバックを取得、修正して再度 gate phase に遷移 → Escort 起動ループ
 
 ### Gate 付き遷移
 
@@ -117,17 +117,17 @@ done
 
 `currentStep` に基づいて対応する sub-skill の手順に従う:
 
-| currentStep | Sub-Skill | Sub-Skill Steps | 内容 |
-|-------------|-----------|-----------------|------|
-| 1-2 | `/implement-setup` | Steps 1-2 | Issue 特定、worktree 作成 |
-| 3-4 | `/implement-plan` | Steps 1-2 | 調査、計画、plan-review gate |
-| 5-8 | `/implement-code` | Steps 1-4 | **Issue 再読み込み** → 実装、ビルド、統合、再テスト |
-| 9-10 | `/implement-review` | Steps 1-2 | コミット、PR、**code-review gate** |
-| 11-16 | `/implement-merge` | Steps 1-6 | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
+| currentStep | Sub-Skill | 内容 |
+|-------------|-----------|------|
+| 1-2 | `/implement-setup` | Issue 特定、worktree 作成 |
+| 3-4 | `/implement-plan` | 調査、計画、plan-review gate |
+| 5-8 | `/implement-code` | **Issue 再読み込み** → 実装、ビルド、統合、再テスト |
+| 9-10 | `/implement-review` | コミット、PR、**code-review gate** |
+| 11-16 | `/implement-merge` | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
 
 > **フェーズ順序制約**: 各 sub-skill は上から順に実行する。code-review gate (`/implement-review`) の承認を得てから受け入れテスト (`/implement-merge`) に進む。順序のスキップ・逆転は禁止。
 
-> **コンテキストリフレッシュ**: `/implement-code` の Step 1a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
+> **コンテキストリフレッシュ**: `/implement-code` の Step 5a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
 
 state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する。
 

@@ -8,7 +8,7 @@ import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, DbMessageType } from "./types.js";
+import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -23,8 +23,6 @@ interface ShipRuntime {
   processDead?: boolean;
   gateCheck: GateCheckState | null;
   prReviewStatus: PRReviewStatus | null;
-  nothingToDo?: boolean;
-  nothingToDoReason?: string;
   retryCount: number;
 }
 
@@ -167,7 +165,6 @@ export class ShipManager {
       processDead: false,
       gateCheck: null,
       prReviewStatus: existingPrReviewStatus,
-      nothingToDo: false,
       retryCount: 0,
     });
 
@@ -347,14 +344,6 @@ export class ShipManager {
     }
   }
 
-  setNothingToDo(id: string, reason: string): void {
-    const rt = this.ensureRuntime(id);
-    if (rt) {
-      rt.nothingToDo = true;
-      rt.nothingToDoReason = reason;
-    }
-  }
-
   respondToPRReview(
     shipId: string,
     result: { verdict: "approve" | "request-changes"; comments?: string },
@@ -385,19 +374,6 @@ export class ShipManager {
   clearGateCheck(shipId: string): void {
     const rt = this.ensureRuntime(shipId);
     if (rt) rt.gateCheck = null;
-  }
-
-  writeDbMessage(
-    shipId: string,
-    type: DbMessageType,
-    sender: string,
-    payload: Record<string, unknown>,
-  ): void {
-    if (!this.fleetDb) {
-      console.warn("[ship-manager] Cannot write DB message: no database");
-      return;
-    }
-    this.fleetDb.insertMessage(shipId, type, sender, payload);
   }
 
   private async deploySkills(
@@ -616,8 +592,6 @@ export class ShipManager {
       processDead: rt.processDead,
       gateCheck: rt.gateCheck,
       prReviewStatus: rt.prReviewStatus ?? dbShip.prReviewStatus,
-      nothingToDo: rt.nothingToDo,
-      nothingToDoReason: rt.nothingToDoReason,
       retryCount: rt.retryCount,
     };
   }

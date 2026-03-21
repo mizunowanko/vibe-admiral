@@ -18,7 +18,7 @@ See `engine/src/process-manager.ts` for the implementation.
 
 - **Ship / Escort disallowedTools**: `EnterPlanMode,ExitPlanMode,AskUserQuestion`
   - `EnterPlanMode` / `ExitPlanMode`: In `-p` (prompt) mode, plan mode causes the CLI to exit after `ExitPlanMode` without performing the implementation. There is no human to approve the plan in non-interactive mode.
-  - `AskUserQuestion`: Ships and Escorts run non-interactively with stdin ignored. Ships use the DB message board (`messages` table in fleet.db) for communication.
+  - `AskUserQuestion`: Ships and Escorts run non-interactively with stdin ignored.
 
 - **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
   - Commanders are restricted to read-only and analysis tools (no Write/Edit).
@@ -30,7 +30,7 @@ Set `VIBE_ADMIRAL=true` for all Ship, Escort, and session resume processes. This
 - Skip worktree creation/deletion (Admiral handles it)
 - Skip label changes (Engine handles it)
 - Skip plan mode (`EnterPlanMode`) and output plan as text instead
-- Use DB message board for acceptance tests instead of `AskUserQuestion`
+- Use direct DB phase updates for gate flow instead of `AskUserQuestion`
 
 ## Exit Code 0 Does Not Guarantee Success
 

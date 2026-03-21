@@ -16,39 +16,10 @@ user-invocable: false
 
 `/implement-plan` Step 2 で `qaRequired: false` と判断した場合、**このステップ全体をスキップして Step 2 に進む**。
 
-### VIBE_ADMIRAL 設定時（DB メッセージ方式）
+### VIBE_ADMIRAL 設定時
 
-1. 空きポートを取得してアプリを起動。**listen 状態になるまで待機してから** DB にメッセージを書き込む:
-   ```bash
-   PORT=$(node -e "const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})")
-   PORT=$PORT npm run dev  # run_in_background: true
-   ```
-   ```bash
-   echo "Waiting for dev server to start on port $PORT..."
-   for i in $(seq 1 30); do
-     if curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null | grep -qE '^[1-9]'; then
-       echo "Dev server is ready on port $PORT"
-       break
-     fi
-     if [ $i -eq 30 ]; then echo "WARNING: Dev server did not start within 30s on port $PORT"; fi
-     sleep 1
-   done
-   ```
-   ```bash
-   DB_PATH="$VIBE_ADMIRAL_DB_PATH"
-   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-   PAYLOAD=$(printf '{"url":"http://localhost:%s","checks":["確認ポイント1","確認ポイント2"]}' "$PORT")
-   sqlite3 "$DB_PATH" "INSERT INTO messages (ship_id, type, sender, payload) VALUES ('$SHIP_ID', 'acceptance-test-request', 'ship', '$PAYLOAD')"
-   ```
-
-2. DB で応答メッセージをポーリング（タイムアウト付き単一コマンド）:
-   ```bash
-   DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='acceptance-test-response' AND read_at IS NULL LIMIT 1" 2>/dev/null); if [ -n "$ROW" ]; then sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='acceptance-test-response' AND read_at IS NULL"; echo "$ROW"; break; fi; sleep 3; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
-   ```
-
-3. レスポンスに基づいて処理:
-   - `accepted: true` → アプリ停止 → Step 2 へ
-   - `accepted: false` → 修正 → commit & push → 再度メッセージ書き込み
+`qaRequired: true` の場合、acceptance-test-gate に遷移し Escort が Playwright テストを実施する（Step 15 参照）。
+受け入れテストの具体的な手順は Step 15 の Gate フローを参照。
 
 ### VIBE_ADMIRAL 未設定時
 

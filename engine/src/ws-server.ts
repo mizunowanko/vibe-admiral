@@ -22,10 +22,7 @@ import {
   extractRequests,
   stripRequestBlocks,
   isBridgeRequest,
-  isShipRequest,
 } from "./stream-parser.js";
-import { ShipRequestHandler } from "./ship-request-handler.js";
-import type { AdmiralRequestResponse } from "./ship-request-handler.js";
 import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
 import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { Lookout } from "./lookout.js";
@@ -34,7 +31,7 @@ import { EscortManager } from "./escort-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, FlagshipRequest, StreamMessage, ShipRequest, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, FlagshipRequest, StreamMessage, CommanderRole } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -48,7 +45,6 @@ export class EngineServer {
   private statusManager: StatusManager;
   private stateSync: StateSync;
   private requestHandler: FlagshipRequestHandler;
-  private shipRequestHandler: ShipRequestHandler;
   private escortManager: EscortManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
@@ -56,8 +52,6 @@ export class EngineServer {
   private commanderFirstData = new Set<string>();
   private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private processLivenessTimer: ReturnType<typeof setInterval> | null = null;
-  /** Per-ship mutex to serialize executeShipRequests() calls. */
-  private shipRequestLocks = new Map<string, Promise<void>>();
   private fleetDb: FleetDatabase | null = null;
 
   /** Unanswered commander questions auto-answered after this duration (ms). */
@@ -74,7 +68,6 @@ export class EngineServer {
     this.dockManager = new DockManager(this.processManager);
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
-    this.shipRequestHandler = new ShipRequestHandler(this.shipManager);
     this.escortManager = new EscortManager(this.processManager, this.shipManager);
     this.lookout = new Lookout(this.shipManager, this.processManager);
 
@@ -279,30 +272,17 @@ export class EngineServer {
               });
             }
 
-            // Detect PR URL BEFORE processing admiral-requests so that
-            // ship.prUrl is populated when gate check messages are built.
-            // Fixes #293: code-review gate showing "PR: not yet created"
-            // when PR URL and status-transition appear in the same message.
+            // Detect PR URL in assistant messages
             if (cleanContent) {
               const cleanMsg = { ...parsed, content: cleanContent };
               this.detectPRCreation(id, cleanMsg);
             }
 
-            // Execute Ship requests (only status-transition allowed)
-            // Serialized per-ship to prevent race conditions with duplicate
-            // admiral-request blocks from cumulative stream-json messages.
-            const shipRequests = requests.filter(isShipRequest);
-            if (shipRequests.length > 0) {
-              const prev = this.shipRequestLocks.get(id) ?? Promise.resolve();
-              const next = prev.then(() => this.executeShipRequests(id, shipRequests)).catch(console.error);
-              this.shipRequestLocks.set(id, next);
-            }
-
             // Reject any Flagship-only requests from Ship
-            const flagshipOnly = requests.filter(isBridgeRequest);
-            if (flagshipOnly.length > 0) {
+            // Ships should not issue admiral-requests (removed in #442)
+            if (requests.length > 0) {
               console.warn(
-                `[ws-server] Ship ${id} attempted Flagship-only requests: ${flagshipOnly.map((r) => r.request).join(", ")}`,
+                `[ws-server] Ship ${id} attempted admiral-requests (not allowed): ${requests.map((r) => r.request).join(", ")}`,
               );
             }
           } else {
@@ -380,13 +360,12 @@ export class EngineServer {
         });
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
-        this.shipRequestLocks.delete(id);
         const ship = this.shipManager.getShip(id);
         if (!ship) {
           console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
           return;
         }
-        // Ship explicitly declares "done" via admiral-request status-transition.
+        // Ship declares "done" via direct DB phase update.
         // If the process exits while in "done" phase, treat as success.
         // If in "merging" phase (squash merge may kill the process), also treat as success.
         const successPhases = new Set(["done", "merging", "stopped"]);
@@ -452,23 +431,18 @@ export class EngineServer {
           repo: ship?.repo,
           issueNumber: ship?.issueNumber,
           issueTitle: ship?.issueTitle,
-          ...(ship?.nothingToDo && {
-            nothingToDo: true,
-            nothingToDoReason: ship.nothingToDoReason,
-          }),
         },
       });
 
       // Inject Ship status into Flagship chat (Ship management is Flagship's domain)
       if (ship) {
-        const nothingToDoSuffix = ship.nothingToDo && phase === "done" ? " (nothing to do)" : "";
         const resumeInfo = detail === "Process dead"
           ? `\nShip ID: ${ship.id}\nResumable: ${ship.sessionId ? "yes (session available)" : "no (no session — re-sortie only)"}\nWorktree: ${ship.worktreePath}`
           : "";
         const statusMessage = {
           type: "system" as const,
           subtype: "ship-status" as const,
-          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${phase}${nothingToDoSuffix}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${phase}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
           meta: {
             category: "ship-status" as const,
             issueNumber: ship.issueNumber,
@@ -1083,31 +1057,6 @@ export class EngineServer {
 
     // Send batched results to Flagship stdin
     this.processManager.sendMessage(flagshipId, results.join("\n\n"));
-  }
-
-  private async executeShipRequests(
-    shipId: string,
-    requests: ShipRequest[],
-  ): Promise<void> {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    for (const request of requests) {
-      const response: AdmiralRequestResponse = await this.shipRequestHandler.handle(shipId, request);
-
-      // Write response to DB so Ship CLI can poll for the result
-      this.shipManager.writeDbMessage(shipId, "admiral-request-response", "engine", response as unknown as Record<string, unknown>);
-
-      if (response.ok) {
-        console.log(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
-        );
-      } else {
-        console.warn(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
-        );
-      }
-    }
   }
 
   private runStartupReconciliation(): void {

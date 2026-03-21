@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ShipProcess, Phase, DbMessageType } from "./types.js";
+import type { ShipProcess, Phase } from "./types.js";
 import { PHASE_ORDER } from "./types.js";
 
 /** Persisted ship row stored in SQLite. */
@@ -27,17 +27,6 @@ export interface ShipRow {
 interface ShipJoinRow extends ShipRow {
   owner: string;
   name: string;
-}
-
-/** Row returned from the messages table. */
-export interface MessageRow {
-  id: number;
-  ship_id: string;
-  type: string;
-  sender: string;
-  payload: string;
-  read_at: string | null;
-  created_at: string;
 }
 
 export class FleetDatabase {
@@ -69,6 +58,9 @@ export class FleetDatabase {
     }
     if (version < 2) {
       this.applyV2();
+    }
+    if (version < 3) {
+      this.applyV3();
     }
   }
 
@@ -146,6 +138,16 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV3(): void {
+    // V3: Drop messages table (replaced by direct DB phase updates + Escort model).
+    this.db.exec(`
+      DROP INDEX IF EXISTS idx_messages_ship_unread;
+      DROP TABLE IF EXISTS messages;
+
+      INSERT INTO schema_version (version) VALUES (3);
+    `);
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -219,7 +221,6 @@ export class FleetDatabase {
 
   /** Delete a ship from the database. */
   deleteShip(shipId: string): void {
-    this.db.prepare("DELETE FROM messages WHERE ship_id = ?").run(shipId);
     this.db.prepare("DELETE FROM phase_transitions WHERE ship_id = ?").run(shipId);
     this.db.prepare("DELETE FROM phases WHERE ship_id = ?").run(shipId);
     this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
@@ -409,52 +410,6 @@ export class FleetDatabase {
         phase = excluded.phase,
         updated_at = excluded.updated_at
     `).run(shipId, toPhase);
-  }
-
-  // === Message Board ===
-
-  /** Insert a message for a ship. */
-  insertMessage(
-    shipId: string,
-    type: DbMessageType,
-    sender: string,
-    payload: Record<string, unknown>,
-  ): number {
-    const result = this.db.prepare(`
-      INSERT INTO messages (ship_id, type, sender, payload)
-      VALUES (?, ?, ?, ?)
-    `).run(shipId, type, sender, JSON.stringify(payload));
-    return Number(result.lastInsertRowid);
-  }
-
-  /** Get unread messages for a ship, optionally filtered by type. */
-  getUnreadMessages(shipId: string, type?: DbMessageType): MessageRow[] {
-    if (type) {
-      return this.db.prepare(`
-        SELECT * FROM messages
-        WHERE ship_id = ? AND type = ? AND read_at IS NULL
-        ORDER BY created_at ASC
-      `).all(shipId, type) as MessageRow[];
-    }
-    return this.db.prepare(`
-      SELECT * FROM messages
-      WHERE ship_id = ? AND read_at IS NULL
-      ORDER BY created_at ASC
-    `).all(shipId) as MessageRow[];
-  }
-
-  /** Mark a message as read. */
-  markMessageRead(messageId: number): void {
-    this.db.prepare(
-      "UPDATE messages SET read_at = datetime('now') WHERE id = ?",
-    ).run(messageId);
-  }
-
-  /** Mark all unread messages of a type for a ship as read. */
-  markAllRead(shipId: string, type: DbMessageType): void {
-    this.db.prepare(
-      "UPDATE messages SET read_at = datetime('now') WHERE ship_id = ? AND type = ? AND read_at IS NULL",
-    ).run(shipId, type);
   }
 
   /** Delete all records for ships in terminal states. */
