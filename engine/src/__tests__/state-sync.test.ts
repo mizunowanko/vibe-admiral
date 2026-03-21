@@ -41,6 +41,7 @@ type MockShipManager = {
   restoreFromDisk: ReturnType<typeof vi.fn>;
   hasRunningProcess: ReturnType<typeof vi.fn>;
   getAllShips: ReturnType<typeof vi.fn>;
+  setIsCompacting: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -118,6 +119,7 @@ describe("StateSync", () => {
       restoreFromDisk: vi.fn().mockResolvedValue(0),
       hasRunningProcess: vi.fn().mockReturnValue(false),
       getAllShips: vi.fn().mockReturnValue([]),
+      setIsCompacting: vi.fn(),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
@@ -270,7 +272,7 @@ describe("StateSync", () => {
       mockStatusManager.markDone.mockResolvedValue(undefined);
 
       await stateSync.onProcessExit("ship-1", true);
-      expect(ship.isCompacting).toBe(false);
+      expect(mockShipManager.setIsCompacting).toHaveBeenCalledWith("ship-1", false);
     });
 
     it("is a no-op when ship not found", async () => {

@@ -114,7 +114,7 @@ export class StateSync {
     if (!ship) return;
 
     // Clear compacting flag — process is gone, no more compact events
-    ship.isCompacting = false;
+    this.shipManager.setIsCompacting(shipId, false);
 
     if (succeeded) {
       this.shipManager.updatePhase(shipId, "done");

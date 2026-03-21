@@ -35,6 +35,7 @@ type MockShipManager = {
   notifyProcessDead: ReturnType<typeof vi.fn>;
   purgeOrphanShips: ReturnType<typeof vi.fn>;
   restoreFromDisk: ReturnType<typeof vi.fn>;
+  setIsCompacting: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -96,6 +97,7 @@ describe("StateSync startup reconciliation (integration)", () => {
       notifyProcessDead: vi.fn(),
       purgeOrphanShips: vi.fn().mockReturnValue(0),
       restoreFromDisk: vi.fn().mockResolvedValue(0),
+      setIsCompacting: vi.fn(),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
