@@ -128,7 +128,8 @@ export type StreamMessageSubtype =
   | "pr-review-request"
   | "gate-check-request"
   | "lookout-alert"
-  | "task-notification";
+  | "task-notification"
+  | "dispatch-log";
 
 // === Lookout ===
 export type LookoutAlertType =

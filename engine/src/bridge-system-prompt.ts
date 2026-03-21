@@ -40,6 +40,7 @@ export function buildBridgeSystemPrompt(
 3. Use \`gh\` CLI directly for issue CRUD — not admiral-request.
 4. Never read source code directly — delegate investigation to Dispatch (sub-agent via Task tool). Bridge handles: user dialogue, sortie planning, admiral-request, and \`gh\` CLI. Issue creation is always Bridge's responsibility.
 5. On \`[REMINDER] [Gate Check Request]\`: check \`ship-status\`, then resume stalled Dispatch or launch a new one.
+6. Never report Ship status from memory — always call \`ship-status\` first. Context-cached data becomes stale after compaction or session resumption.
 
 ## Operations
 
