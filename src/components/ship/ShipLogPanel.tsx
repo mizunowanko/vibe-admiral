@@ -5,6 +5,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChatMessage } from "@/components/chat/ChatMessage";
+import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
+import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
 import { X } from "lucide-react";
 
 interface ShipLogPanelProps {
@@ -23,6 +25,11 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
   const tailLogs = useMemo(
     () => logs.slice(-LOG_TAIL_LIMIT),
     [logs],
+  );
+
+  const displayItems = useMemo(
+    () => groupToolMessages(tailLogs),
+    [tailLogs],
   );
 
   const baseIndex = logs.length - tailLogs.length;
@@ -82,9 +89,13 @@ export function ShipLogPanel({ shipId, onClose }: ShipLogPanelProps) {
               Showing last {LOG_TAIL_LIMIT} of {logs.length} entries
             </p>
           )}
-          {tailLogs.map((log, i) => (
-            <ChatMessage key={baseIndex + i} message={log} context="ship" />
-          ))}
+          {displayItems.map((item, i) =>
+            isToolGroup(item) ? (
+              <ToolUseGroup key={item.timestamp ?? baseIndex + i} group={item} context="ship" />
+            ) : (
+              <ChatMessage key={item.timestamp ?? baseIndex + i} message={item} context="ship" />
+            ),
+          )}
           {tailLogs.length === 0 && (
             <p className="text-center text-muted-foreground py-4">
               No logs yet — waiting for output...

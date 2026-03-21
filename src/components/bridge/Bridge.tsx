@@ -7,6 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageSquare, Loader2, ArrowDown, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StreamMessage } from "@/types";
+import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
+import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 
 interface BridgeProps {
   fleetId: string | null;
@@ -41,7 +43,10 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
   const [hasNewMessages, setHasNewMessages] = useState(false);
-  const displayMessages = useMemo(() => collapseShipStatus(messages), [messages]);
+  const displayItems = useMemo(
+    () => groupToolMessages(collapseShipStatus(messages)),
+    [messages],
+  );
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -137,9 +142,13 @@ export const Bridge = memo(function Bridge({ fleetId }: BridgeProps) {
                 Bridge is ready. Send a command to manage issues and coordinate ships.
               </p>
             )}
-            {displayMessages.map((msg, i) => (
-              <BridgeMessage key={msg.timestamp ?? i} message={msg} repeatCount={msg.repeatCount} />
-            ))}
+            {displayItems.map((item, i) =>
+              isToolGroup(item) ? (
+                <ToolUseGroup key={item.timestamp ?? i} group={item} />
+              ) : (
+                <BridgeMessage key={item.timestamp ?? i} message={item} repeatCount={item.repeatCount} />
+              ),
+            )}
             {isLoading && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
