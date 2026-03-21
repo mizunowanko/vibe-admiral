@@ -1,3 +1,4 @@
+import { memo, useState, useMemo } from "react";
 import { useShipStore } from "@/stores/shipStore";
 import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
 import { Badge } from "@/components/ui/badge";
@@ -11,31 +12,53 @@ interface BridgeShipBarProps {
   fleetId: string;
 }
 
-export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
+export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   const ships = useShipStore((s) => s.ships);
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
+  const [showCompleted, setShowCompleted] = useState(false);
 
-  const fleetShips = Array.from(ships.values()).filter(
-    (s) => s.fleetId === fleetId && s.phase !== "done" && !s.processDead,
+  const allFleetShips = useMemo(
+    () => Array.from(ships.values()).filter((s) => s.fleetId === fleetId),
+    [ships, fleetId],
   );
 
-  if (fleetShips.length === 0) return null;
+  const fleetShips = useMemo(
+    () =>
+      showCompleted
+        ? allFleetShips
+        : allFleetShips.filter((s) => s.phase !== "done" && !s.processDead),
+    [allFleetShips, showCompleted],
+  );
 
   // Only show log panel for ships belonging to this fleet
   const showLogPanel =
-    selectedShipId && fleetShips.some((s) => s.id === selectedShipId);
+    selectedShipId && allFleetShips.some((s) => s.id === selectedShipId);
 
   return (
     <div className="w-72 shrink-0 border-l border-border bg-background/50 flex flex-col">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Ships ({fleetShips.length})
         </span>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={(e) => setShowCompleted(e.target.checked)}
+            className="h-3 w-3 rounded border-border accent-primary"
+          />
+          <span className="text-[10px] text-muted-foreground">Show completed</span>
+        </label>
       </div>
       <ScrollArea className="flex-1">
         <div className="grid grid-cols-1 gap-2 p-3">
+          {fleetShips.length === 0 && (
+            <p className="text-center text-xs text-muted-foreground py-4">
+              No active ships
+            </p>
+          )}
           {fleetShips.map((ship) => {
             const config = ship.processDead
               ? PROCESS_DEAD_CONFIG
@@ -114,4 +137,4 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
       )}
     </div>
   );
-}
+});

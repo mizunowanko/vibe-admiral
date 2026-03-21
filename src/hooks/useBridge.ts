@@ -26,6 +26,9 @@ export function useBridge(fleetId: string | null) {
         const data = msg.data as { fleetId: string; message: StreamMessage };
         if (data.fleetId === fleetId) {
           if (data.message.type === "history") {
+            // Only apply history on initial load or reconnect.
+            // Skip if we already have live messages to prevent scroll reset.
+            if (historyLoadedRef.current) return;
             try {
               const history = JSON.parse(
                 data.message.content ?? "[]",
