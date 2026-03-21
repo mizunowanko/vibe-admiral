@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Issue ベースの機能実装ワークフロー。計画→実装→受け入れテ スト→マージまで一気通貫で実行する。"/implement", "実装して" などで起動。
+description: Issue ベースの機能実装ワークフロー。計画→実装→受け入れテスト→マージまで一気通貫で実行する。"/implement", "実装して" などで起動。
 user-invocable: true
 ---
 
@@ -58,48 +58,51 @@ STATEEOF
 if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキッ プ、DB メッセージボード方式
+- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキップ、DB メッセージボード方式
 - `VIBE_ADMIRAL_DISABLED`（スタンドアロン）: Worktree/ラベル管理をスキル内で実行
 
-## ステータス遷移（admiral-request プロトコル）
+## ステータス遷移（直接 DB 更新）
 
-**`VIBE_ADMIRAL` 設定時のみ。** Ship はステータス遷移を admiral-request ブロックで Engine に表明する。
+**`VIBE_ADMIRAL` 設定時のみ。** Ship は phase 遷移時に直接 DB の `phases` テーブルを更新する。
 
-### 遷移の表明
-
-````
-```admiral-request
-{ "request": "status-transition", "status": "<phase-name>" }
-```
-````
-
-### Engine レスポンス待機（DB ポーリング）
+### Phase 更新テンプレート
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"
-SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
+BEGIN;
+  UPDATE phases SET phase = '<targetPhase>', updated_at = datetime('now')
+    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
+  UPDATE ships SET phase = '<targetPhase>'
+    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = '<currentPhase>';
+  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
+    VALUES ('$VIBE_ADMIRAL_SHIP_ID', '<currentPhase>', '<targetPhase>', 'ship', '{}');
+COMMIT;
+"
+```
+
+### Gate 待ち（phases テーブルポーリング）
+
+Gate phase に入った後、Escort が phase を更新するのを待つ:
+
+```bash
 while true; do
-  ROW=$(sqlite3 "$DB_PATH" "SELECT payload FROM messages WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL LIMIT 1" 2>/dev/null)
-  if [ -n "$ROW" ]; then
-    sqlite3 "$DB_PATH" "UPDATE messages SET read_at=datetime('now') WHERE ship_id='$SHIP_ID' AND type='admiral-request-response' AND read_at IS NULL"
-    echo "$ROW"
-    break
-  fi
-  sleep 1
+  PHASE=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "SELECT phase FROM phases WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'")
+  case "$PHASE" in
+    <expected-next-phase>) echo "Gate approved"; break ;;
+    <rejection-phase>) echo "Gate rejected"; break ;;
+    <current-gate-phase>) sleep 2 ;;
+  esac
 done
 ```
 
-- `ok: true` → 遷移確定
-- `ok: false` + `gate` フィールドあり → Ship 自身が Escort sub-agent を起動して Gate review を実施
-
 ### Gate フロー（Ship Escort 方式）
 
-Engine 応答に `gate` フィールドが含まれる場合:
-1. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
-2. Escort がレビュー実施 → GitHub に記録 → DB に `gate-response` を書き込み
-3. Ship が DB をポーリングして gate-response を取得
-4. `approved: true` → 再度 `status-transition` を表明 → Engine が gate 完了を確認して遷移
-5. `approved: false` → GitHub でフィードバックを確認、修正して再度 `status-transition` → Escort 起動ループ
+1. Ship が直接 DB で gate phase に遷移（例: `planning` → `planning-gate`）
+2. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
+3. Escort がレビュー実施 → GitHub に記録 → DB に `gate-response` を書き込み
+4. Ship が `phases` テーブルをポーリングして phase 変更を検知
+5. `approved: true` → Escort が phase を次の作業 phase に更新 → Ship が検知して次の作業を開始
+6. `approved: false` → GitHub でフィードバックを確認、修正して再度 gate phase に遷移 → Escort 起動ループ
 
 ### Gate 付き遷移
 
@@ -125,7 +128,7 @@ Engine 応答に `gate` フィールドが含まれる場合:
 
 > **コンテキストリフレッシュ**: `/implement-code` の Step 5a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
 
-state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する 。
+state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する。
 
 **`VIBE_ADMIRAL` 未設定時**:
 admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。

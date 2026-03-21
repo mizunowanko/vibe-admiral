@@ -1,4 +1,4 @@
-import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, Phase } from "./types.js";
+import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -175,15 +175,6 @@ export function parseStreamMessage(
 const REQUEST_BLOCK_RE = /```admiral-request\n([\s\S]*?)```/g;
 const REPO_PATTERN_REQ = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
-/** Valid phases that Ship can request via status-transition. */
-const VALID_PHASES: ReadonlySet<Phase> = new Set([
-  "planning",
-  "implementing",
-  "acceptance-test",
-  "merging",
-  "done",
-]);
-
 function validateRequest(obj: unknown): AdmiralRequest | null {
   if (typeof obj !== "object" || obj === null) return null;
   const r = obj as Record<string, unknown>;
@@ -218,18 +209,6 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
         items.push(entry);
       }
       return { request: "sortie", items };
-    }
-
-    case "status-transition": {
-      const status = r.status as string | undefined;
-      if (typeof status !== "string" || !VALID_PHASES.has(status as Phase)) return null;
-      const transition: { request: "status-transition"; status: Phase; planCommentUrl?: string; qaRequired?: boolean } = {
-        request: "status-transition",
-        status: status as Phase,
-      };
-      if (typeof r.planCommentUrl === "string") transition.planCommentUrl = r.planCommentUrl;
-      if (typeof r.qaRequired === "boolean") transition.qaRequired = r.qaRequired;
-      return transition;
     }
 
     case "nothing-to-do": {
@@ -276,7 +255,7 @@ export function extractRequests(text: string): AdmiralRequest[] {
   return requests;
 }
 
-const SHIP_REQUEST_TYPES = new Set(["status-transition", "nothing-to-do"]);
+const SHIP_REQUEST_TYPES = new Set(["nothing-to-do"]);
 
 /** Type guard: check if a request is a Bridge-only request. */
 export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
