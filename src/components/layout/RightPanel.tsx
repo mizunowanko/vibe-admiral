@@ -1,7 +1,6 @@
 import { memo, useState, useMemo, useRef } from "react";
 import { useUIStore } from "@/stores/uiStore";
 import { useShipStore } from "@/stores/shipStore";
-import { Bridge } from "@/components/bridge/Bridge";
 import { ShipDetailPanel } from "@/components/ship/ShipDetailPanel";
 import { ActiveShipSummary } from "@/components/ship/ActiveShipSummary";
 import { Badge } from "@/components/ui/badge";
@@ -154,47 +153,34 @@ export const RightPanel = memo(function RightPanel({ fleetId }: RightPanelProps)
       {/* Active Ship Summary — always visible */}
       <ActiveShipSummary fleetId={fleetId} />
 
-      {/* Ship Detail Panel (replaces tab content when viewing a ship) */}
+      {/* Tab Bar — Flagship/Dock tabs switch the left chat panel, Ships tab is for the ship list */}
+      <div className="flex border-b border-border shrink-0">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const active = rightPanelTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setRightPanelTab(tab.key)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px flex-1 justify-center",
+                active
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Content: Ship Detail Panel or Ships List */}
       {viewingShipId ? (
         <ShipDetailPanel shipId={viewingShipId} />
       ) : (
-        <>
-          {/* Tab Bar */}
-          <div className="flex border-b border-border shrink-0">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const active = rightPanelTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => setRightPanelTab(tab.key)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px flex-1 justify-center",
-                    active
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
-                  )}
-                >
-                  <Icon className="h-3 w-3" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Tab Content */}
-          <div className="flex flex-1 flex-col min-h-0">
-            {rightPanelTab === "flagship" && (
-              <Bridge fleetId={fleetId} role="flagship" />
-            )}
-            {rightPanelTab === "dock" && (
-              <Bridge fleetId={fleetId} role="dock" />
-            )}
-            {rightPanelTab === "ships" && (
-              <ShipsTabContent fleetId={fleetId} />
-            )}
-          </div>
-        </>
+        <ShipsTabContent fleetId={fleetId} />
       )}
     </div>
   );
