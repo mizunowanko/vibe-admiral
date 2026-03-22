@@ -60,7 +60,7 @@ describe("EscortManager", () => {
       expect(mockProcessManager.launchEscort).toHaveBeenCalledWith(
         "escort-ship-001-planning-gate",
         "/repo/.worktrees/feature/42-test",
-        "gate-plan-review",
+        "planning-gate",
         42,
         {
           VIBE_ADMIRAL_SHIP_ID: "ship-001",
@@ -70,13 +70,13 @@ describe("EscortManager", () => {
       );
     });
 
-    it("maps implementing-gate to gate-code-review skill", () => {
+    it("maps implementing-gate to implementing-gate skill", () => {
       escortManager.launchEscort("ship-001", "implementing-gate", "code-review");
 
       expect(mockProcessManager.launchEscort).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        "gate-code-review",
+        "implementing-gate",
         expect.any(Number),
         expect.any(Object),
       );

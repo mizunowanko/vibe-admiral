@@ -131,13 +131,13 @@ describe("ProcessManager", () => {
 
   describe("launchEscort", () => {
     it("spawns an Escort with stdin ignored and max-turns 100", () => {
-      pm.launchEscort("escort-001", "/worktree", "gate-plan-review", 42);
+      pm.launchEscort("escort-001", "/worktree", "planning-gate", 42);
 
       expect(spawn).toHaveBeenCalledWith(
         "claude",
         expect.arrayContaining([
           "-p",
-          "/gate-plan-review 42",
+          "/planning-gate 42",
           "--max-turns",
           "100",
         ]),

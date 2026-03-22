@@ -97,7 +97,7 @@ done
 ### Gate フロー（Engine Escort 方式）
 
 1. Ship が Engine REST API で gate phase に遷移（例: `planning` → `planning-gate`）
-2. Engine が Escort プロセスを起動（`/gate-plan-review` or `/gate-code-review` スキル）
+2. Engine が Escort プロセスを起動（`/planning-gate`, `/implementing-gate`, `/acceptance-test-gate` スキル）
 3. Escort がレビュー実施 → GitHub に記録 → Engine REST API で gate-verdict を送信
 4. Ship が REST API をポーリングして phase 変更を検知
 5. approved → Engine が phase を次の作業 phase に更新済み → Ship が検知して次の作業を開始
