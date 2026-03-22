@@ -38,8 +38,11 @@ export const useFleetStore = create<FleetState>()(
         set({
           fleets,
           selectedFleet,
-          // Fallback: clear persisted ID when the fleet no longer exists
-          ...(selectedFleetId && !selectedFleet && { selectedFleetId: null }),
+          // Clear persisted ID only when the fleet list is non-empty but
+          // the selected fleet is genuinely missing. An empty array may
+          // arrive during a transient reconnection; clearing in that case
+          // would cause the UI to jump to the Fleet selection screen.
+          ...(selectedFleetId && !selectedFleet && fleets.length > 0 && { selectedFleetId: null }),
         });
       },
 

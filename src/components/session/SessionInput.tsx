@@ -73,6 +73,17 @@ export function SessionInput({
   const setInputDraft = useSessionStore((s) => s.setInputDraft);
   const [value, setValue] = useState(storedDraft);
   const [images, setImages] = useState<PreviewAttachment[]>([]);
+
+  // Sync local value with stored draft when sessionId changes.
+  // Without a key prop, the same component instance is reused across sessions,
+  // so useState(storedDraft) only reads the initial value on mount.
+  const prevSessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    if (prevSessionIdRef.current !== sessionId) {
+      prevSessionIdRef.current = sessionId;
+      setValue(storedDraft);
+    }
+  }, [sessionId, storedDraft]);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
