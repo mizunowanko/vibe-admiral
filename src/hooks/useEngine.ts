@@ -165,7 +165,7 @@ export function useEngine() {
     // Fetch data on every connect/reconnect
     const unsubConnect = wsClient.onConnect(() => {
       fetchFleets();
-      fetchShips();
+      void fetchShips();
     });
 
     return () => {
