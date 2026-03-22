@@ -117,7 +117,7 @@ export const Bridge = memo(function Bridge({ fleetId, role }: CommanderChatProps
   }
 
   return (
-    <div className="flex flex-1 flex-col min-h-0">
+    <div className="flex flex-1 flex-col min-h-0 min-w-0">
       {/* Disconnected Banner */}
       {!engineConnected && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-center text-xs text-destructive">
