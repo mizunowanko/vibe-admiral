@@ -17,7 +17,6 @@ export function MainPanel() {
   const focusedSessionId = useSessionStore((s) => s.focusedSessionId);
   const setFocus = useSessionStore((s) => s.setFocus);
   const registerSession = useSessionStore((s) => s.registerSession);
-  const sessions = useSessionStore((s) => s.sessions);
 
   // Register commander sessions when fleet changes and auto-focus flagship
   useEffect(() => {
@@ -52,6 +51,8 @@ export function MainPanel() {
       }
 
       // Ctrl+3..N → focus Nth ship session
+      // Read sessions at event time to avoid re-rendering MainPanel on every session change
+      const sessions = useSessionStore.getState().sessions;
       const shipSessions = Array.from(sessions.values()).filter(
         (s) => s.type === "ship" && s.fleetId === selectedFleetId,
       );
@@ -61,7 +62,7 @@ export function MainPanel() {
         setFocus(target.id);
       }
     },
-    [selectedFleetId, setFocus, sessions],
+    [selectedFleetId, setFocus],
   );
 
   useEffect(() => {

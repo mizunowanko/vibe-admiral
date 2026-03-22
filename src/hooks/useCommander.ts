@@ -11,6 +11,8 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
   // Track the timestamp when we requested history so we can identify
   // which optimistic messages arrived after the request and must be preserved.
   const historyRequestedAtRef = useRef<number>(0);
+  // Track previous fleetId/role to detect actual changes vs. effect re-runs
+  const prevFleetRef = useRef<{ fleetId: string | null; role: CommanderRole }>({ fleetId: null, role });
 
   const streamType = `${role}:stream` as const;
   const questionType = `${role}:question` as const;
@@ -24,15 +26,21 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
       setPendingQuestion(null);
       pendingToolUseId.current = null;
       historyLoadedRef.current = false;
+      prevFleetRef.current = { fleetId, role };
       return;
     }
 
-    // Clear stale messages from the previous role to prevent cross-role
-    // leakage (e.g. Flagship Lookout alerts appearing on the Dock screen).
-    setMessages([]);
-    setPendingQuestion(null);
-    pendingToolUseId.current = null;
-    historyLoadedRef.current = false;
+    // Only clear messages when fleetId or role actually changed to prevent
+    // cross-role leakage. Skip clearing if the effect re-runs with the
+    // same values (e.g. due to dependency identity changes from parent re-renders).
+    const prev = prevFleetRef.current;
+    if (prev.fleetId !== fleetId || prev.role !== role) {
+      setMessages([]);
+      setPendingQuestion(null);
+      pendingToolUseId.current = null;
+      historyLoadedRef.current = false;
+    }
+    prevFleetRef.current = { fleetId, role };
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
       if (msg.type === streamType) {

@@ -67,6 +67,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   registerSession: (session) => {
     set((state) => {
+      const existing = state.sessions.get(session.id);
+      if (
+        existing &&
+        existing.type === session.type &&
+        existing.fleetId === session.fleetId &&
+        existing.label === session.label &&
+        existing.hasInput === session.hasInput &&
+        existing.shipId === session.shipId
+      ) {
+        return state; // No change — skip Map recreation
+      }
       const sessions = new Map(state.sessions);
       sessions.set(session.id, session);
       return { sessions };
