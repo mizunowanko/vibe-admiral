@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo, useRef } from "react";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
 import { cn } from "@/lib/utils";
@@ -19,19 +19,44 @@ const PHASE_ORDER: Phase[] = [
   "merging",
 ];
 
-export function ActiveShipSummary({ fleetId }: ActiveShipSummaryProps) {
-  const ships = useShipStore((s) => s.ships);
+function buildSummaryFingerprint(ships: Ship[]): string {
+  return ships
+    .map((s) => `${s.id}:${s.phase}:${s.issueNumber}:${s.processDead ?? false}`)
+    .join("|");
+}
+
+export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: ActiveShipSummaryProps) {
   const setViewingShipId = useUIStore((s) => s.setViewingShipId);
 
+  // Use fingerprint-based selector to avoid re-renders on unrelated ship store changes (e.g. log additions)
+  const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
+  const fleetShips = useShipStore((s) => {
+    const filtered = Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId);
+    const fingerprint = buildSummaryFingerprint(filtered);
+    if (fingerprint === prevRef.current.fingerprint) {
+      return prevRef.current.ships;
+    }
+    prevRef.current = { fingerprint, ships: filtered };
+    return filtered;
+  });
+
   const activeShips = useMemo(() => {
-    return Array.from(ships.values()).filter(
+    return fleetShips.filter(
       (s) =>
-        s.fleetId === fleetId &&
         s.phase !== "done" &&
         s.phase !== "stopped" &&
         !s.processDead,
     );
-  }, [ships, fleetId]);
+  }, [fleetShips]);
+
+  const errorShips = useMemo(() => {
+    return fleetShips.filter(
+      (s) =>
+        s.processDead &&
+        s.phase !== "done" &&
+        s.phase !== "stopped",
+    );
+  }, [fleetShips]);
 
   const phaseCounts = useMemo(() => {
     const counts = new Map<Phase, Ship[]>();
@@ -43,7 +68,7 @@ export function ActiveShipSummary({ fleetId }: ActiveShipSummaryProps) {
     return counts;
   }, [activeShips]);
 
-  if (activeShips.length === 0) return null;
+  if (activeShips.length === 0 && errorShips.length === 0) return null;
 
   return (
     <div className="border-b border-border px-3 py-2 bg-card/50">
@@ -78,29 +103,21 @@ export function ActiveShipSummary({ fleetId }: ActiveShipSummaryProps) {
           );
         })}
         {/* Error ships */}
-        {Array.from(ships.values())
-          .filter(
-            (s) =>
-              s.fleetId === fleetId &&
-              s.processDead &&
-              s.phase !== "done" &&
-              s.phase !== "stopped",
-          )
-          .map((ship) => (
-            <button
-              key={ship.id}
-              onClick={() => setViewingShipId(ship.id)}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors",
-                "hover:ring-1 hover:ring-primary/50 cursor-pointer",
-                PROCESS_DEAD_CONFIG.color,
-              )}
-              title={`#${ship.issueNumber}: ${ship.issueTitle} (Error)`}
-            >
-              #{ship.issueNumber}
-            </button>
-          ))}
+        {errorShips.map((ship) => (
+          <button
+            key={ship.id}
+            onClick={() => setViewingShipId(ship.id)}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors",
+              "hover:ring-1 hover:ring-primary/50 cursor-pointer",
+              PROCESS_DEAD_CONFIG.color,
+            )}
+            title={`#${ship.issueNumber}: ${ship.issueTitle} (Error)`}
+          >
+            #{ship.issueNumber}
+          </button>
+        ))}
       </div>
     </div>
   );
-}
+});

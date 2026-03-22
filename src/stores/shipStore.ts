@@ -10,6 +10,31 @@ interface ShipPhaseData {
   issueTitle?: string;
 }
 
+// --- Log batching ---
+// Buffer incoming logs and flush once per animation frame to avoid
+// creating a new Map reference on every single CLI output line.
+const pendingLogs = new Map<string, StreamMessage[]>();
+let flushScheduled = false;
+
+function scheduleBatchFlush() {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  requestAnimationFrame(() => {
+    flushScheduled = false;
+    const batch = new Map(pendingLogs);
+    pendingLogs.clear();
+    if (batch.size === 0) return;
+    useShipStore.setState((state) => {
+      const shipLogs = new Map(state.shipLogs);
+      for (const [id, msgs] of batch) {
+        const existing = shipLogs.get(id) ?? [];
+        shipLogs.set(id, [...existing, ...msgs]);
+      }
+      return { shipLogs };
+    });
+  });
+}
+
 interface ShipState {
   ships: Map<string, Ship>;
   shipLogs: Map<string, StreamMessage[]>;
@@ -106,12 +131,10 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
   addShipLog: (id, message) => {
-    set((state) => {
-      const shipLogs = new Map(state.shipLogs);
-      const logs = shipLogs.get(id) ?? [];
-      shipLogs.set(id, [...logs, message]);
-      return { shipLogs };
-    });
+    const buf = pendingLogs.get(id) ?? [];
+    buf.push(message);
+    pendingLogs.set(id, buf);
+    scheduleBatchFlush();
   },
 
   setShipLogs: (id, messages) => {

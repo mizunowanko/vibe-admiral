@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { memo, useState, useMemo, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
@@ -52,7 +52,7 @@ interface ChatMessageProps {
   context?: "command" | "bridge" | "ship";
 }
 
-export function ChatMessage({ message, repeatCount, context }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, repeatCount, context }: ChatMessageProps) {
   const [toolExpanded, setToolExpanded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
   const imageUrls = useImageObjectUrls(message.images);
@@ -323,4 +323,4 @@ export function ChatMessage({ message, repeatCount, context }: ChatMessageProps)
       </div>
     </div>
   );
-}
+});
