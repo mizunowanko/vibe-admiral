@@ -27,6 +27,11 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
       return;
     }
 
+    // Clear stale messages from the previous role to prevent cross-role
+    // leakage (e.g. Flagship Lookout alerts appearing on the Dock screen).
+    setMessages([]);
+    setPendingQuestion(null);
+    pendingToolUseId.current = null;
     historyLoadedRef.current = false;
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
