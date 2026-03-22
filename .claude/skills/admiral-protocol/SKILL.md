@@ -83,42 +83,89 @@ Flagship can check `ok` field or HTTP status code to detect failures.
 ## Environment Variables (VIBE_ADMIRAL mode)
 
 - `VIBE_ADMIRAL_SHIP_ID`: The Ship's unique ID
-- `VIBE_ADMIRAL_DB_PATH`: Path to the fleet's SQLite database
 - `VIBE_ADMIRAL_MAIN_REPO`: The fleet's main repository (owner/repo)
+- `VIBE_ADMIRAL_ENGINE_PORT`: Engine API port (default: 9721)
 
-## Gate Flow (Engine Escort Model)
+## Ship/Escort API Endpoints
 
-Gate checks are handled autonomously by Ships via direct DB updates:
+### 6. phase-transition — Ship transitions its own phase
 
-1. Ship directly updates `phases` table to gate phase (e.g. `planning` → `planning-gate`) via `sqlite3`
-2. Ship launches Escort sub-agent via Task tool (see `/gate-plan-review`, `/gate-code-review`)
-3. Escort performs review, records on GitHub, directly updates `phases` table and writes to `phase_transitions` via `sqlite3`
-4. Ship polls `phases` table for phase changes
-5. On approval: Escort has already updated phase to next work phase (e.g. `planning-gate` → `implementing`)
-6. On rejection: Escort reverts phase (e.g. `planning-gate` → `planning`); Ship reads feedback from `phase_transitions`
-
-### Gate Polling Pattern (phases table)
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"
-SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-while true; do
-  PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null)
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "planning-gate", "metadata": {"planCommentUrl": "..."}}'
+```
+
+- Engine validates the transition (forward-only, gate-reject exception)
+- Returns `{ "ok": true, "phase": "planning-gate" }` or `{ "ok": false, "error": "..." }`
+
+### 7. phase — Poll current phase
+
+```bash
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase
+```
+
+- Returns `{ "ok": true, "phase": "implementing" }`
+
+### 8. gate-verdict — Escort submits gate result
+
+```bash
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/gate-verdict \
+  -H 'Content-Type: application/json' \
+  -d '{"verdict": "approve"}'
+```
+
+- `verdict`: `"approve"` or `"reject"`
+- `feedback` (optional, for reject): reason string
+- Engine validates ship is in a gate phase, then transitions accordingly
+
+### 9. phase-transition-log — Get recent phase transitions
+
+```bash
+curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1"
+```
+
+- Returns `{ "ok": true, "transitions": [{ "fromPhase": "...", "toPhase": "...", "metadata": {...}, ... }] }`
+
+### 10. nothing-to-do — Ship declares nothing to do
+
+```bash
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/nothing-to-do \
+  -H 'Content-Type: application/json' \
+  -d '{"reason": "Issue already resolved"}'
+```
+
+## Gate Flow (Engine REST API Model)
+
+Gate checks are handled via Engine REST API:
+
+1. Ship calls `POST /api/ship/:id/phase-transition` to enter gate phase (e.g. `planning` → `planning-gate`)
+2. Engine detects gate phase, launches Escort process with appropriate gate skill
+3. Escort performs review, records on GitHub, calls `POST /api/ship/:id/gate-verdict`
+4. Ship polls `GET /api/ship/:id/phase` for phase changes
+5. On approval: Engine transitions to next work phase (e.g. `planning-gate` → `implementing`)
+6. On rejection: Engine reverts to previous phase (e.g. `planning-gate` → `planning`); Ship reads feedback via `GET /api/ship/:id/phase-transition-log`
+
+### Gate Polling Pattern (REST API)
+```bash
+TIMEOUT=600; ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase)
+  PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4)
   case "$PHASE" in
     <expected-next-phase>) echo "Gate approved"; break ;;
     <rejection-phase>) echo "Gate rejected"; break ;;
-    <current-gate-phase>) sleep 2 ;;
+    <current-gate-phase>) sleep 3 ;;
+    *) echo "UNEXPECTED_PHASE: $PHASE"; break ;;
   esac
+  ELAPSED=$((ELAPSED + 3))
 done
+[ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
 ### Feedback Retrieval (on rejection)
 ```bash
-FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-  SELECT json_extract(metadata, '$.feedback')
-  FROM phase_transitions
-  WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
-  ORDER BY created_at DESC LIMIT 1
-")
+FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
 ```
 
 ## Ship Status Confirmation Rules

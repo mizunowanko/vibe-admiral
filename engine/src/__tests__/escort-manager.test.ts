@@ -57,11 +57,10 @@ describe("EscortManager", () => {
         "/repo/.worktrees/feature/42-test",
         "gate-plan-review",
         42,
-        expect.objectContaining({
+        {
           VIBE_ADMIRAL_SHIP_ID: "ship-001",
           VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
-          VIBE_ADMIRAL_DB_PATH: "/tmp/fleet.db",
-        }),
+        },
       );
     });
 
@@ -107,8 +106,7 @@ describe("EscortManager", () => {
       expect(result).toBeNull();
     });
 
-    it("omits VIBE_ADMIRAL_DB_PATH when no DB path available", () => {
-      mockShipManager.getDbPath.mockReturnValue(undefined);
+    it("does not pass VIBE_ADMIRAL_DB_PATH (API-based communication)", () => {
       escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
 
       const envArg = mockProcessManager.launchEscort.mock.calls[0]![4] as Record<string, string>;

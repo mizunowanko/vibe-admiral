@@ -182,13 +182,11 @@ export class ShipManager {
       .filter(Boolean)
       .join("\n\n") || undefined;
 
-    // 10. Launch Claude CLI process with DB path for message polling
+    // 10. Launch Claude CLI process with Engine API access
     const shipEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: repo,
+      VIBE_ADMIRAL_SHIP_ID: shipId,
     };
-    if (this.fleetDb) {
-      shipEnv.VIBE_ADMIRAL_DB_PATH = this.fleetDb.path;
-    }
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
     this.updatePhase(shipId, "planning");
@@ -305,6 +303,18 @@ export class ShipManager {
       }
       // Notify frontend
       this.onPhaseChange?.(id, phase, detail);
+    }
+  }
+
+  /**
+   * Sync phase from DB and notify frontend.
+   * Called by the REST API after it has already updated the DB via transitionPhase().
+   * Unlike updatePhase(), this does NOT write to DB — it only reads and notifies.
+   */
+  syncPhaseFromDb(id: string): void {
+    const dbShip = this.fleetDb?.getShipById(id);
+    if (dbShip) {
+      this.onPhaseChange?.(id, dbShip.phase as Phase);
     }
   }
 
@@ -487,10 +497,8 @@ export class ShipManager {
     // Build extra env vars for the Ship process
     const shipEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: ship.repo,
+      VIBE_ADMIRAL_SHIP_ID: shipId,
     };
-    if (this.fleetDb) {
-      shipEnv.VIBE_ADMIRAL_DB_PATH = this.fleetDb.path;
-    }
 
     if (ship.sessionId) {
       // Resume existing session

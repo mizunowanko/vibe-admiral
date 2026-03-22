@@ -74,6 +74,8 @@ export class EngineServer {
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
     const apiHandler = createApiHandler({
       requestHandler: this.requestHandler,
+      getDatabase: () => this.fleetDb,
+      getShipManager: () => this.shipManager,
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
       broadcastRequestResult: (fleetId, result) => {
