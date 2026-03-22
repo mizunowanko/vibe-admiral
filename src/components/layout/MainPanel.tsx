@@ -1,17 +1,73 @@
+import { useEffect, useCallback } from "react";
 import { useUIStore } from "@/stores/uiStore";
 import { useFleetStore } from "@/stores/fleetStore";
-import { Bridge } from "@/components/bridge/Bridge";
-import { RightPanel } from "@/components/layout/RightPanel";
-import { ShipDetailPanel } from "@/components/ship/ShipDetailPanel";
+import {
+  useSessionStore,
+  commanderSessionId,
+  createCommanderSession,
+} from "@/stores/sessionStore";
+import { SessionChat } from "@/components/session/SessionChat";
+import { SessionCardList } from "@/components/session/SessionCardList";
 import { ShipGrid } from "@/components/ship/ShipGrid";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
-import type { CommanderRole } from "@/types";
 
 export function MainPanel() {
   const mainView = useUIStore((s) => s.mainView);
-  const activeCommanderTab = useUIStore((s) => s.activeCommanderTab);
-  const viewingShipId = useUIStore((s) => s.viewingShipId);
   const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
+  const focusedSessionId = useSessionStore((s) => s.focusedSessionId);
+  const setFocus = useSessionStore((s) => s.setFocus);
+  const registerSession = useSessionStore((s) => s.registerSession);
+  const sessions = useSessionStore((s) => s.sessions);
+
+  // Register commander sessions when fleet changes and auto-focus flagship
+  useEffect(() => {
+    if (!selectedFleetId) return;
+    registerSession(createCommanderSession("dock", selectedFleetId));
+    registerSession(createCommanderSession("flagship", selectedFleetId));
+    // Auto-focus flagship for this fleet if nothing focused
+    const currentFocus = useSessionStore.getState().focusedSessionId;
+    if (!currentFocus) {
+      setFocus(commanderSessionId("flagship", selectedFleetId));
+    }
+  }, [selectedFleetId, registerSession, setFocus]);
+
+  // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!selectedFleetId) return;
+      if (!e.ctrlKey && !e.metaKey) return;
+
+      const num = parseInt(e.key, 10);
+      if (isNaN(num) || num < 1) return;
+
+      e.preventDefault();
+
+      if (num === 1) {
+        setFocus(commanderSessionId("dock", selectedFleetId));
+        return;
+      }
+      if (num === 2) {
+        setFocus(commanderSessionId("flagship", selectedFleetId));
+        return;
+      }
+
+      // Ctrl+3..N → focus Nth ship session
+      const shipSessions = Array.from(sessions.values()).filter(
+        (s) => s.type === "ship" && s.fleetId === selectedFleetId,
+      );
+      const shipIndex = num - 3;
+      const target = shipSessions[shipIndex];
+      if (shipIndex >= 0 && target) {
+        setFocus(target.id);
+      }
+    },
+    [selectedFleetId, setFocus, sessions],
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   if (!selectedFleetId && mainView !== "fleet-settings") {
     return (
@@ -30,21 +86,11 @@ export function MainPanel() {
     case "command":
       return (
         <div className="flex flex-1 min-h-0">
-          {/* Center: Commander Chat or Ship Detail */}
-          {viewingShipId ? (
-            <ShipDetailPanel shipId={viewingShipId} />
-          ) : (
-            <>
-              {(["dock", "flagship"] as const satisfies readonly CommanderRole[]).map((role) => (
-                <div key={role} className={activeCommanderTab === role ? "flex flex-1 h-full min-h-0 flex-col" : "hidden"}>
-                  <Bridge fleetId={selectedFleetId} role={role} />
-                </div>
-              ))}
-            </>
-          )}
+          {/* Left: Session Chat */}
+          <SessionChat sessionId={focusedSessionId} />
 
-          {/* Right: Dock → Flagship → Ships (stacked) */}
-          <RightPanel fleetId={selectedFleetId!} />
+          {/* Right: Session Card List */}
+          <SessionCardList fleetId={selectedFleetId!} />
         </div>
       );
     case "ships":

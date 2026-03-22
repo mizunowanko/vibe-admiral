@@ -1,6 +1,6 @@
 import { memo, useMemo, useRef } from "react";
 import { useShipStore } from "@/stores/shipStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useSessionStore, shipSessionId } from "@/stores/sessionStore";
 import { cn } from "@/lib/utils";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
 import type { Ship, Phase } from "@/types";
@@ -26,9 +26,8 @@ function buildSummaryFingerprint(ships: Ship[]): string {
 }
 
 export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: ActiveShipSummaryProps) {
-  const setViewingShipId = useUIStore((s) => s.setViewingShipId);
+  const setFocus = useSessionStore((s) => s.setFocus);
 
-  // Use fingerprint-based selector to avoid re-renders on unrelated ship store changes (e.g. log additions)
   const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
   const fleetShips = useShipStore((s) => {
     const filtered = Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId);
@@ -85,7 +84,7 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
               {shipsInPhase.map((ship) => (
                 <button
                   key={ship.id}
-                  onClick={() => setViewingShipId(ship.id)}
+                  onClick={() => setFocus(shipSessionId(ship.id))}
                   className={cn(
                     "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors",
                     "hover:ring-1 hover:ring-primary/50 cursor-pointer",
@@ -102,11 +101,10 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
             </div>
           );
         })}
-        {/* Error ships */}
         {errorShips.map((ship) => (
           <button
             key={ship.id}
-            onClick={() => setViewingShipId(ship.id)}
+            onClick={() => setFocus(shipSessionId(ship.id))}
             className={cn(
               "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors",
               "hover:ring-1 hover:ring-primary/50 cursor-pointer",

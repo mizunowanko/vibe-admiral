@@ -3,6 +3,12 @@ import { wsClient } from "@/lib/ws-client";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
+import {
+  useSessionStore,
+  createCommanderSession,
+  createShipSession,
+  commanderSessionId,
+} from "@/stores/sessionStore";
 import type { ServerMessage, Fleet, Ship, Phase, StreamMessage, GatePhase, GateType } from "@/types";
 
 export function useEngine() {
@@ -21,6 +27,8 @@ export function useEngine() {
   const fetchShips = useShipStore((s) => s.fetchShips);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
+  const registerSession = useSessionStore((s) => s.registerSession);
+  const setFocus = useSessionStore((s) => s.setFocus);
 
   useEffect(() => {
     wsClient.connect();
@@ -34,16 +42,32 @@ export function useEngine() {
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
       switch (msg.type) {
-        case "fleet:data":
-          setFleets(msg.data as unknown as Fleet[]);
+        case "fleet:data": {
+          const fleets = msg.data as unknown as Fleet[];
+          setFleets(fleets);
+          // Register commander sessions for the selected fleet
+          const selectedId = useFleetStore.getState().selectedFleetId;
+          if (selectedId) {
+            registerSession(createCommanderSession("dock", selectedId));
+            registerSession(createCommanderSession("flagship", selectedId));
+            // Auto-focus flagship if nothing is focused
+            const currentFocus = useSessionStore.getState().focusedSessionId;
+            if (!currentFocus) {
+              setFocus(commanderSessionId("flagship", selectedId));
+            }
+          }
           break;
+        }
 
         case "ship:data": {
           const shipList = msg.data as unknown as Ship[];
           syncShips(shipList);
-          // Request logs for ships that don't have logs in the store yet
+          // Register ship sessions and request logs
           const currentLogs = useShipStore.getState().shipLogs;
           for (const ship of shipList) {
+            registerSession(
+              createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+            );
             if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
               wsClient.send({ type: "ship:logs", data: { id: ship.id } });
             }
@@ -56,6 +80,10 @@ export function useEngine() {
           setFleets(created.fleets);
           selectFleet(created.id);
           setMainView("command");
+          // Register commander sessions for the new fleet
+          registerSession(createCommanderSession("dock", created.id));
+          registerSession(createCommanderSession("flagship", created.id));
+          setFocus(commanderSessionId("flagship", created.id));
           break;
         }
 
@@ -70,6 +98,15 @@ export function useEngine() {
             branchName?: string;
           };
           addShip(created);
+          // Register ship session
+          registerSession(
+            createShipSession(
+              created.id,
+              created.fleetId,
+              created.issueNumber,
+              created.issueTitle,
+            ),
+          );
           break;
         }
 
@@ -89,6 +126,17 @@ export function useEngine() {
             issueNumber: statusData.issueNumber,
             issueTitle: statusData.issueTitle,
           });
+          // Update session label if issue info changed
+          if (statusData.issueNumber && statusData.issueTitle) {
+            registerSession(
+              createShipSession(
+                statusData.id,
+                statusData.fleetId ?? "",
+                statusData.issueNumber,
+                statusData.issueTitle,
+              ),
+            );
+          }
           break;
         }
 
@@ -221,5 +269,7 @@ export function useEngine() {
     fetchShips,
     setEngineConnected,
     fetchFleets,
+    registerSession,
+    setFocus,
   ]);
 }
