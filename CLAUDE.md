@@ -107,6 +107,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - [ADR-0002: 品質保証戦略](adr/0002-qa-strategy.md)
 - [ADR-0003: Ship ステータス管理のリアーキテクチャ](adr/0003-ship-status-rearchitecture.md)
 - [ADR-0004: XState 状態機械の可視化](adr/0004-xstate-state-machine-visualization.md)
+- [ADR-0005: E2E Config のポート共有パターン](adr/0005-e2e-port-sharing-pattern.md)
 
 ## ラベル体系
 
