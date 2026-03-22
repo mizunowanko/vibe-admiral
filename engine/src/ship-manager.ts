@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir, readFile, unlink } from "node:fs/promises";
+import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import type { StatusManager } from "./status-manager.js";
@@ -11,6 +11,28 @@ import * as worktree from "./worktree.js";
 import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, StreamMessage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Minimal CLAUDE.md for Ships working on external repos.
+ * Only includes VIBE_ADMIRAL environment variable documentation
+ * and basic tool constraints — no vibe-admiral-specific architecture or terminology.
+ */
+const SHIP_MINIMAL_CLAUDE_MD = `# Ship Context
+
+This Ship is managed by vibe-admiral. Use the /implement skill to execute the workflow.
+
+## Environment Variables
+
+- \`VIBE_ADMIRAL=true\` — Running inside Admiral (worktree/label management handled externally)
+- \`VIBE_ADMIRAL_SHIP_ID\` — This Ship's unique ID
+- \`VIBE_ADMIRAL_MAIN_REPO\` — The fleet's main repository (owner/repo)
+- \`VIBE_ADMIRAL_ENGINE_PORT\` — Engine API port (default: 9721)
+
+## Constraints
+
+- Do not modify \`.env\` files
+- Use Engine REST API for phase transitions (see /admiral-protocol skill)
+`;
 
 /**
  * Runtime-only state for a Ship. Kept in-memory only — not persisted to DB.
@@ -104,6 +126,9 @@ export class ShipManager {
 
     // 5. Copy /implement skill to worktree
     await this.deploySkills(repoRoot, worktreePath, skillSources);
+
+    // 5b. Write minimal CLAUDE.md for external repos (overrides vibe-admiral's CLAUDE.md)
+    await this.deployCLAUDEmd(localPath, repoRoot, worktreePath);
 
     // 6. Remove stale workflow-state.json from previous sortie
     await unlink(join(worktreePath, ".claude", "workflow-state.json")).catch(() => {});
@@ -450,6 +475,52 @@ export class ShipManager {
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill from dev-shared`);
       }
+    }
+  }
+
+  /**
+   * For external repos, replace the inherited CLAUDE.md with a minimal Ship template.
+   * When a worktree is created from an external repo, the repo's own CLAUDE.md (if any)
+   * is inherited — which is correct. But vibe-admiral's CLAUDE.md should NOT appear.
+   *
+   * Detection: if localPath's git root differs from the Engine's own repo root
+   * (i.e. the repo containing skills/), the Ship targets an external repo.
+   * In that case, write a minimal CLAUDE.md that only contains VIBE_ADMIRAL env var docs.
+   */
+  private async deployCLAUDEmd(
+    localPath: string,
+    repoRoot: string,
+    worktreePath: string,
+  ): Promise<void> {
+    // Determine if this is an external repo by checking whether the worktree
+    // was created inside the localPath repo or somewhere else.
+    // repoRoot = git root of the repo being worked on (from localPath)
+    // worktreePath = always inside repoRoot/.worktrees/
+    // If the target repo has its own CLAUDE.md, the worktree will inherit it.
+    // We only need to act when:
+    //   - The worktree inherits a CLAUDE.md from a DIFFERENT repo than localPath
+    //   - This happens when worktrees are created under the vibe-admiral repo
+    //     for issues belonging to external repos
+
+    // Check if the worktree path is under the localPath's repo root
+    const worktreeIsUnderLocalRepo = worktreePath.startsWith(repoRoot);
+    if (worktreeIsUnderLocalRepo) {
+      // Worktree is inside the target repo — CLAUDE.md is correct
+      return;
+    }
+
+    // Worktree is outside the target repo (e.g., under vibe-admiral's tree).
+    // Copy the external repo's CLAUDE.md if it exists, otherwise write a minimal one.
+    const externalClaudeMd = join(localPath, "CLAUDE.md");
+    const destClaudeMd = join(worktreePath, "CLAUDE.md");
+
+    try {
+      await copyFile(externalClaudeMd, destClaudeMd);
+      console.log(`[ship-manager] Copied external repo CLAUDE.md to worktree`);
+    } catch {
+      // No CLAUDE.md in external repo — write minimal Ship template
+      await writeFile(destClaudeMd, SHIP_MINIMAL_CLAUDE_MD);
+      console.log(`[ship-manager] Wrote minimal CLAUDE.md for external repo Ship`);
     }
   }
 

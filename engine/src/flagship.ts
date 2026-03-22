@@ -14,8 +14,6 @@ export class FlagshipManager extends CommanderManager {
   protected getSkillNames(): string[] {
     return [
       "admiral-protocol",
-      "gate-plan-review",
-      "gate-code-review",
       "sortie",
       "issue-manage",
       "investigate",

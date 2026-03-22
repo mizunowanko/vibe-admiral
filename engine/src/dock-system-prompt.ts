@@ -34,7 +34,7 @@ You may read Ship status for context, but you cannot control Ships directly.
 | /investigate | Bug report, codebase question, or feasibility analysis |
 | /read-issue | Need full issue context (body + comments + deps) |
 | /sortie | Prepare sortie recommendations (priority ordering, readiness check, clarity assessment) |
-| /admiral-protocol | Ship status queries (read-only) or protocol questions |
+| /dock-ship-status | Ship status queries (read-only) |
 
 ## Rules
 

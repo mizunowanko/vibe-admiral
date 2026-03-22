@@ -13,7 +13,7 @@ export class DockManager extends CommanderManager {
 
   protected getSkillNames(): string[] {
     return [
-      "admiral-protocol",
+      "dock-ship-status",
       "issue-manage",
       "investigate",
       "read-issue",
