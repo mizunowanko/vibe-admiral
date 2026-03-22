@@ -1,23 +1,12 @@
-// === Phase (Ship lifecycle) ===
-// Gate is a phase: planning → planning-gate → implementing → implementing-gate
-// → acceptance-test → acceptance-test-gate → merging → done
-// "error" is a derived state: phase ≠ done && process dead.
-export type Phase =
-  | "planning"
-  | "planning-gate"
-  | "implementing"
-  | "implementing-gate"
-  | "acceptance-test"
-  | "acceptance-test-gate"
-  | "merging"
-  | "done"
-  | "stopped";
+// Phase definitions re-exported from the single source of truth.
+// See shared-phases.ts for the canonical definitions.
+import type { Phase as _Phase, GatePhase as _GatePhase } from "./shared-phases";
+export type Phase = _Phase;
+export type GatePhase = _GatePhase;
+export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
-
-/** Gate phases where Bridge review is required. */
-export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
 
 // === Fleet ===
 export interface FleetRepo {
