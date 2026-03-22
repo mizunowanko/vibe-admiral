@@ -41,10 +41,7 @@ DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBran
   Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
   **アクティブステータスラベルが付いている Issue は絶対に選択しない。**
 
-- ラベル変更:
-  ```bash
-  gh issue edit <番号> --repo "$REPO" --remove-label status/ready --add-label status/implementing
-  ```
+- ラベル変更: Engine が `status/ready` → `status/sortied` の遷移を自動で行うため、スキル側でのラベル操作は不要。
 
 ## Step 2: Worktree 作成
 

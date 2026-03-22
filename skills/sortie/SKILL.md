@@ -70,10 +70,7 @@ Evaluate the issue body (and comments) for:
 | Label | Meaning |
 |-------|---------|
 | `status/ready` | Ready for sortie |
-| `status/planning` | Planning phase |
-| `status/implementing` | Implementation in progress |
-| `status/acceptance-test` | Acceptance testing |
-| `status/merging` | Merge in progress |
+| `status/sortied` | Ship is active |
 | `status/mooring` | Blocked by dependencies |
 
 ### Type labels (`type/` prefix) — set by Bridge or human
@@ -146,4 +143,4 @@ When a sortie candidate has the `priority/critical` label, Bridge MUST discuss t
 - If the human declines the approach, defer the critical issue and sortie only the non-critical candidates.
 - Non-critical candidates in the same batch do NOT need escalation — they proceed normally.
 
-> **NOTE**: The Engine's `getUnblockedTodoIssues()` returns issues pre-sorted by this priority order. Bridge should respect this order.
+> **NOTE**: The Engine's `getUnblockedReadyIssues()` returns issues pre-sorted by this priority order. Bridge should respect this order.

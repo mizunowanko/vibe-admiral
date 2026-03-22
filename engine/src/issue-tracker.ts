@@ -58,7 +58,7 @@ export function sortIssuesByPriority<T extends Issue>(issues: T[]): T[] {
   });
 }
 
-export async function getUnblockedTodoIssues(
+export async function getUnblockedReadyIssues(
   repo: string,
 ): Promise<UnblockedIssue[]> {
   const issues = await github.listIssues(repo, "status/ready");
