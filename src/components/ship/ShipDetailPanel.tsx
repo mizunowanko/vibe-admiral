@@ -1,43 +1,25 @@
 import { useRef, useEffect, useMemo, useCallback } from "react";
 import { useShip } from "@/hooks/useShip";
-import { useShipStore } from "@/stores/shipStore";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { useUIStore } from "@/stores/uiStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
 import { cn } from "@/lib/utils";
+import { ArrowLeft } from "lucide-react";
 
 const LOG_TAIL_LIMIT = 200;
 
-export function ShipDetailModal() {
-  const selectedShipId = useShipStore((s) => s.selectedShipId);
-  const selectShip = useShipStore((s) => s.selectShip);
-
-  return (
-    <Dialog
-      open={!!selectedShipId}
-      onOpenChange={(open) => {
-        if (!open) selectShip(null);
-      }}
-    >
-      {selectedShipId && (
-        <ShipDetailContent shipId={selectedShipId} />
-      )}
-    </Dialog>
-  );
+interface ShipDetailPanelProps {
+  shipId: string;
 }
 
-function ShipDetailContent({ shipId }: { shipId: string }) {
+export function ShipDetailPanel({ shipId }: ShipDetailPanelProps) {
   const { ship, logs } = useShip(shipId);
+  const setViewingShipId = useUIStore((s) => s.setViewingShipId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
 
@@ -71,62 +53,64 @@ function ShipDetailContent({ shipId }: { shipId: string }) {
     : STATUS_CONFIG[ship.phase];
 
   return (
-    <DialogContent className="max-w-[85vw] w-[85vw] h-[85vh] flex flex-col p-0 gap-0">
-      <DialogHeader className="px-6 py-4 border-b border-border shrink-0">
-        <div className="flex items-start justify-between gap-4 pr-8">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0">
-            <DialogTitle className="flex items-center gap-2">
-              <span className="font-mono text-muted-foreground">
-                #{ship.issueNumber}
-              </span>
-              <span className="break-all">
-                {ship.issueTitle || `Issue #${ship.issueNumber}`}
-              </span>
-            </DialogTitle>
-            <Badge className={cn("text-xs px-2 py-0.5", statusConfig.color)}>
-              {statusConfig.animate && (
-                <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-              )}
-              {statusConfig.label}
+    <div className="flex flex-1 flex-col min-h-0">
+      {/* Header */}
+      <div className="px-3 py-2 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 mb-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
+            onClick={() => setViewingShipId(null)}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Button>
+          <span className="font-mono text-xs text-muted-foreground">
+            #{ship.issueNumber}
+          </span>
+          <Badge className={cn("text-[10px] px-1.5 py-0", statusConfig.color)}>
+            {statusConfig.animate && (
+              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+            )}
+            {statusConfig.label}
+          </Badge>
+          {ship.isCompacting && (
+            <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400">
+              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+              Compact
             </Badge>
-            {ship.isCompacting && (
-              <Badge className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400">
-                <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-                Compacting
-              </Badge>
-            )}
-            {ship.gateCheck?.status === "pending" && (
-              <Badge className="text-xs px-2 py-0.5 bg-sky-500/20 text-sky-400">
-                <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-                Gate: {ship.gateCheck.gateType}
-              </Badge>
-            )}
-          </div>
+          )}
+          {ship.gateCheck?.status === "pending" && (
+            <Badge className="text-[10px] px-1.5 py-0 bg-sky-500/20 text-sky-400">
+              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+              Gate
+            </Badge>
+          )}
         </div>
-        <DialogDescription asChild>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground mt-1">
-            <span>Branch: <code className="text-xs">{ship.branchName}</code></span>
-            {ship.prUrl && (
-              <a
-                href={ship.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                PR: {ship.prUrl.split("/").pop()}
-              </a>
-            )}
-            <span className="text-xs">{ship.repo}</span>
-          </div>
-        </DialogDescription>
-      </DialogHeader>
+        <p className="text-xs font-medium truncate pl-8">
+          {ship.issueTitle || `Issue #${ship.issueNumber}`}
+        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground mt-1 pl-8">
+          <span>{ship.repo}</span>
+          {ship.prUrl && (
+            <a
+              href={ship.prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              PR: {ship.prUrl.split("/").pop()}
+            </a>
+          )}
+        </div>
+      </div>
 
       {/* Gate Check Banner */}
       {ship.gateCheck && (
-        <div className="px-6 py-3 border-b border-border shrink-0">
+        <div className="px-3 py-2 border-b border-border shrink-0">
           <div
             className={cn(
-              "rounded-lg border p-3",
+              "rounded-md border p-2 text-xs",
               ship.gateCheck.status === "pending"
                 ? "border-sky-500/50 bg-sky-500/10"
                 : ship.gateCheck.status === "rejected"
@@ -137,7 +121,7 @@ function ShipDetailContent({ shipId }: { shipId: string }) {
             <div className="flex items-center justify-between">
               <span
                 className={cn(
-                  "text-sm font-medium",
+                  "font-medium",
                   ship.gateCheck.status === "pending"
                     ? "text-sky-400"
                     : ship.gateCheck.status === "rejected"
@@ -147,12 +131,12 @@ function ShipDetailContent({ shipId }: { shipId: string }) {
               >
                 Gate: {ship.gateCheck.gatePhase}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-muted-foreground">
                 {ship.gateCheck.gateType} | {ship.gateCheck.status}
               </span>
             </div>
             {ship.gateCheck.feedback && (
-              <p className="text-xs text-muted-foreground mt-2">
+              <p className="text-muted-foreground mt-1">
                 {ship.gateCheck.feedback}
               </p>
             )}
@@ -163,12 +147,12 @@ function ShipDetailContent({ shipId }: { shipId: string }) {
       {/* Logs */}
       <ScrollArea
         ref={scrollRef}
-        className="flex-1 min-h-0 px-6 py-4"
+        className="flex-1 min-h-0 px-3 py-2"
         onScroll={handleScroll}
       >
         <div className="space-y-1">
           {logs.length > LOG_TAIL_LIMIT && (
-            <p className="text-center text-muted-foreground/50 text-xs py-1">
+            <p className="text-center text-muted-foreground/50 text-[10px] py-1">
               Showing last {LOG_TAIL_LIMIT} of {logs.length} entries
             </p>
           )}
@@ -188,12 +172,12 @@ function ShipDetailContent({ shipId }: { shipId: string }) {
             ),
           )}
           {tailLogs.length === 0 && (
-            <p className="text-center text-muted-foreground py-8 text-sm">
+            <p className="text-center text-muted-foreground py-8 text-xs">
               Waiting for output...
             </p>
           )}
         </div>
       </ScrollArea>
-    </DialogContent>
+    </div>
   );
 }

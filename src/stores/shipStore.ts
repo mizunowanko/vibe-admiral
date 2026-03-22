@@ -12,7 +12,6 @@ interface ShipPhaseData {
 interface ShipState {
   ships: Map<string, Ship>;
   shipLogs: Map<string, StreamMessage[]>;
-  selectedShipId: string | null;
 
   addShip: (ship: Partial<Ship> & { id: string; phase: Phase }) => void;
   setShipPhase: (id: string, phase: Phase, extra?: ShipPhaseData) => void;
@@ -21,7 +20,6 @@ interface ShipState {
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
-  selectShip: (id: string | null) => void;
 
   syncShips: (ships: Ship[]) => void;
   fetchShips: () => void;
@@ -34,7 +32,6 @@ interface ShipState {
 export const useShipStore = create<ShipState>((set) => ({
   ships: new Map(),
   shipLogs: new Map(),
-  selectedShipId: null,
 
   addShip: (shipData) => {
     set((state) => {
@@ -152,7 +149,6 @@ export const useShipStore = create<ShipState>((set) => ({
     });
   },
 
-  selectShip: (id) => set({ selectedShipId: id }),
 
   syncShips: (shipList) => {
     set((state) => {

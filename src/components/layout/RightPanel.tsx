@@ -1,37 +1,38 @@
 import { memo, useState, useMemo, useRef } from "react";
+import { useUIStore } from "@/stores/uiStore";
 import { useShipStore } from "@/stores/shipStore";
-import { ShipDetailModal } from "@/components/ship/ShipDetailModal";
+import { Bridge } from "@/components/bridge/Bridge";
+import { ShipDetailPanel } from "@/components/ship/ShipDetailPanel";
+import { ActiveShipSummary } from "@/components/ship/ActiveShipSummary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
-import { Square } from "lucide-react";
-import type { Ship } from "@/types";
+import { Flag, Anchor, Ship as ShipIcon, Square } from "lucide-react";
+import type { Ship, RightPanelTab } from "@/types";
 
-interface BridgeShipBarProps {
+interface RightPanelProps {
   fleetId: string;
 }
 
-/**
- * Build a stable fingerprint for a fleet's ship list.
- * Only re-renders when ships relevant to this fleet actually change.
- */
+const TABS: Array<{ key: RightPanelTab; label: string; icon: typeof Flag }> = [
+  { key: "flagship", label: "Flagship", icon: Flag },
+  { key: "dock", label: "Dock", icon: Anchor },
+  { key: "ships", label: "Ships", icon: ShipIcon },
+];
+
 function buildFleetShipFingerprint(ships: Ship[]): string {
   return ships
     .map((s) => `${s.id}:${s.phase}:${s.issueNumber}:${s.issueTitle}:${s.isCompacting}:${s.gateCheck?.status ?? ""}:${s.processDead ?? false}:${s.repo}`)
     .join("|");
 }
 
-export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
-  const selectedShipId = useShipStore((s) => s.selectedShipId);
-  const selectShip = useShipStore((s) => s.selectShip);
+function ShipsTabContent({ fleetId }: { fleetId: string }) {
   const stopShip = useShipStore((s) => s.stopShip);
+  const setViewingShipId = useUIStore((s) => s.setViewingShipId);
   const [showCompleted, setShowCompleted] = useState(false);
 
-  // Use a fingerprint-based selector to avoid re-renders when unrelated ships change.
-  // The selector extracts fleet-specific ships and returns a stable reference
-  // as long as the ships' display-relevant fields haven't changed.
   const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
   const allFleetShips = useShipStore((s) => {
     const filtered = Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId);
@@ -52,10 +53,10 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
   );
 
   return (
-    <div className="w-72 shrink-0 border-l border-border bg-background/50 flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          Ships ({fleetShips.length})
+    <div className="flex flex-1 flex-col min-h-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+        <span className="text-xs font-medium text-muted-foreground">
+          {fleetShips.length} ship{fleetShips.length !== 1 ? "s" : ""}
         </span>
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input
@@ -79,18 +80,15 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
               ? PROCESS_DEAD_CONFIG
               : STATUS_CONFIG[ship.phase];
             const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
-            const isSelected = ship.id === selectedShipId;
 
             return (
               <div
                 key={ship.id}
-                onClick={() => selectShip(isSelected ? null : ship.id)}
+                onClick={() => setViewingShipId(ship.id)}
                 className={cn(
                   "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
                   ship.gateCheck?.status === "pending" &&
                     "border-sky-500/50 ring-1 ring-sky-500/20",
-                  isSelected &&
-                    "border-primary/70 bg-primary/5",
                 )}
               >
                 <div className="flex items-center justify-between gap-2 mb-1">
@@ -142,8 +140,62 @@ export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShip
           })}
         </div>
       </ScrollArea>
+    </div>
+  );
+}
 
-      <ShipDetailModal />
+export const RightPanel = memo(function RightPanel({ fleetId }: RightPanelProps) {
+  const rightPanelTab = useUIStore((s) => s.rightPanelTab);
+  const setRightPanelTab = useUIStore((s) => s.setRightPanelTab);
+  const viewingShipId = useUIStore((s) => s.viewingShipId);
+
+  return (
+    <div className="w-[420px] shrink-0 border-l border-border bg-background/50 flex flex-col min-h-0">
+      {/* Active Ship Summary — always visible */}
+      <ActiveShipSummary fleetId={fleetId} />
+
+      {/* Ship Detail Panel (replaces tab content when viewing a ship) */}
+      {viewingShipId ? (
+        <ShipDetailPanel shipId={viewingShipId} />
+      ) : (
+        <>
+          {/* Tab Bar */}
+          <div className="flex border-b border-border shrink-0">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = rightPanelTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setRightPanelTab(tab.key)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px flex-1 justify-center",
+                    active
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
+                  )}
+                >
+                  <Icon className="h-3 w-3" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Tab Content */}
+          <div className="flex flex-1 flex-col min-h-0">
+            {rightPanelTab === "flagship" && (
+              <Bridge fleetId={fleetId} role="flagship" />
+            )}
+            {rightPanelTab === "dock" && (
+              <Bridge fleetId={fleetId} role="dock" />
+            )}
+            {rightPanelTab === "ships" && (
+              <ShipsTabContent fleetId={fleetId} />
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 });
