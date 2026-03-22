@@ -168,6 +168,9 @@ export class FleetDatabase {
 
     const repoId = this.ensureRepo(owner, name);
 
+    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict
+    this.db.prepare(`DELETE FROM ships WHERE repo_id = ? AND issue_number = ?`).run(repoId, ship.issueNumber);
+
     this.db.prepare(`
       INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

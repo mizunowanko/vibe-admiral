@@ -75,7 +75,7 @@ export class ShipManager {
     if (this.fleetDb) {
       const allShips = this.fleetDb.getAllShips();
       for (const ship of allShips) {
-        if (ship.phase === "done") {
+        if (ship.phase === "done" || ship.phase === "stopped") {
           this.runtime.delete(ship.id);
           this.fleetDb.deleteShip(ship.id);
         }
@@ -539,7 +539,7 @@ export class ShipManager {
     try {
       this.fleetDb.upsertShip(ship);
     } catch (err) {
-      console.warn("[ship-manager] Failed to persist ship to database:", err);
+      console.error(`[ShipManager] CRITICAL: Failed to persist ship ${ship.id} (issue #${ship.issueNumber}) to DB:`, err);
     }
   }
 
