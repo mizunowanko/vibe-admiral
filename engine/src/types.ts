@@ -90,6 +90,8 @@ export interface FleetRepo {
 export interface FleetSkillSources {
   implement?: string;
   devSharedDir?: string;
+  /** Absolute path to the Admiral repo's skills/ directory. Auto-populated by Engine. */
+  admiralSkillsDir?: string;
 }
 
 export interface Fleet {

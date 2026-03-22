@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import type { StatusManager } from "./status-manager.js";
@@ -429,22 +429,67 @@ export class ShipManager {
     if (rt) rt.gateCheck = null;
   }
 
+  /**
+   * Check whether a file exists (non-throwing).
+   */
+  private async fileExists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Deploy a single skill to the worktree, skipping if the repo already provides it.
+   * Returns true if deployed, false if skipped (repo skill preserved).
+   */
+  private async deploySkill(
+    skillName: string,
+    srcPath: string,
+    worktreePath: string,
+  ): Promise<boolean> {
+    const dest = join(worktreePath, ".claude", "skills", skillName, "SKILL.md");
+
+    // Preserve repo-specific skill: if the worktree already has this skill
+    // (inherited from git tracked files), do not overwrite it.
+    if (await this.fileExists(dest)) {
+      console.log(`[ship-manager] Skipping /${skillName} — repo-specific skill preserved`);
+      return false;
+    }
+
+    const destDir = join(worktreePath, ".claude", "skills", skillName);
+    await mkdir(destDir, { recursive: true });
+    await copyFile(srcPath, dest);
+    return true;
+  }
+
   private async deploySkills(
     repoRoot: string,
     worktreePath: string,
     skillSources?: FleetSkillSources,
   ): Promise<void> {
-    // Copy /implement orchestrator + sub-skills from the main repo's skills/
-    // The orchestrator is essential for Ship operation — failure is fatal.
+    // Resolve the Admiral skills directory.
+    // admiralSkillsDir is auto-populated by resolveFleetContext(); fall back to
+    // repoRoot/skills for backward compatibility (e.g., Admiral-only fleets).
+    const admiralSkillsDir = skillSources?.admiralSkillsDir
+      ?? join(repoRoot, "skills");
+
+    // Deploy /implement orchestrator (essential for Ship operation).
+    // skillSources.implement override takes priority over admiralSkillsDir.
     const implementSrc = skillSources?.implement
       ? join(skillSources.implement, "SKILL.md")
-      : join(repoRoot, "skills", "implement", "SKILL.md");
-    const implementDestDir = join(worktreePath, ".claude", "skills", "implement");
-    await mkdir(implementDestDir, { recursive: true });
-    await copyFile(implementSrc, join(implementDestDir, "SKILL.md"));
+      : join(admiralSkillsDir, "implement", "SKILL.md");
+    try {
+      await this.deploySkill("implement", implementSrc, worktreePath);
+    } catch (err) {
+      // Fatal: /implement is required for Ship operation
+      throw new Error(`Failed to deploy /implement skill: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
-    // Deploy Ship sub-skills and shared skills from repo's skills/ (non-fatal individually)
-    const repoSkills = [
+    // Deploy Admiral sub-skills and shared skills (non-fatal individually)
+    const admiralSkills = [
       // Ship sub-skills
       "implement-setup",
       "implement-plan",
@@ -457,15 +502,13 @@ export class ShipManager {
       // Shared skills (Bridge/Ship common)
       "admiral-protocol",
       "read-issue",
-      // Other repo skills
+      // Other Admiral skills
       "adr",
     ];
-    for (const skillName of repoSkills) {
-      const src = join(repoRoot, "skills", skillName, "SKILL.md");
-      const destDir = join(worktreePath, ".claude", "skills", skillName);
+    for (const skillName of admiralSkills) {
+      const src = join(admiralSkillsDir, skillName, "SKILL.md");
       try {
-        await mkdir(destDir, { recursive: true });
-        await copyFile(src, join(destDir, "SKILL.md"));
+        await this.deploySkill(skillName, src, worktreePath);
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill`);
       }
@@ -478,10 +521,8 @@ export class ShipManager {
     const devSharedSkills = ["review-pr", "second-opinion", "test", "refactor"];
     for (const skillName of devSharedSkills) {
       const src = join(devSharedDir, skillName, "SKILL.md");
-      const destDir = join(worktreePath, ".claude", "skills", skillName);
       try {
-        await mkdir(destDir, { recursive: true });
-        await copyFile(src, join(destDir, "SKILL.md"));
+        await this.deploySkill(skillName, src, worktreePath);
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill from dev-shared`);
       }
