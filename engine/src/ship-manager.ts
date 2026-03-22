@@ -128,7 +128,7 @@ export class ShipManager {
     await this.deploySkills(repoRoot, worktreePath, skillSources);
 
     // 5b. Write minimal CLAUDE.md for external repos (overrides vibe-admiral's CLAUDE.md)
-    await this.deployCLAUDEmd(localPath, repoRoot, worktreePath);
+    await this.deployCLAUDEmd(repoRoot, worktreePath);
 
     // 6. Remove stale workflow-state.json from previous sortie
     await unlink(join(worktreePath, ".claude", "workflow-state.json")).catch(() => {});
@@ -480,45 +480,49 @@ export class ShipManager {
 
   /**
    * For external repos, replace the inherited CLAUDE.md with a minimal Ship template.
-   * When a worktree is created from an external repo, the repo's own CLAUDE.md (if any)
-   * is inherited — which is correct. But vibe-admiral's CLAUDE.md should NOT appear.
+   * Worktrees inherit CLAUDE.md from the git tree they branch from. When the
+   * worktree's main repo (the repo that owns the .worktrees/ directory) differs
+   * from the target repo (`localPath`), the inherited CLAUDE.md belongs to the
+   * wrong project. In that case, copy the target repo's CLAUDE.md or write a
+   * minimal Ship template.
    *
-   * Detection: if localPath's git root differs from the Engine's own repo root
-   * (i.e. the repo containing skills/), the Ship targets an external repo.
-   * In that case, write a minimal CLAUDE.md that only contains VIBE_ADMIRAL env var docs.
+   * Detection: compare the worktree's main working tree (via `git worktree list`)
+   * with `localPath`'s git root. If they differ, it's an external repo.
    */
   private async deployCLAUDEmd(
-    localPath: string,
     repoRoot: string,
     worktreePath: string,
   ): Promise<void> {
-    // Determine if this is an external repo by checking whether the worktree
-    // was created inside the localPath repo or somewhere else.
-    // repoRoot = git root of the repo being worked on (from localPath)
-    // worktreePath = always inside repoRoot/.worktrees/
-    // If the target repo has its own CLAUDE.md, the worktree will inherit it.
-    // We only need to act when:
-    //   - The worktree inherits a CLAUDE.md from a DIFFERENT repo than localPath
-    //   - This happens when worktrees are created under the vibe-admiral repo
-    //     for issues belonging to external repos
-
-    // Check if the worktree path is under the localPath's repo root
-    const worktreeIsUnderLocalRepo = worktreePath.startsWith(repoRoot);
-    if (worktreeIsUnderLocalRepo) {
-      // Worktree is inside the target repo — CLAUDE.md is correct
+    // Find the main working tree that owns this worktree.
+    // `git worktree list --porcelain` lists the main tree first.
+    let mainRepoRoot: string;
+    try {
+      const { stdout } = await execFileAsync(
+        "git", ["worktree", "list", "--porcelain"],
+        { cwd: worktreePath },
+      );
+      const firstLine = stdout.split("\n")[0] ?? "";
+      mainRepoRoot = firstLine.replace("worktree ", "");
+    } catch {
+      // Cannot determine — assume worktree is within the correct repo
       return;
     }
 
-    // Worktree is outside the target repo (e.g., under vibe-admiral's tree).
-    // Copy the external repo's CLAUDE.md if it exists, otherwise write a minimal one.
-    const externalClaudeMd = join(localPath, "CLAUDE.md");
+    // If the main repo root matches localPath's repo root, the CLAUDE.md is correct
+    if (mainRepoRoot === repoRoot) {
+      return;
+    }
+
+    // Worktree belongs to a different repo than the target (e.g., vibe-admiral
+    // hosts worktrees for external repos). Replace CLAUDE.md.
+    const externalClaudeMd = join(repoRoot, "CLAUDE.md");
     const destClaudeMd = join(worktreePath, "CLAUDE.md");
 
     try {
       await copyFile(externalClaudeMd, destClaudeMd);
-      console.log(`[ship-manager] Copied external repo CLAUDE.md to worktree`);
+      console.log(`[ship-manager] Copied target repo CLAUDE.md to worktree`);
     } catch {
-      // No CLAUDE.md in external repo — write minimal Ship template
+      // No CLAUDE.md in target repo — write minimal Ship template
       await writeFile(destClaudeMd, SHIP_MINIMAL_CLAUDE_MD);
       console.log(`[ship-manager] Wrote minimal CLAUDE.md for external repo Ship`);
     }
