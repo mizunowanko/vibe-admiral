@@ -155,8 +155,16 @@ export class ShipManager {
       lastOutputAt: null,
     };
 
-    // Persist to DB first (DB is SSoT for display data)
-    this.persistToDb(ship);
+    // Persist to DB first — DB record is a precondition for process spawn.
+    // If INSERT fails, we must NOT launch the CLI process (prevents orphans).
+    try {
+      this.persistToDb(ship);
+    } catch (err) {
+      console.error(`[ship-manager] DB INSERT failed for ship ${shipId} (issue #${issueNumber}):`, err);
+      // Roll back: remove worktree created in step 3
+      await worktree.remove(worktreePath).catch(() => {});
+      throw new Error(`Failed to persist ship to DB for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     // Store runtime state in memory
     this.runtime.set(shipId, {
@@ -541,14 +549,11 @@ export class ShipManager {
 
   /**
    * Persist a ship's state to the database.
+   * Throws on failure — callers MUST handle the error to prevent orphan processes.
    */
   private persistToDb(ship: ShipProcess): void {
     if (!this.fleetDb) return;
-    try {
-      this.fleetDb.upsertShip(ship);
-    } catch (err) {
-      console.error(`[ShipManager] CRITICAL: Failed to persist ship ${ship.id} (issue #${ship.issueNumber}) to DB:`, err);
-    }
+    this.fleetDb.upsertShip(ship);
   }
 
   /**
