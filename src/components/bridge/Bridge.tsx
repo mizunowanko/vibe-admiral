@@ -182,6 +182,7 @@ export const Bridge = memo(function Bridge({ fleetId, role }: CommanderChatProps
       <BridgeInput
         onSend={pendingQuestion ? answerQuestion : sendMessage}
         disabled={!engineConnected}
+        draftKey={`${role}-input`}
         placeholder={
           !engineConnected
             ? "Engine disconnected"

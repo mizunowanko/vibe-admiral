@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Send, X, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/stores/uiStore";
 import type { ImageAttachment } from "@/types";
 
 const ACCEPTED_TYPES = new Set([
@@ -53,6 +54,8 @@ interface BridgeInputProps {
   onSend: (message: string, images?: ImageAttachment[]) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** Key used to persist the draft text in UI store across remounts. */
+  draftKey?: string;
 }
 
 const MAX_ROWS = 6;
@@ -63,8 +66,11 @@ export function BridgeInput({
   onSend,
   disabled,
   placeholder = "Send a command to the Bridge...",
+  draftKey,
 }: BridgeInputProps) {
-  const [value, setValue] = useState("");
+  const storedDraft = useUIStore((s) => draftKey ? s.inputDrafts[draftKey] ?? "" : "");
+  const setInputDraft = useUIStore((s) => s.setInputDraft);
+  const [value, setValue] = useState(storedDraft);
   const [images, setImages] = useState<PreviewAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -137,7 +143,8 @@ export function BridgeInput({
     for (const img of images) URL.revokeObjectURL(img.objectUrl);
     setValue("");
     setImages([]);
-  }, [value, images, onSend]);
+    if (draftKey) setInputDraft(draftKey, "");
+  }, [value, images, onSend, draftKey, setInputDraft]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -150,8 +157,10 @@ export function BridgeInput({
   );
 
   const handleChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setValue(e.target.value);
-  }, []);
+    const v = e.target.value;
+    setValue(v);
+    if (draftKey) setInputDraft(draftKey, v);
+  }, [draftKey, setInputDraft]);
 
   const handlePaste = useCallback(
     (e: ClipboardEvent<HTMLTextAreaElement>) => {

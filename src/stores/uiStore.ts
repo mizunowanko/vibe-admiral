@@ -10,6 +10,8 @@ interface UIState {
   viewingShipId: string | null;
   sidebarOpen: boolean;
   engineConnected: boolean;
+  /** Per-role input drafts preserved across component remounts. */
+  inputDrafts: Record<string, string>;
 
   setMainView: (view: MainView) => void;
   setActiveCommanderTab: (tab: CommanderRole) => void;
@@ -17,6 +19,7 @@ interface UIState {
   setViewingShipId: (id: string | null) => void;
   toggleSidebar: () => void;
   setEngineConnected: (connected: boolean) => void;
+  setInputDraft: (key: string, value: string) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -26,6 +29,7 @@ export const useUIStore = create<UIState>((set) => ({
   viewingShipId: null,
   sidebarOpen: true,
   engineConnected: false,
+  inputDrafts: {},
 
   setMainView: (view) => set({ mainView: view }),
   setActiveCommanderTab: (tab) => set({ activeCommanderTab: tab }),
@@ -39,4 +43,6 @@ export const useUIStore = create<UIState>((set) => ({
   setViewingShipId: (id) => set({ viewingShipId: id }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setEngineConnected: (connected) => set({ engineConnected: connected }),
+  setInputDraft: (key, value) =>
+    set((s) => ({ inputDrafts: { ...s.inputDrafts, [key]: value } })),
 }));

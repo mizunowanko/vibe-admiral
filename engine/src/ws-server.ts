@@ -538,7 +538,7 @@ export class EngineServer {
           break;
         }
         case "flagship:history": {
-          this.handleCommanderHistory(ws, data, "flagship");
+          await this.handleCommanderHistory(ws, data, "flagship");
           break;
         }
 
@@ -552,7 +552,7 @@ export class EngineServer {
           break;
         }
         case "dock:history": {
-          this.handleCommanderHistory(ws, data, "dock");
+          await this.handleCommanderHistory(ws, data, "dock");
           break;
         }
 
@@ -965,14 +965,16 @@ export class EngineServer {
     }
   }
 
-  private handleCommanderHistory(
+  private async handleCommanderHistory(
     ws: WebSocket,
     data: Record<string, unknown>,
     role: CommanderRole,
-  ): void {
+  ): Promise<void> {
     const manager = role === "flagship" ? this.flagshipManager : this.dockManager;
     const fleetId = data.fleetId as string;
-    const history = manager.getHistory(fleetId);
+    // Use disk fallback so history is available even after Engine restart
+    // (before the Commander process is re-launched by a user message).
+    const history = await manager.getHistoryWithDiskFallback(fleetId);
     this.sendTo(ws, {
       type: `${role}:stream`,
       data: {
