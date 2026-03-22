@@ -67,6 +67,9 @@ export interface GateCheckState {
   feedback?: string;
 }
 
+// === Ship Kind ===
+export type ShipKind = "ship" | "escort";
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -86,6 +89,10 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   retryCount: number;
   createdAt: string;
+  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
+  kind?: ShipKind;
+  /** For escort Ships, the ID of the parent Ship being reviewed. */
+  parentShipId?: string | null;
 }
 
 // === Issue ===

@@ -119,6 +119,9 @@ export interface Fleet {
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
+// === Ship Kind ===
+export type ShipKind = "ship" | "escort";
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -138,6 +141,10 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   retryCount: number;
   createdAt: string;
+  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
+  kind: ShipKind;
+  /** For escort Ships, the ID of the parent Ship being reviewed. */
+  parentShipId: string | null;
 }
 
 // === Issue ===
@@ -267,6 +274,10 @@ export interface ShipProcess {
   lastOutputAt: number | null;
   /** Whether this Ship's process has died without reaching "done". Derived state. */
   processDead?: boolean;
+  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
+  kind: ShipKind;
+  /** For escort Ships, the ID of the parent Ship being reviewed. */
+  parentShipId: string | null;
 }
 
 // === Commander Role (Dock or Flagship) ===

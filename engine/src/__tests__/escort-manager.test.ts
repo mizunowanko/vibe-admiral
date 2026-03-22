@@ -4,7 +4,6 @@ import { EscortManager } from "../escort-manager.js";
 type MockProcessManager = {
   isRunning: ReturnType<typeof vi.fn>;
   kill: ReturnType<typeof vi.fn>;
-  launchEscort: ReturnType<typeof vi.fn>;
 };
 
 type MockShipManager = {
@@ -12,6 +11,9 @@ type MockShipManager = {
   getDbPath: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
   syncPhaseFromDb: ReturnType<typeof vi.fn>;
+  sortieEscort: ReturnType<typeof vi.fn>;
+  isEscort: ReturnType<typeof vi.fn>;
+  getEscortForShip: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Record<string, unknown> = {}) {
@@ -20,6 +22,20 @@ function makeShip(overrides: Record<string, unknown> = {}) {
     repo: "owner/repo",
     issueNumber: 42,
     worktreePath: "/repo/.worktrees/feature/42-test",
+    kind: "ship",
+    parentShipId: null,
+    ...overrides,
+  };
+}
+
+function makeEscortShip(parentShipId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: "escort-001",
+    repo: "owner/repo",
+    issueNumber: 42,
+    worktreePath: "/repo/.worktrees/feature/42-test",
+    kind: "escort",
+    parentShipId,
     ...overrides,
   };
 }
@@ -33,13 +49,15 @@ describe("EscortManager", () => {
     mockProcessManager = {
       isRunning: vi.fn().mockReturnValue(false),
       kill: vi.fn().mockReturnValue(true),
-      launchEscort: vi.fn(),
     };
     mockShipManager = {
       getShip: vi.fn().mockReturnValue(makeShip()),
       getDbPath: vi.fn().mockReturnValue("/tmp/fleet.db"),
       clearGateCheck: vi.fn(),
       syncPhaseFromDb: vi.fn(),
+      sortieEscort: vi.fn().mockReturnValue(makeEscortShip("ship-001")),
+      isEscort: vi.fn().mockReturnValue(false),
+      getEscortForShip: vi.fn().mockReturnValue(undefined),
     };
     escortManager = new EscortManager(
       mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
@@ -49,98 +67,49 @@ describe("EscortManager", () => {
   });
 
   describe("launchEscort", () => {
-    it("launches an Escort for a gate phase", () => {
-      const escortId = escortManager.launchEscort(
-        "ship-001",
-        "planning-gate",
-        "plan-review",
-      );
+    it("launches a persistent Escort via ShipManager.sortieEscort", () => {
+      const escortId = escortManager.launchEscort("ship-001");
 
-      expect(escortId).toBe("escort-ship-001-planning-gate");
-      expect(mockProcessManager.launchEscort).toHaveBeenCalledWith(
-        "escort-ship-001-planning-gate",
-        "/repo/.worktrees/feature/42-test",
-        "planning-gate",
-        42,
-        {
-          VIBE_ADMIRAL_SHIP_ID: "ship-001",
-          VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
-          VIBE_ADMIRAL_ENGINE_PORT: "9721",
-        },
-      );
+      expect(escortId).toBe("escort-001");
+      expect(mockShipManager.sortieEscort).toHaveBeenCalledWith(makeShip());
     });
 
-    it("maps implementing-gate to implementing-gate skill", () => {
-      escortManager.launchEscort("ship-001", "implementing-gate", "code-review");
-
-      expect(mockProcessManager.launchEscort).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
-        "implementing-gate",
-        expect.any(Number),
-        expect.any(Object),
-      );
-    });
-
-    it("prevents duplicate Escorts for the same Ship", () => {
+    it("prevents duplicate Escorts for the same parent Ship", () => {
       // First launch succeeds
-      const first = escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
+      const first = escortManager.launchEscort("ship-001");
       expect(first).not.toBeNull();
 
       // Second launch is blocked because the Escort process is running
       mockProcessManager.isRunning.mockReturnValue(true);
-      const second = escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
+      const second = escortManager.launchEscort("ship-001");
       expect(second).toBeNull();
     });
 
     it("allows re-launch after previous Escort has exited", () => {
       // First launch
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
+      escortManager.launchEscort("ship-001");
 
       // Escort exits
       mockProcessManager.isRunning.mockReturnValue(false);
-      escortManager.onEscortExit("escort-ship-001-planning-gate", 0);
+      escortManager.onEscortExit("escort-001", 0);
 
       // Re-launch should succeed
-      const escortId = escortManager.launchEscort("ship-001", "implementing-gate", "code-review");
-      expect(escortId).not.toBeNull();
+      const newEscort = makeEscortShip("ship-001", { id: "escort-002" });
+      mockShipManager.sortieEscort.mockReturnValue(newEscort);
+      const escortId = escortManager.launchEscort("ship-001");
+      expect(escortId).toBe("escort-002");
     });
 
-    it("returns null if Ship not found", () => {
+    it("returns null if parent Ship not found", () => {
       mockShipManager.getShip.mockReturnValue(undefined);
-      const result = escortManager.launchEscort("non-existent", "planning-gate", "plan-review");
+      const result = escortManager.launchEscort("non-existent");
       expect(result).toBeNull();
-    });
-
-    it("does not pass VIBE_ADMIRAL_DB_PATH (API-based communication)", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
-
-      const envArg = mockProcessManager.launchEscort.mock.calls[0]![4] as Record<string, string>;
-      expect(envArg).not.toHaveProperty("VIBE_ADMIRAL_DB_PATH");
-    });
-  });
-
-  describe("getEscort", () => {
-    it("returns Escort info after launch", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
-      const info = escortManager.getEscort("ship-001");
-      expect(info).toEqual({
-        escortId: "escort-ship-001-planning-gate",
-        shipId: "ship-001",
-        gatePhase: "planning-gate",
-        gateType: "plan-review",
-        startedAt: expect.any(String),
-      });
-    });
-
-    it("returns undefined for Ship without Escort", () => {
-      expect(escortManager.getEscort("ship-001")).toBeUndefined();
     });
   });
 
   describe("isEscortRunning", () => {
     it("returns true when Escort process is running", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
+      escortManager.launchEscort("ship-001");
       mockProcessManager.isRunning.mockReturnValue(true);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(true);
@@ -151,21 +120,29 @@ describe("EscortManager", () => {
     });
 
     it("returns false when Escort process has died", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
+      escortManager.launchEscort("ship-001");
       mockProcessManager.isRunning.mockReturnValue(false);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(false);
+    });
+
+    it("checks DB for restored Escort when not in memory", () => {
+      const escort = makeEscortShip("ship-001", { id: "restored-escort" });
+      mockShipManager.getEscortForShip.mockReturnValue(escort);
+      mockProcessManager.isRunning.mockReturnValue(true);
+
+      expect(escortManager.isEscortRunning("ship-001")).toBe(true);
+      expect(mockShipManager.getEscortForShip).toHaveBeenCalledWith("ship-001");
     });
   });
 
   describe("killEscort", () => {
     it("kills the running Escort and removes tracking", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
+      escortManager.launchEscort("ship-001");
       const killed = escortManager.killEscort("ship-001");
 
       expect(killed).toBe(true);
-      expect(mockProcessManager.kill).toHaveBeenCalledWith("escort-ship-001-planning-gate");
-      expect(escortManager.getEscort("ship-001")).toBeUndefined();
+      expect(mockProcessManager.kill).toHaveBeenCalledWith("escort-001");
     });
 
     it("returns false for Ship without Escort", () => {
@@ -174,31 +151,49 @@ describe("EscortManager", () => {
   });
 
   describe("isEscortProcess", () => {
-    it("identifies Escort process IDs", () => {
-      expect(escortManager.isEscortProcess("escort-abc-planning-gate")).toBe(true);
+    it("delegates to shipManager.isEscort", () => {
+      mockShipManager.isEscort.mockReturnValue(true);
+      expect(escortManager.isEscortProcess("some-id")).toBe(true);
+      expect(mockShipManager.isEscort).toHaveBeenCalledWith("some-id");
+    });
+
+    it("returns false for non-escort ships", () => {
+      mockShipManager.isEscort.mockReturnValue(false);
       expect(escortManager.isEscortProcess("ship-001")).toBe(false);
-      expect(escortManager.isEscortProcess("flagship-1")).toBe(false);
     });
   });
 
   describe("findShipIdByEscortId", () => {
-    it("finds the Ship ID for an active Escort", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
-      const shipId = escortManager.findShipIdByEscortId("escort-ship-001-planning-gate");
+    it("finds the parent Ship ID for an active Escort", () => {
+      escortManager.launchEscort("ship-001");
+      const shipId = escortManager.findShipIdByEscortId("escort-001");
       expect(shipId).toBe("ship-001");
     });
 
-    it("returns undefined for unknown Escort ID", () => {
+    it("falls back to DB lookup for unknown Escort ID", () => {
+      mockShipManager.getShip.mockReturnValue(
+        makeEscortShip("ship-001", { id: "db-escort" }),
+      );
+      const shipId = escortManager.findShipIdByEscortId("db-escort");
+      expect(shipId).toBe("ship-001");
+    });
+
+    it("returns undefined for unknown Escort ID with no DB match", () => {
+      mockShipManager.getShip.mockReturnValue(undefined);
       expect(escortManager.findShipIdByEscortId("unknown")).toBeUndefined();
     });
   });
 
   describe("onEscortExit", () => {
     it("cleans up tracking state on exit", () => {
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
-      escortManager.onEscortExit("escort-ship-001-planning-gate", 0);
+      escortManager.launchEscort("ship-001");
+      escortManager.onEscortExit("escort-001", 0);
 
-      expect(escortManager.getEscort("ship-001")).toBeUndefined();
+      // Should allow re-launch
+      const newEscort = makeEscortShip("ship-001", { id: "escort-002" });
+      mockShipManager.sortieEscort.mockReturnValue(newEscort);
+      const escortId = escortManager.launchEscort("ship-001");
+      expect(escortId).toBe("escort-002");
     });
 
     it("is a no-op for unknown Escort IDs", () => {
@@ -213,15 +208,16 @@ describe("EscortManager", () => {
       mockShipManager.getShip
         .mockReturnValueOnce(makeShip({ id: "ship-001" }))
         .mockReturnValueOnce(makeShip({ id: "ship-002", issueNumber: 43 }));
+      mockShipManager.sortieEscort
+        .mockReturnValueOnce(makeEscortShip("ship-001", { id: "escort-a" }))
+        .mockReturnValueOnce(makeEscortShip("ship-002", { id: "escort-b" }));
 
-      escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
-      escortManager.launchEscort("ship-002", "implementing-gate", "code-review");
+      escortManager.launchEscort("ship-001");
+      escortManager.launchEscort("ship-002");
 
       escortManager.killAll();
 
       expect(mockProcessManager.kill).toHaveBeenCalledTimes(2);
-      expect(escortManager.getEscort("ship-001")).toBeUndefined();
-      expect(escortManager.getEscort("ship-002")).toBeUndefined();
     });
   });
 });

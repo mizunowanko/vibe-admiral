@@ -95,52 +95,6 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Launch an Escort process for gate review (planning-gate, implementing-gate, etc.).
-   * Escorts are non-interactive (-p mode) like Ships, but run a gate skill
-   * instead of /implement. Launched by EscortManager when Engine detects
-   * a gate phase.
-   */
-  launchEscort(
-    id: string,
-    worktreePath: string,
-    skill: string,
-    issueNumber: number,
-    extraEnv?: Record<string, string>,
-  ): ChildProcess {
-    // Same stdio constraints as sortie() — see .claude/rules/cli-subprocess.md.
-    const args = [
-      "-p",
-      `/${skill} ${issueNumber}`,
-      "--output-format",
-      "stream-json",
-      "--dangerously-skip-permissions",
-      "--disallowedTools",
-      "EnterPlanMode,ExitPlanMode,AskUserQuestion",
-      "--max-turns",
-      "100",
-      "--verbose",
-    ];
-
-    const proc = spawn(
-      "claude",
-      args,
-      {
-        cwd: worktreePath,
-        env: {
-          ...process.env,
-          VIBE_ADMIRAL: "true",
-          ...extraEnv,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-
-    const logFilePath = join(worktreePath, ".claude", "escort-log.jsonl");
-    this.setupProcess(id, proc, logFilePath);
-    return proc;
-  }
-
-  /**
    * Launch an interactive commander session (Dock or Flagship).
    * Both roles use the same CLI config — they differ only in system prompt and skills.
    */

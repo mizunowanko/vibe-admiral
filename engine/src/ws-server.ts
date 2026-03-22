@@ -184,12 +184,25 @@ export class EngineServer {
 
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
-      // Route Escort stream data to frontend (separate from Ship stream)
+      // Route Escort-Ship stream data to frontend (separate from Ship stream)
       if (this.escortManager.isEscortProcess(id)) {
-        const shipId = this.escortManager.findShipIdByEscortId(id);
-        if (shipId) {
-          const ship = this.shipManager.getShip(shipId);
+        const parentShipId = this.escortManager.findShipIdByEscortId(id);
+        if (parentShipId) {
+          const parentShip = this.shipManager.getShip(parentShipId);
           const parsed = parseStreamMessage(msg);
+
+          // Update Escort-Ship's lastOutputAt for Lookout
+          this.shipManager.setLastOutputAt(id, Date.now());
+
+          // Extract sessionId from Escort init messages
+          const sessionId = extractSessionId(msg);
+          if (sessionId) {
+            const escort = this.shipManager.getShip(id);
+            if (escort && !escort.sessionId) {
+              this.shipManager.setSessionId(id, sessionId);
+            }
+          }
+
           if (parsed && parsed.type !== "result") {
             // Mark assistant messages with escort-log metadata for visual distinction
             if (parsed.type === "assistant") {
@@ -201,10 +214,10 @@ export class EngineServer {
             this.broadcast({
               type: "escort:stream",
               data: {
-                id: shipId,
+                id: parentShipId,
                 escortId: id,
-                fleetId: ship?.fleetId,
-                issueNumber: ship?.issueNumber,
+                fleetId: parentShip?.fleetId,
+                issueNumber: parentShip?.issueNumber,
                 message: parsed,
               },
             });
@@ -317,40 +330,40 @@ export class EngineServer {
     });
 
     this.processManager.on("exit", (id: string, code: number | null) => {
-      // Handle Escort process exit
+      // Handle Escort-Ship process exit
       if (this.escortManager.isEscortProcess(id)) {
-        const shipId = this.escortManager.findShipIdByEscortId(id);
+        const parentShipId = this.escortManager.findShipIdByEscortId(id);
         this.escortManager.onEscortExit(id, code);
-        if (shipId) {
-          const ship = this.shipManager.getShip(shipId);
+        if (parentShipId) {
+          const parentShip = this.shipManager.getShip(parentShipId);
           this.broadcast({
             type: "escort:completed",
             data: {
-              id: shipId,
+              id: parentShipId,
               escortId: id,
               exitCode: code,
-              fleetId: ship?.fleetId,
-              issueNumber: ship?.issueNumber,
+              fleetId: parentShip?.fleetId,
+              issueNumber: parentShip?.issueNumber,
             },
           });
 
           // Inject notification into Flagship chat
-          if (ship) {
+          if (parentShip) {
             const escortMsg = {
               type: "system" as const,
               subtype: "ship-status" as const,
-              content: `Ship #${ship.issueNumber} (${ship.issueTitle}): Escort review completed (exit ${code})`,
+              content: `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}): Escort review completed (exit ${code})`,
               meta: {
                 category: "ship-status" as const,
-                issueNumber: ship.issueNumber,
-                issueTitle: ship.issueTitle,
+                issueNumber: parentShip.issueNumber,
+                issueTitle: parentShip.issueTitle,
               },
               timestamp: Date.now(),
             };
-            this.flagshipManager.addToHistory(ship.fleetId, escortMsg);
+            this.flagshipManager.addToHistory(parentShip.fleetId, escortMsg);
             this.broadcast({
               type: "flagship:stream",
-              data: { fleetId: ship.fleetId, message: escortMsg },
+              data: { fleetId: parentShip.fleetId, message: escortMsg },
             });
           }
         }

@@ -266,8 +266,12 @@ async function handleShipRoute(
           // Notify Actor of gate entry
           actorManager.send(shipId, { type: "GATE_ENTER" });
 
+          // Persistent Escort detects gate phase via polling — no explicit launch needed.
+          // If no Escort is running (died or not yet launched), launch one now.
           const escortManager = deps.getEscortManager();
-          escortManager.launchEscort(shipId, gatePhase, gateType);
+          if (!escortManager.isEscortRunning(shipId)) {
+            escortManager.launchEscort(shipId, gatePhase, gateType);
+          }
         } else if (targetPhase === "done") {
           actorManager.send(shipId, { type: "COMPLETE" });
         }
