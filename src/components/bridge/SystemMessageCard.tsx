@@ -60,6 +60,7 @@ const STYLE: Record<
   "commander-status": null,
   "request-result": null,
   "dispatch-log": null,
+  "escort-log": null,
 };
 
 interface SystemMessageCardProps {

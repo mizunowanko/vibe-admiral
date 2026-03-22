@@ -157,7 +157,8 @@ export type StreamMessageSubtype =
   | "gate-check-request"
   | "lookout-alert"
   | "task-notification"
-  | "dispatch-log";
+  | "dispatch-log"
+  | "escort-log";
 
 // === Lookout ===
 export type LookoutAlertType =

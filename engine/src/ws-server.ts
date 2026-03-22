@@ -165,6 +165,13 @@ export class EngineServer {
           const ship = this.shipManager.getShip(shipId);
           const parsed = parseStreamMessage(msg);
           if (parsed) {
+            // Mark assistant messages with escort-log metadata for visual distinction
+            if (parsed.type === "assistant") {
+              parsed.meta = {
+                ...parsed.meta,
+                category: "escort-log",
+              };
+            }
             this.broadcast({
               type: "escort:stream",
               data: {
