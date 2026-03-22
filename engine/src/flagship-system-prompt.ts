@@ -81,5 +81,6 @@ Always call the \`ship-status\` API before reporting Ship state to the user. Nev
 2. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
 3. **Lookout Alerts**: call the \`ship-status\` API to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
+5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Task tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
 `;
 }
