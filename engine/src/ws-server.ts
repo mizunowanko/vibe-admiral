@@ -81,6 +81,7 @@ export class EngineServer {
           type: "system",
           subtype: "request-result",
           content: result,
+          timestamp: Date.now(),
         };
         this.flagshipManager.addToHistory(fleetId, resultMessage);
         this.broadcast({
@@ -201,6 +202,7 @@ export class EngineServer {
             type: "system" as const,
             subtype: "commander-status" as const,
             content: `${roleLabel} CLI connected${pid ? ` (pid: ${pid})` : ""}`,
+            timestamp: Date.now(),
           };
           manager.addToHistory(fleetId, connMsg);
           this.broadcast({
@@ -304,6 +306,7 @@ export class EngineServer {
                 issueNumber: ship.issueNumber,
                 issueTitle: ship.issueTitle,
               },
+              timestamp: Date.now(),
             };
             this.flagshipManager.addToHistory(ship.fleetId, escortMsg);
             this.broadcast({
@@ -331,6 +334,7 @@ export class EngineServer {
                 code === 0
                   ? `${roleLabel} session ended.`
                   : `${roleLabel} process exited with code ${code}.`,
+              timestamp: Date.now(),
             },
           },
         });
@@ -378,6 +382,7 @@ export class EngineServer {
             type: "system" as const,
             subtype: "commander-status" as const,
             content: `Failed to start ${roleLabel} CLI: ${error.message}`,
+            timestamp: Date.now(),
           };
           manager.addToHistory(fleetId, errMsg);
           this.broadcast({
@@ -424,6 +429,7 @@ export class EngineServer {
             issueNumber: ship.issueNumber,
             issueTitle: ship.issueTitle,
           },
+          timestamp: Date.now(),
         };
         this.flagshipManager.addToHistory(ship.fleetId, statusMessage);
         this.broadcast({
@@ -454,6 +460,7 @@ export class EngineServer {
           shipId: alert.shipId,
           branchName: ship.branchName,
         },
+        timestamp: Date.now(),
       };
 
       // Add to Flagship history and broadcast to frontend
@@ -917,6 +924,7 @@ export class EngineServer {
           type: "system" as const,
           subtype: "commander-status" as const,
           content: `Starting ${roleLabel} session...`,
+          timestamp: Date.now(),
         };
         manager.addToHistory(fleetId, startMsg);
         this.broadcast({
@@ -1056,6 +1064,7 @@ export class EngineServer {
         type: "system" as const,
         subtype: "ship-status" as const,
         content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
+        timestamp: Date.now(),
       };
       this.flagshipManager.addToHistory(ship.fleetId, compactMsg);
       this.broadcast({
@@ -1161,6 +1170,7 @@ export class EngineServer {
         const answerMsg: StreamMessage = {
           type: "user",
           content: autoAnswer,
+          timestamp: Date.now(),
         };
         manager.addToHistory(fleetId, answerMsg);
 
@@ -1169,6 +1179,7 @@ export class EngineServer {
           type: "system",
           subtype: "commander-status",
           content: `${roleLabel} question timed out — auto-answered with default response.`,
+          timestamp: Date.now(),
         };
         manager.addToHistory(fleetId, timeoutMsg);
         this.broadcast({
