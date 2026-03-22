@@ -1,10 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import type { FlagshipRequestHandler } from "./bridge-request-handler.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
 import { isGatePhase, DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+
+/** Admiral repo's skills/ directory, resolved from Engine's own source location. */
+const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
 
 const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
@@ -129,7 +133,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     fleetId: fleet.id,
     fleetRepos,
     repoRemotes,
-    skillSources: fleet.skillSources,
+    skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
     maxConcurrentSorties: fleet.maxConcurrentSorties,
   };
