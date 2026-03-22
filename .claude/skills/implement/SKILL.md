@@ -86,10 +86,10 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
   case "$PHASE" in
     <expected-next-phase>) echo "Gate approved"; break ;;
     <rejection-phase>) echo "Gate rejected"; break ;;
-    <current-gate-phase>) sleep 3 ;;
+    <current-gate-phase>) sleep 60 ;;
     *) echo "UNEXPECTED_PHASE: $PHASE"; break ;;
   esac
-  ELAPSED=$((ELAPSED + 3))
+  ELAPSED=$((ELAPSED + 60))
 done
 [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
