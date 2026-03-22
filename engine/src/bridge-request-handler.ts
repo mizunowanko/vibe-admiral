@@ -46,7 +46,7 @@ export class FlagshipRequestHandler {
     // Determine concurrent sortie limit (static, not dynamically adjusted)
     const configuredMax = maxConcurrentSorties ?? 6;
     const activeShips = this.shipManager.getShipsByFleet(fleetId)
-      .filter((s: ShipProcess) => s.phase !== "done");
+      .filter((s: ShipProcess) => s.phase !== "done" && s.phase !== "stopped");
     const availableSlots = Math.max(0, configuredMax - activeShips.length);
 
     if (availableSlots === 0) {
