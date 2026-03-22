@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Send, X, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/stores/uiStore";
+import { useSessionStore } from "@/stores/sessionStore";
 import type { ImageAttachment } from "@/types";
 
 const ACCEPTED_TYPES = new Set([
@@ -36,7 +36,6 @@ function fileToAttachment(file: File): Promise<PreviewAttachment> {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      // Strip "data:<mime>;base64," prefix
       const base64 = dataUrl.split(",")[1] ?? "";
       const objectUrl = URL.createObjectURL(file);
       resolve({
@@ -50,26 +49,28 @@ function fileToAttachment(file: File): Promise<PreviewAttachment> {
   });
 }
 
-interface BridgeInputProps {
+interface SessionInputProps {
   onSend: (message: string, images?: ImageAttachment[]) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** Key used to persist the draft text in UI store across remounts. */
-  draftKey?: string;
+  /** Session ID used to persist the draft text across remounts. */
+  sessionId?: string;
 }
 
 const MAX_ROWS = 6;
 const LINE_HEIGHT = 20;
 const PADDING_Y = 8;
 
-export function BridgeInput({
+export function SessionInput({
   onSend,
   disabled,
-  placeholder = "Send a command to the Bridge...",
-  draftKey,
-}: BridgeInputProps) {
-  const storedDraft = useUIStore((s) => draftKey ? s.inputDrafts[draftKey] ?? "" : "");
-  const setInputDraft = useUIStore((s) => s.setInputDraft);
+  placeholder = "Send a message...",
+  sessionId,
+}: SessionInputProps) {
+  const storedDraft = useSessionStore((s) =>
+    sessionId ? s.inputDrafts[sessionId] ?? "" : "",
+  );
+  const setInputDraft = useSessionStore((s) => s.setInputDraft);
   const [value, setValue] = useState(storedDraft);
   const [images, setImages] = useState<PreviewAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -89,10 +90,8 @@ export function BridgeInput({
     resetHeight();
   }, [value, resetHeight]);
 
-  // Keep ref in sync so the unmount cleanup sees the latest images
   imagesRef.current = images;
 
-  // Revoke all object URLs on unmount to prevent memory leaks
   useEffect(() => {
     return () => {
       for (const img of imagesRef.current) URL.revokeObjectURL(img.objectUrl);
@@ -114,7 +113,6 @@ export function BridgeInput({
     if (attachments.length === 0) return;
     setImages((prev) => {
       const merged = [...prev, ...attachments];
-      // Revoke object URLs for images that exceed the limit
       for (const dropped of merged.slice(MAX_IMAGES)) {
         URL.revokeObjectURL(dropped.objectUrl);
       }
@@ -133,18 +131,16 @@ export function BridgeInput({
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed && images.length === 0) return;
-    // Strip objectUrl before sending — only base64 + mediaType go over the wire
     const toSend: ImageAttachment[] | undefined =
       images.length > 0
         ? images.map(({ base64, mediaType }) => ({ base64, mediaType }))
         : undefined;
     onSend(trimmed, toSend);
-    // Revoke all preview object URLs
     for (const img of images) URL.revokeObjectURL(img.objectUrl);
     setValue("");
     setImages([]);
-    if (draftKey) setInputDraft(draftKey, "");
-  }, [value, images, onSend, draftKey, setInputDraft]);
+    if (sessionId) setInputDraft(sessionId, "");
+  }, [value, images, onSend, sessionId, setInputDraft]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -156,11 +152,14 @@ export function BridgeInput({
     [handleSend],
   );
 
-  const handleChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    const v = e.target.value;
-    setValue(v);
-    if (draftKey) setInputDraft(draftKey, v);
-  }, [draftKey, setInputDraft]);
+  const handleChange = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
+      const v = e.target.value;
+      setValue(v);
+      if (sessionId) setInputDraft(sessionId, v);
+    },
+    [sessionId, setInputDraft],
+  );
 
   const handlePaste = useCallback(
     (e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -192,8 +191,6 @@ export function BridgeInput({
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    // Only clear dragOver when the pointer truly leaves the container,
-    // not when entering a child element within it.
     if (
       e.relatedTarget instanceof Node &&
       e.currentTarget.contains(e.relatedTarget)
@@ -208,7 +205,6 @@ export function BridgeInput({
       e.preventDefault();
       e.stopPropagation();
       setDragOver(false);
-
       const files = Array.from(e.dataTransfer.files);
       addImages(files);
     },
@@ -223,7 +219,6 @@ export function BridgeInput({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       addImages(files);
-      // Reset so re-selecting the same file works
       e.target.value = "";
     },
     [addImages],
@@ -298,11 +293,7 @@ export function BridgeInput({
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         />
-        <Button
-          onClick={handleSend}
-          disabled={!canSend}
-          size="icon"
-        >
+        <Button onClick={handleSend} disabled={!canSend} size="icon">
           <Send className="h-4 w-4" />
         </Button>
       </div>

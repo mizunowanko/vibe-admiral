@@ -3,6 +3,7 @@ import { useShipsByFleet } from "@/hooks/useShip";
 import { useShipStore } from "@/stores/shipStore";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useUIStore } from "@/stores/uiStore";
+import { useSessionStore, shipSessionId } from "@/stores/sessionStore";
 import { ShipCard } from "./ShipCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +18,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const retryShip = useShipStore((s) => s.retryShip);
   const sortie = useShipStore((s) => s.sortie);
   const fleet = useFleetStore((s) => s.selectedFleet);
-  const setViewingShipId = useUIStore((s) => s.setViewingShipId);
+  const setFocus = useSessionStore((s) => s.setFocus);
   const setMainView = useUIStore((s) => s.setMainView);
 
   const [sortieRepo, setSortieRepo] = useState("");
@@ -52,7 +53,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   };
 
   const handleSelectShip = (shipId: string) => {
-    setViewingShipId(shipId);
+    setFocus(shipSessionId(shipId));
     setMainView("command");
   };
 

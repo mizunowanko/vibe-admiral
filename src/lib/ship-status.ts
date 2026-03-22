@@ -8,11 +8,11 @@ export interface StatusConfig {
 }
 
 export const STATUS_CONFIG: Record<Phase, StatusConfig> = {
-  planning: { label: "Planning", color: "bg-indigo-500/20 text-indigo-400", textColor: "text-indigo-400", animate: true },
+  planning: { label: "Plan", color: "bg-indigo-500/20 text-indigo-400", textColor: "text-indigo-400", animate: true },
   "planning-gate": { label: "Plan Gate", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  implementing: { label: "Implementing", color: "bg-violet-500/20 text-violet-400", textColor: "text-violet-400", animate: true },
+  implementing: { label: "Coding", color: "bg-violet-500/20 text-violet-400", textColor: "text-violet-400", animate: true },
   "implementing-gate": { label: "Code Gate", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  "acceptance-test": { label: "Acceptance Test", color: "bg-amber-500/20 text-amber-400", textColor: "text-amber-400", animate: true },
+  "acceptance-test": { label: "QA", color: "bg-amber-500/20 text-amber-400", textColor: "text-amber-400", animate: true },
   "acceptance-test-gate": { label: "QA Gate", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
   merging: { label: "Merging", color: "bg-emerald-500/20 text-emerald-400", textColor: "text-emerald-400", animate: true },
   done: { label: "Done", color: "bg-green-500/20 text-green-400", textColor: "text-green-400" },

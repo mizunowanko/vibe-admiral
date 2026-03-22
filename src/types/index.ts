@@ -49,6 +49,21 @@ export interface Fleet {
 // === Commander (Dock/Flagship shared role type) ===
 export type CommanderRole = "dock" | "flagship";
 
+// === Session ===
+export type SessionType = "dock" | "flagship" | "ship" | "dispatch";
+
+export interface Session {
+  id: string;
+  type: SessionType;
+  fleetId: string;
+  label: string;
+  hasInput: boolean;
+  /** Ship ID for ship sessions (same as session id suffix). */
+  shipId?: string;
+  /** Parent session ID for dispatch sub-agents. */
+  parentSessionId?: string;
+}
+
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
