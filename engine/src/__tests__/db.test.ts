@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import Database from "better-sqlite3";
 import { FleetDatabase, initFleetDatabase } from "../db.js";
 import type { ShipProcess } from "../types.js";
 
@@ -251,6 +252,145 @@ describe("FleetDatabase", () => {
     it("returns 0 when no terminal ships", () => {
       db.upsertShip(makeShip());
       expect(db.purgeTerminalShips()).toBe(0);
+    });
+  });
+
+  describe("phase_transitions metadata", () => {
+    /** Open a raw SQLite connection to query phase_transitions directly. */
+    function queryTransitions(dbPath: string) {
+      const raw = new Database(dbPath);
+      const rows = raw.prepare(
+        "SELECT from_phase, to_phase, triggered_by, metadata FROM phase_transitions ORDER BY id",
+      ).all() as Array<{
+        from_phase: string | null;
+        to_phase: string;
+        triggered_by: string;
+        metadata: string | null;
+      }>;
+      raw.close();
+      return rows;
+    }
+
+    it("stores metadata JSON via transitionPhase", () => {
+      db.upsertShip(makeShip());
+      db.transitionPhase("ship-001", "planning", "planning-gate", "ship", {
+        planCommentUrl: "https://github.com/owner/repo/issues/42#comment-1",
+        qaRequired: true,
+      });
+
+      const rows = queryTransitions(db.path);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.triggered_by).toBe("ship");
+
+      const meta = JSON.parse(rows[0]!.metadata!);
+      expect(meta.planCommentUrl).toBe("https://github.com/owner/repo/issues/42#comment-1");
+      expect(meta.qaRequired).toBe(true);
+    });
+
+    it("stores gate rejection feedback via transitionPhase", () => {
+      db.upsertShip(makeShip({ phase: "planning-gate" }));
+      // Escort rejects: planning-gate → planning (backward is disallowed by transitionPhase)
+      // Use recordPhaseTransition for rejection (which doesn't enforce forward-only)
+      db.recordPhaseTransition("ship-001", "planning-gate", "planning", "escort", {
+        gate_result: "rejected",
+        feedback: "Plan is too broad, narrow the scope",
+      });
+
+      const rows = queryTransitions(db.path);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.from_phase).toBe("planning-gate");
+      expect(rows[0]!.to_phase).toBe("planning");
+      expect(rows[0]!.triggered_by).toBe("escort");
+
+      const meta = JSON.parse(rows[0]!.metadata!);
+      expect(meta.gate_result).toBe("rejected");
+      expect(meta.feedback).toBe("Plan is too broad, narrow the scope");
+    });
+
+    it("stores gate approval metadata via recordPhaseTransition", () => {
+      db.upsertShip(makeShip({ phase: "implementing-gate" }));
+      db.recordPhaseTransition("ship-001", "implementing-gate", "acceptance-test", "escort", {
+        gate_result: "approved",
+      });
+
+      const rows = queryTransitions(db.path);
+      expect(rows).toHaveLength(1);
+      const meta = JSON.parse(rows[0]!.metadata!);
+      expect(meta.gate_result).toBe("approved");
+    });
+
+    it("stores null metadata when not provided", () => {
+      db.upsertShip(makeShip());
+      db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+
+      const rows = queryTransitions(db.path);
+      expect(rows[0]!.metadata).toBeNull();
+    });
+
+    it("records full gate lifecycle: ship → escort approve", () => {
+      db.upsertShip(makeShip());
+
+      // Ship enters gate
+      db.transitionPhase("ship-001", "planning", "planning-gate", "ship", {
+        planCommentUrl: "https://example.com",
+      });
+
+      // Escort approves (updates phase to implementing)
+      db.transitionPhase("ship-001", "planning-gate", "implementing", "escort", {
+        gate_result: "approved",
+      });
+
+      const rows = queryTransitions(db.path);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]!.triggered_by).toBe("ship");
+      expect(rows[1]!.triggered_by).toBe("escort");
+      expect(rows[1]!.to_phase).toBe("implementing");
+    });
+  });
+
+  describe("concurrent phase updates (gate exclusivity)", () => {
+    it("transitionPhase rejects stale expectedPhase (optimistic locking)", () => {
+      db.upsertShip(makeShip({ phase: "planning-gate" }));
+
+      // Escort approves: planning-gate → implementing
+      const first = db.transitionPhase("ship-001", "planning-gate", "implementing", "escort");
+      expect(first).toBe(true);
+
+      // A stale Ship attempt using old expectedPhase should fail
+      expect(() =>
+        db.transitionPhase("ship-001", "planning-gate", "implementing", "ship"),
+      ).toThrow("Phase mismatch");
+    });
+
+    it("only one of two competing transitions succeeds", () => {
+      db.upsertShip(makeShip({ phase: "implementing" }));
+
+      // First transition succeeds
+      const result1 = db.transitionPhase("ship-001", "implementing", "implementing-gate", "ship");
+      expect(result1).toBe(true);
+
+      // Second transition with same expected phase fails (phase already changed)
+      expect(() =>
+        db.transitionPhase("ship-001", "implementing", "implementing-gate", "engine"),
+      ).toThrow("Phase mismatch");
+    });
+
+    it("phases table is updated atomically with ships table", () => {
+      db.upsertShip(makeShip());
+      db.transitionPhase("ship-001", "planning", "planning-gate", "ship");
+
+      // Both ships and phases tables should reflect the same state
+      const ships = db.getActiveShips();
+      expect(ships[0]!.phase).toBe("planning-gate");
+
+      // Verify phases table via raw query
+      const raw = new Database(db.path);
+      const phaseRow = raw.prepare(
+        "SELECT phase FROM phases WHERE ship_id = ?",
+      ).get("ship-001") as { phase: string } | undefined;
+      raw.close();
+
+      expect(phaseRow?.phase).toBe("planning-gate");
     });
   });
 });
