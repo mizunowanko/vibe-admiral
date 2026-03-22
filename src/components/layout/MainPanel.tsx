@@ -5,6 +5,7 @@ import { RightPanel } from "@/components/layout/RightPanel";
 import { ShipDetailPanel } from "@/components/ship/ShipDetailPanel";
 import { ShipGrid } from "@/components/ship/ShipGrid";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
+import type { CommanderRole } from "@/types";
 
 export function MainPanel() {
   const mainView = useUIStore((s) => s.mainView);
@@ -33,7 +34,13 @@ export function MainPanel() {
           {viewingShipId ? (
             <ShipDetailPanel shipId={viewingShipId} />
           ) : (
-            <Bridge fleetId={selectedFleetId} role={activeCommanderTab} />
+            <>
+              {(["dock", "flagship"] as const satisfies readonly CommanderRole[]).map((role) => (
+                <div key={role} className={activeCommanderTab === role ? "flex flex-1 min-h-0 flex-col" : "hidden"}>
+                  <Bridge fleetId={selectedFleetId} role={role} />
+                </div>
+              ))}
+            </>
           )}
 
           {/* Right: Dock → Flagship → Ships (stacked) */}
