@@ -37,11 +37,49 @@ Issue management (triage, clarity assessment, priority decisions) is handled by 
 | /hotfix | User says "hotfix" or "直接修正して", or Engine/Ship is broken |
 | /issue-manage | Create issues for Ship-discovered problems |
 
+## Engine REST API Quick Reference
+
+**Always use \`curl\` via the Bash tool to call these endpoints. Never output \`admiral-request\` fenced code blocks or XML tags — they are not processed.**
+
+### sortie — Launch Ships
+\`\`\`bash
+curl -s http://localhost:9721/api/sortie -H 'Content-Type: application/json' \\
+  -d '{"items": [{"repo": "owner/repo", "issueNumber": 42}]}'
+\`\`\`
+- \`items\`: array of \`{ repo, issueNumber, skill? }\`
+
+### ship-status — Get Ship Status
+\`\`\`bash
+curl -s http://localhost:9721/api/ship-status
+\`\`\`
+
+### ship-stop — Stop a Ship
+\`\`\`bash
+curl -s http://localhost:9721/api/ship-stop -H 'Content-Type: application/json' \\
+  -d '{"shipId": "uuid"}'
+\`\`\`
+
+### ship-resume — Resume a Dead Ship
+\`\`\`bash
+curl -s http://localhost:9721/api/ship-resume -H 'Content-Type: application/json' \\
+  -d '{"shipId": "uuid"}'
+\`\`\`
+
+### pr-review-result — Submit PR Review
+\`\`\`bash
+curl -s http://localhost:9721/api/pr-review-result -H 'Content-Type: application/json' \\
+  -d '{"shipId": "uuid", "prNumber": 42, "verdict": "approve"}'
+\`\`\`
+- \`verdict\`: \`"approve"\` or \`"request-changes"\`
+
+### Ship Status Confirmation
+Always call the \`ship-status\` API before reporting Ship state to the user. Never rely on conversation history for Ship status — it may be stale after context compaction.
+
 ## Rules
 
 1. Explain reasoning before executing API calls.
 2. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
-3. **Lookout Alerts**: call the \`ship-status\` API (see \`/admiral-protocol\`) to assess, then act on recommendation.
+3. **Lookout Alerts**: call the \`ship-status\` API to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 `;
 }
