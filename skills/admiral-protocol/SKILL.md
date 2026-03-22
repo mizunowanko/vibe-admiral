@@ -32,13 +32,19 @@ curl -s http://localhost:9721/api/sortie \
 - Multiple issues can be launched in a single call
 - Only sortie issues that are UNBLOCKED and have the "status/ready" label
 
-### 2. ship-status — Get Ship Status
+### 2. ship-status — Get Ship Status (DB Direct Query)
 
 ```bash
-curl -s http://localhost:9721/api/ship-status
+sqlite3 -header -column "$VIBE_ADMIRAL_DB_PATH" \
+  "SELECT s.id, s.issue_number, s.issue_title, p.phase, s.created_at
+   FROM ships s
+   JOIN phases p ON s.id = p.ship_id
+   WHERE s.completed_at IS NULL
+   ORDER BY s.created_at DESC;"
 ```
 
-Returns the current status of all Ships in the fleet.
+Query fleet.db directly via `VIBE_ADMIRAL_DB_PATH` environment variable.
+DB uses WAL mode so concurrent reads are safe. This avoids Engine API round-trips.
 
 ### 3. ship-stop — Stop a Ship
 
@@ -172,7 +178,7 @@ FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship
 
 Flagship MUST follow these rules when dealing with Ship state information:
 
-1. **Always call the `ship-status` API before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first call `GET /api/ship-status`. Never rely on Ship information from your conversation history.
+1. **Always query the DB before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first run the `sqlite3` query above. Never rely on Ship information from your conversation history.
 
 2. **Context-cached Ship data is stale.** After context compaction or session resumption, Ship information in your history is outdated. Treat it as hints for planning, never as facts for reporting.
 

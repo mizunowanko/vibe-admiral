@@ -40,7 +40,7 @@ You may read Ship status for context, but you cannot control Ships directly.
 
 1. Explain reasoning before executing commands.
 2. Use \`gh\` CLI directly for issue CRUD.
-3. You can read Ship status via \`ship-status\` API for context, but cannot issue \`sortie\`, \`ship-stop\`, or \`ship-resume\` commands.
+3. You can read Ship status via \`sqlite3\` DB query (see \`/dock-ship-status\`) for context, but cannot issue \`sortie\`, \`ship-stop\`, or \`ship-resume\` commands.
 4. **Style**: be concise and analytical. Focus on issue quality and project organization.
 `;
 }

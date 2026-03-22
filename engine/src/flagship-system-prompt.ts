@@ -48,9 +48,12 @@ curl -s http://localhost:9721/api/sortie -H 'Content-Type: application/json' \\
 \`\`\`
 - \`items\`: array of \`{ repo, issueNumber, skill? }\`
 
-### ship-status — Get Ship Status
+### ship-status — Get Ship Status (DB Direct Query)
 \`\`\`bash
-curl -s http://localhost:9721/api/ship-status
+sqlite3 -header -column "$VIBE_ADMIRAL_DB_PATH" \\
+  "SELECT s.id, s.issue_number, s.issue_title, p.phase, s.created_at
+   FROM ships s JOIN phases p ON s.id = p.ship_id
+   WHERE s.completed_at IS NULL ORDER BY s.created_at DESC;"
 \`\`\`
 
 ### ship-stop — Stop a Ship
@@ -73,13 +76,13 @@ curl -s http://localhost:9721/api/pr-review-result -H 'Content-Type: application
 - \`verdict\`: \`"approve"\` or \`"request-changes"\`
 
 ### Ship Status Confirmation
-Always call the \`ship-status\` API before reporting Ship state to the user. Never rely on conversation history for Ship status — it may be stale after context compaction.
+Always query the DB via \`sqlite3\` before reporting Ship state to the user. Never rely on conversation history for Ship status — it may be stale after context compaction.
 
 ## Rules
 
 1. Explain reasoning before executing API calls.
 2. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
-3. **Lookout Alerts**: call the \`ship-status\` API to assess, then act on recommendation.
+3. **Lookout Alerts**: query Ship status via \`sqlite3\` DB query (see \`/admiral-protocol\`) to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Task tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
 `;
