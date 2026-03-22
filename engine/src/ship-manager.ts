@@ -130,8 +130,17 @@ export class ShipManager {
     // 5b. Write minimal CLAUDE.md for external repos (overrides vibe-admiral's CLAUDE.md)
     await this.deployCLAUDEmd(repoRoot, worktreePath);
 
-    // 6. Remove stale workflow-state.json from previous sortie
-    await unlink(join(worktreePath, ".claude", "workflow-state.json")).catch(() => {});
+    // 6. Remove stale .claude work files from previous sortie (or inherited from main)
+    const staleFiles = [
+      "workflow-state.json",
+      "ship-log.jsonl",
+      "escort-log.jsonl",
+      "gate-request.json",
+      "gate-response.json",
+    ];
+    await Promise.all(
+      staleFiles.map((f) => unlink(join(worktreePath, ".claude", f)).catch(() => {})),
+    );
 
     // 7. npm install if web project
     if (await worktree.isWebProject(worktreePath)) {

@@ -438,6 +438,15 @@ export class EngineServer {
           type: "flagship:stream",
           data: { fleetId: ship.fleetId, message: statusMessage },
         });
+
+        // Send phase change to Flagship stdin if Flagship is running
+        const flagshipId = `flagship-${ship.fleetId}`;
+        if (this.processManager.isRunning(flagshipId)) {
+          this.processManager.sendMessage(
+            flagshipId,
+            statusMessage.content,
+          );
+        }
       }
     });
   }

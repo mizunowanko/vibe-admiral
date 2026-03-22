@@ -2,12 +2,14 @@ import { useUIStore } from "@/stores/uiStore";
 import { useFleetStore } from "@/stores/fleetStore";
 import { Bridge } from "@/components/bridge/Bridge";
 import { RightPanel } from "@/components/layout/RightPanel";
+import { ShipDetailPanel } from "@/components/ship/ShipDetailPanel";
 import { ShipGrid } from "@/components/ship/ShipGrid";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
 
 export function MainPanel() {
   const mainView = useUIStore((s) => s.mainView);
   const activeCommanderTab = useUIStore((s) => s.activeCommanderTab);
+  const viewingShipId = useUIStore((s) => s.viewingShipId);
   const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
 
   if (!selectedFleetId && mainView !== "fleet-settings") {
@@ -27,10 +29,14 @@ export function MainPanel() {
     case "command":
       return (
         <div className="flex flex-1 min-h-0">
-          {/* Left: Active Commander Chat */}
-          <Bridge fleetId={selectedFleetId} role={activeCommanderTab} />
+          {/* Center: Commander Chat or Ship Detail */}
+          {viewingShipId ? (
+            <ShipDetailPanel shipId={viewingShipId} />
+          ) : (
+            <Bridge fleetId={selectedFleetId} role={activeCommanderTab} />
+          )}
 
-          {/* Right: Flagship / Dock / Ships tabs */}
+          {/* Right: Dock → Flagship → Ships (stacked) */}
           <RightPanel fleetId={selectedFleetId!} />
         </div>
       );

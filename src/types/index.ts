@@ -49,9 +49,6 @@ export interface Fleet {
 // === Commander (Dock/Flagship shared role type) ===
 export type CommanderRole = "dock" | "flagship";
 
-// === Right Panel Tab ===
-export type RightPanelTab = "flagship" | "dock" | "ships";
-
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
