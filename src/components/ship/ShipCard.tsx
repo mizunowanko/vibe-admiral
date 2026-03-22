@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Ship } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ interface ShipCardProps {
   onRetry?: () => void;
 }
 
-export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
+export const ShipCard = memo(function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
   const config = ship.processDead
     ? PROCESS_DEAD_CONFIG
     : STATUS_CONFIG[ship.phase];
@@ -137,4 +138,4 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
       )}
     </div>
   );
-}
+});

@@ -2,18 +2,15 @@ import { useMemo } from "react";
 import { useShipStore } from "@/stores/shipStore";
 import type { Ship } from "@/types";
 
-export function useShip(shipId: string | null) {
-  const ships = useShipStore((s) => s.ships);
-  const shipLogs = useShipStore((s) => s.shipLogs);
+const EMPTY_LOGS: import("@/types").StreamMessage[] = [];
 
-  const ship = useMemo(
-    () => (shipId ? ships.get(shipId) ?? null : null),
-    [ships, shipId],
+export function useShip(shipId: string | null) {
+  const ship = useShipStore((s) =>
+    shipId ? s.ships.get(shipId) ?? null : null,
   );
 
-  const logs = useMemo(
-    () => (shipId ? shipLogs.get(shipId) ?? [] : []),
-    [shipLogs, shipId],
+  const logs = useShipStore((s) =>
+    shipId ? s.shipLogs.get(shipId) ?? EMPTY_LOGS : EMPTY_LOGS,
   );
 
   return { ship, logs };
