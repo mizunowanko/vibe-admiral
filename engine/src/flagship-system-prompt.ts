@@ -41,7 +41,7 @@ Issue management (triage, clarity assessment, priority decisions) is handled by 
 
 1. Explain reasoning before executing API calls.
 2. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
-3. **Lookout Alerts**: call the \`ship-status\` API (see \`/admiral-protocol\`) to assess, then act on recommendation.
+3. **Lookout Alerts**: query Ship status via \`sqlite3\` DB query (see \`/admiral-protocol\`) to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 `;
 }

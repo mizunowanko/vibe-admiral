@@ -1,27 +1,31 @@
 ---
 name: dock-ship-status
-description: Read-only Ship status API for Dock (lightweight alternative to admiral-protocol)
+description: Read-only Ship status via direct DB query for Dock
 user-invocable: false
 ---
 
-# /dock-ship-status — Ship Status API (Read-Only)
+# /dock-ship-status — Ship Status (DB Direct Query)
 
-Dock 用の Ship ステータス確認 API リファレンス。
-Dock は Ship の状態を読み取ることはできるが、Ship の操作（sortie, stop, resume）は行えない。
+Dock 用の Ship ステータス確認方法。
+fleet.db を `sqlite3` で直接クエリすることで、Engine 経由の通信に依存せず Ship 状態を取得する。
 
-## Endpoint
-
-### ship-status — Get Ship Status
+## Query
 
 ```bash
-curl -s http://localhost:9721/api/ship-status
+sqlite3 -header -column "$VIBE_ADMIRAL_DB_PATH" \
+  "SELECT s.id, s.issue_number, s.issue_title, p.phase, s.created_at
+   FROM ships s
+   JOIN phases p ON s.id = p.ship_id
+   WHERE s.completed_at IS NULL
+   ORDER BY s.created_at DESC;"
 ```
 
-Returns the current status of all Ships in the fleet.
+- `VIBE_ADMIRAL_DB_PATH` 環境変数で DB パスを取得する
+- DB は WAL モードのため読み取りは安全
 
 ## Ship Status Confirmation Rules
 
-1. **Always call the `ship-status` API before reporting to the user.** Never rely on Ship information from conversation history.
+1. **Always query the DB before reporting to the user.** Never rely on Ship information from conversation history.
 2. **Context-cached Ship data is stale.** After context compaction, treat Ship information as hints, not facts.
 
 ## Handling Results

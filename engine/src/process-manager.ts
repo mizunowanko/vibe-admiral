@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { getAdmiralHome } from "./admiral-home.js";
 
 /** Retryable error patterns in stderr / error output from Claude CLI.
  *  Covers rate limits (429), overload (529), server errors (500),
@@ -175,6 +176,10 @@ export class ProcessManager extends EventEmitter {
 
     const proc = spawn("claude", args, {
       cwd: fleetPath,
+      env: {
+        ...process.env,
+        VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -277,6 +282,10 @@ export class ProcessManager extends EventEmitter {
 
     const proc = spawn("claude", args, {
       cwd: fleetPath,
+      env: {
+        ...process.env,
+        VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
