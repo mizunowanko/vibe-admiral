@@ -3,21 +3,12 @@ import { useShipStore } from "@/stores/shipStore";
 import { useSessionStore, shipSessionId } from "@/stores/sessionStore";
 import { cn } from "@/lib/utils";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { PHASE_ORDER } from "@/types";
 import type { Ship, Phase } from "@/types";
 
 interface ActiveShipSummaryProps {
   fleetId: string;
 }
-
-const PHASE_ORDER: Phase[] = [
-  "planning",
-  "planning-gate",
-  "implementing",
-  "implementing-gate",
-  "acceptance-test",
-  "acceptance-test-gate",
-  "merging",
-];
 
 function buildSummaryFingerprint(ships: Ship[]): string {
   return ships
