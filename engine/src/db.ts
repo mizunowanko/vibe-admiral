@@ -394,6 +394,16 @@ export class FleetDatabase {
     return txn();
   }
 
+  /** Get the phase a ship was in before it was stopped. */
+  getPhaseBeforeStopped(shipId: string): Phase | null {
+    const row = this.db.prepare(`
+      SELECT from_phase FROM phase_transitions
+      WHERE ship_id = ? AND to_phase = 'stopped'
+      ORDER BY id DESC LIMIT 1
+    `).get(shipId) as { from_phase: string | null } | undefined;
+    return (row?.from_phase as Phase) ?? null;
+  }
+
   /** Record a phase transition in the audit log (non-transactional, for backward compat). */
   recordPhaseTransition(
     shipId: string,

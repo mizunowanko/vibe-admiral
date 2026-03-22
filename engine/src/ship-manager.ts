@@ -517,7 +517,8 @@ export class ShipManager {
         ship.worktreePath,
         shipEnv,
       );
-      this.updatePhase(shipId, "implementing", "Resumed from session");
+      const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "implementing";
+      this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
     } else {
       // No session to resume — re-sortie
       this.processManager.sortie(
