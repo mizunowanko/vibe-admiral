@@ -123,7 +123,7 @@ done
 | 3-4 | `/implement-plan` | Steps 1-2 | 調査、計画、plan-review gate |
 | 5-8 | `/implement-code` | Steps 1-4 | **Issue 再読み込み** → 実装、ビルド、統合、再テスト |
 | 9-10 | `/implement-review` | Steps 1-2 | コミット、PR、**code-review gate** |
-| 11-16 | `/implement-merge` | Steps 1-6 | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
+| 11-17 | `/implement-merge` | Steps 1-7 | 受入テスト、CI、マージ、**振り返り**、done 遷移、クリーンアップ |
 
 > **フェーズ順序制約**: 各 sub-skill は上から順に実行する。code-review gate (`/implement-review`) の承認を得てから受け入れテスト (`/implement-merge`) に進む。順序のスキップ・逆転は禁止。
 
