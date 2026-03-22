@@ -1,47 +1,10 @@
 import { MockEngine } from "./mock-engine";
-import net from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, () => {
-      const addr = server.address();
-      if (addr && typeof addr === "object") {
-        const port = addr.port;
-        server.close(() => resolve(port));
-      } else {
-        server.close(() => reject(new Error("Failed to get port")));
-      }
-    });
-    server.on("error", reject);
-  });
-}
-
-function waitForPort(port: number, timeoutMs = 30_000): Promise<void> {
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    const tryConnect = () => {
-      if (Date.now() - start > timeoutMs) {
-        reject(new Error(`Port ${port} not ready within ${timeoutMs}ms`));
-        return;
-      }
-      const socket = net.createConnection({ port, host: "localhost" });
-      socket.on("connect", () => {
-        socket.destroy();
-        resolve();
-      });
-      socket.on("error", () => {
-        setTimeout(tryConnect, 500);
-      });
-    };
-    tryConnect();
-  });
-}
+import { getAvailablePort, waitForPort } from "../test-utils/port-helpers.js";
 
 export default async function globalSetup() {
-  const enginePort = await getRandomPort();
-  const vitePort = await getRandomPort();
+  const enginePort = await getAvailablePort();
+  const vitePort = await getAvailablePort();
 
   // Start mock engine on dynamic port
   const mockEngine = new MockEngine(enginePort);

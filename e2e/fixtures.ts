@@ -4,14 +4,22 @@ export { expect };
 
 export const test = base.extend<{
   enginePort: number;
+  vitePort: number;
   admiralHome: string;
 }>({
   enginePort: async ({}, use) => {
     const port = parseInt(process.env.E2E_ENGINE_PORT ?? "9721", 10);
     await use(port);
   },
+  vitePort: async ({}, use) => {
+    const port = parseInt(process.env.E2E_VITE_PORT ?? "1420", 10);
+    await use(port);
+  },
   admiralHome: async ({}, use) => {
     await use(process.env.E2E_ADMIRAL_HOME ?? "");
+  },
+  baseURL: async ({ vitePort }, use) => {
+    await use(`http://localhost:${vitePort}`);
   },
 });
 

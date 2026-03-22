@@ -1,8 +1,10 @@
 import { rm } from "node:fs/promises";
 import { type ChildProcess } from "node:child_process";
+import { killProcess } from "../test-utils/port-helpers.js";
 
 interface E2EContext {
   engineProcess: ChildProcess;
+  viteProcess: ChildProcess;
   admiralHome: string;
   enginePort: number;
   vitePort: number;
@@ -15,20 +17,15 @@ export default async function globalTeardown() {
 
   if (!ctx) return;
 
+  // Kill Vite process
+  if (ctx.viteProcess) {
+    await killProcess(ctx.viteProcess);
+    console.log("E2E Vite stopped");
+  }
+
   // Kill Engine process
-  if (ctx.engineProcess && !ctx.engineProcess.killed) {
-    ctx.engineProcess.kill("SIGTERM");
-    // Wait briefly for graceful shutdown
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        ctx.engineProcess.kill("SIGKILL");
-        resolve();
-      }, 5000);
-      ctx.engineProcess.on("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-    });
+  if (ctx.engineProcess) {
+    await killProcess(ctx.engineProcess);
     console.log("E2E Engine stopped");
   }
 

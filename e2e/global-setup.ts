@@ -4,57 +4,27 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import net from "node:net";
+import { getAvailablePort, waitForPort } from "../test-utils/port-helpers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface E2EContext {
   engineProcess: ChildProcess;
+  viteProcess: ChildProcess;
   admiralHome: string;
   enginePort: number;
   vitePort: number;
 }
 
-function waitForPort(port: number, timeoutMs = 30_000): Promise<void> {
-  const start = Date.now();
-  return new Promise((resolve, reject) => {
-    const tryConnect = () => {
-      if (Date.now() - start > timeoutMs) {
-        reject(new Error(`Port ${port} not ready within ${timeoutMs}ms`));
-        return;
-      }
-      const socket = net.createConnection({ port, host: "localhost" });
-      socket.on("connect", () => {
-        socket.destroy();
-        resolve();
-      });
-      socket.on("error", () => {
-        setTimeout(tryConnect, 500);
-      });
-    };
-    tryConnect();
-  });
-}
-
-// Defaults must match the fallback values in playwright.e2e.config.ts so that
-// the config's synchronous port read and this async setup stay in sync.
-const DEFAULT_VITE_PORT = 1520;
-const DEFAULT_ENGINE_PORT = 9821;
-
 export default async function globalSetup(config: FullConfig) {
-  const enginePort = parseInt(
-    process.env.E2E_ENGINE_PORT ?? String(DEFAULT_ENGINE_PORT),
-    10,
-  );
-  const vitePort = parseInt(
-    process.env.E2E_VITE_PORT ?? String(DEFAULT_VITE_PORT),
-    10,
-  );
+  const enginePort = await getAvailablePort("E2E_ENGINE_PORT");
+  const vitePort = await getAvailablePort("E2E_VITE_PORT");
   const admiralHome = await mkdtemp(join(tmpdir(), "vibe-admiral-test-"));
 
   // Store context for teardown and test access
   const ctx: E2EContext = {
     engineProcess: null!,
+    viteProcess: null!,
     admiralHome,
     enginePort,
     vitePort,
@@ -94,10 +64,34 @@ export default async function globalSetup(config: FullConfig) {
   await waitForPort(enginePort);
   console.log(`E2E Engine started on port ${enginePort}`);
 
+  // Start Vite dev server with isolated ports
+  const viteProcess = spawn("npx", ["vite", "--port", String(vitePort)], {
+    env: {
+      ...process.env,
+      VITE_PORT: String(vitePort),
+      VITE_ENGINE_PORT: String(enginePort),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd: projectRoot,
+  });
+
+  viteProcess.stderr?.on("data", (chunk: Buffer) => {
+    const msg = chunk.toString();
+    if (msg.trim()) {
+      console.error(`[vite:stderr] ${msg.trimEnd()}`);
+    }
+  });
+
+  ctx.viteProcess = viteProcess;
+
+  // Wait for Vite to be ready
+  await waitForPort(vitePort);
+  console.log(`E2E Vite started on port ${vitePort}`);
+
   // Store for teardown
   (globalThis as Record<string, unknown>).__e2eContext = ctx;
 
-  // Export ports via env for Playwright config and tests
+  // Export ports via env for tests
   process.env.E2E_ENGINE_PORT = String(enginePort);
   process.env.E2E_VITE_PORT = String(vitePort);
   process.env.E2E_ADMIRAL_HOME = admiralHome;

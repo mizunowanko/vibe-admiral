@@ -98,16 +98,21 @@ test.describe("Admiral E2E — Full Workflow", () => {
     });
 
     // ── Step 7: Verify Engine API is accessible ──
+    // Engine may or may not have a /api/health endpoint.
+    // If it doesn't exist, that's fine — we already proved connectivity via WebSocket.
+    // This step is informational; network errors (e.g. CORS from cross-origin
+    // browser fetch to a dynamic Engine port) are caught and logged.
     const apiResponse = await page.evaluate(
       async (port: number) => {
-        const res = await fetch(`http://localhost:${port}/api/health`);
-        return { status: res.status, ok: res.ok };
+        try {
+          const res = await fetch(`http://localhost:${port}/api/health`);
+          return { status: res.status, ok: res.ok, error: null };
+        } catch (e) {
+          return { status: 0, ok: false, error: String(e) };
+        }
       },
       enginePort,
     );
-    // Engine may or may not have a /api/health endpoint.
-    // If it doesn't exist, that's fine — we already proved connectivity via WebSocket.
-    // This step is informational.
     console.log(`Engine API /health response: ${JSON.stringify(apiResponse)}`);
   });
 });
