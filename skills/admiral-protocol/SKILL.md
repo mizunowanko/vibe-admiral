@@ -1,67 +1,84 @@
 ---
 name: admiral-protocol
-description: admiral-request プロトコル仕様。Bridge/Ship が admiral-request を送信する際に参照する
+description: Engine HTTP API reference for Ship management operations (sortie, ship-status, etc.)
 user-invocable: false
 ---
 
-# /admiral-protocol — Admiral-Request Protocol Reference
+# /admiral-protocol — Engine HTTP API Reference
 
-Flagship 用の admiral-request プロトコル仕様。
-トリガー: admiral-request の仕様確認が必要なとき。
+Flagship 用の Ship 管理 API リファレンス。
+トリガー: Ship 管理操作（sortie, ship-status, ship-stop, ship-resume, pr-review-result）の実行が必要なとき。
 
-## Admiral-Request Protocol
+## Overview
 
-For operations that ONLY the Engine can perform (Ship management), use `admiral-request` blocks:
+Engine は HTTP REST API を提供する。Flagship は `curl` を Bash ツール経由で呼び出す。
 
-```admiral-request
-{ ... JSON request ... }
+- **Base URL**: `http://localhost:${ENGINE_PORT:-9721}`
+- **Response format**: JSON `{ "ok": true, "result": "..." }` or `{ "ok": false, "error": "..." }`
+- **fleetId**: 複数 Fleet がある場合は body に `"fleetId": "..."` を含める（1つの場合は省略可）
+
+## Endpoints
+
+### 1. sortie — Launch Ships
+
+```bash
+curl -s http://localhost:9721/api/sortie \
+  -H 'Content-Type: application/json' \
+  -d '{"items": [{"repo": "owner/repo", "issueNumber": 42}]}'
 ```
 
-The Engine intercepts these blocks, executes them, and returns results to you.
-
-## Flagship Requests (5 total)
-
-### 1. sortie
-Launch Ships (Claude Code implementation sessions) for issues.
-
-```admiral-request
-{ "request": "sortie", "items": [{ "repo": "owner/repo", "issueNumber": 42 }] }
-```
-
+- `items` (required): Array of `{ repo, issueNumber, skill? }`
+- `skill` (optional): Defaults to "/implement"
+- Multiple issues can be launched in a single call
 - Only sortie issues that are UNBLOCKED and have the "status/todo" label
-- Multiple issues can be launched simultaneously via the `items` array
-- Optional `skill` field per item: defaults to "/implement"
 
-### 2. ship-status
-Get the current status of all Ships in this fleet.
+### 2. ship-status — Get Ship Status
 
-```admiral-request
-{ "request": "ship-status" }
+```bash
+curl -s http://localhost:9721/api/ship-status
 ```
 
-### 3. ship-stop
-Stop a running Ship by its ID.
+Returns the current status of all Ships in the fleet.
 
-```admiral-request
-{ "request": "ship-stop", "shipId": "uuid-of-ship" }
+### 3. ship-stop — Stop a Ship
+
+```bash
+curl -s http://localhost:9721/api/ship-stop \
+  -H 'Content-Type: application/json' \
+  -d '{"shipId": "uuid-of-ship"}'
 ```
 
-### 4. pr-review-result
-Submit the result of a PR code review.
+### 4. ship-resume — Resume a Dead Ship
 
-```admiral-request
-{ "request": "pr-review-result", "shipId": "uuid-of-ship", "prNumber": 42, "verdict": "approve" }
-```
-
-### 5. ship-resume
-Resume a Ship with a dead process.
-
-```admiral-request
-{ "request": "ship-resume", "shipId": "uuid-of-ship" }
+```bash
+curl -s http://localhost:9721/api/ship-resume \
+  -H 'Content-Type: application/json' \
+  -d '{"shipId": "uuid-of-ship"}'
 ```
 
 - Only works on Ships whose process has died (processDead).
 - Preferred over re-sortie because it preserves context.
+
+### 5. pr-review-result — Submit PR Review
+
+```bash
+curl -s http://localhost:9721/api/pr-review-result \
+  -H 'Content-Type: application/json' \
+  -d '{"shipId": "uuid-of-ship", "prNumber": 42, "verdict": "approve"}'
+```
+
+- `verdict`: `"approve"` or `"request-changes"`
+- `comments` (optional): Review comments string
+
+## Error Handling
+
+All endpoints return structured JSON:
+- **200**: `{ "ok": true, "result": "..." }` — operation succeeded
+- **400**: `{ "ok": false, "error": "..." }` — validation error (bad input)
+- **404**: `{ "ok": false, "error": "..." }` — unknown endpoint
+- **500**: `{ "ok": false, "error": "..." }` — internal error
+
+Flagship can check `ok` field or HTTP status code to detect failures.
 
 ## Environment Variables (VIBE_ADMIRAL mode)
 
@@ -108,9 +125,9 @@ FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
 
 Flagship MUST follow these rules when dealing with Ship state information:
 
-1. **Always call `ship-status` before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first issue a `ship-status` admiral-request. Never rely on Ship information from your conversation history.
+1. **Always call the `ship-status` API before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first call `GET /api/ship-status`. Never rely on Ship information from your conversation history.
 
 2. **Context-cached Ship data is stale.** After context compaction or session resumption, Ship information in your history is outdated. Treat it as hints for planning, never as facts for reporting.
 
 ## Handling Results
-When the Engine returns results, **summarize** in natural language. Omit internal Ship UUIDs and gate metadata.
+When the API returns results, **summarize** in natural language. Omit internal Ship UUIDs and gate metadata.

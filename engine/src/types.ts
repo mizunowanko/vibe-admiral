@@ -237,11 +237,6 @@ export type FlagshipRequest =
 /** @deprecated Use FlagshipRequest instead. Kept for backward compat. */
 export type BridgeRequest = FlagshipRequest;
 
-// === Admiral Request ===
-// Note: ShipRequest type was removed in #442. Ships no longer issue admiral-requests.
-// Only Flagship can issue requests (sortie, ship-status, ship-stop, ship-resume, pr-review-result).
-export type AdmiralRequest = FlagshipRequest;
-
 // === Ship Process Info ===
 export interface ShipProcess {
   id: string;
