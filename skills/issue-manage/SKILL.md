@@ -46,6 +46,23 @@ Optional labels:
 
 If ambiguous, ask the human before creating the issue.
 
+## Issue Creation Best Practices
+
+- Always include clear requirements, acceptance criteria, and type labels
+- Include `--label status/ready` and one `type/*` label in every `gh issue create` command
+
+## Dependency Tracking
+
+- Use `depends-on/<number>` labels to mark blocking relationships (one label per dependency)
+- The Engine automatically removes `depends-on/<N>` labels and transitions `status/mooring` → `status/ready` when a dependency issue is closed
+
+## Sortie Readiness Evaluation
+
+When asked about what to work on next:
+1. Assess issue clarity and priority
+2. Recommend a sortie order to the user
+3. The user can then ask Flagship to launch sorties
+
 ## Issue Triage Rules
 
 When reviewing or organizing existing issues:
@@ -55,3 +72,9 @@ When reviewing or organizing existing issues:
 3. **Type accuracy**: re-evaluate against classification criteria. If comments changed the nature of work, update accordingly
 4. **Legacy labels**: remove outdated labels not following `status/` or `type/` prefix convention. Replace with correct labels
 5. **Dependency labels**: ensure `depends-on/<number>` labels are accurate. Remove for closed dependencies. Migrate body "## Dependencies" sections to labels
+
+## Priority Rules
+
+- Evaluate urgency and impact when triaging issues
+- Use `priority/*` labels to indicate importance (`priority/critical` for urgent issues)
+- Only humans may apply the `priority/critical` label — Dock may suggest it but must not apply it
