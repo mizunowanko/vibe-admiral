@@ -249,17 +249,17 @@ export const ChatMessage = memo(function ChatMessage({ message, repeatCount, con
     );
   }
 
-  // Escort log — Escort process messages displayed left-aligned with purple styling
+  // Escort log — Escort process messages displayed left-aligned with light blue styling
   if (message.meta?.category === "escort-log") {
     return (
       <div className="flex w-full justify-start">
         <div
           className={cn(
             "max-w-[90%] rounded-lg px-3 py-2 text-sm border",
-            "border-violet-500/20 bg-violet-500/5",
+            "border-sky-500/30 bg-sky-500/10",
           )}
         >
-          <span className="text-xs font-mono block mb-1 text-violet-400/70">
+          <span className="text-xs font-mono block mb-1 text-sky-400/80">
             [Escort]
           </span>
           <div className="bridge-markdown break-words text-card-foreground">
@@ -273,7 +273,7 @@ export const ChatMessage = memo(function ChatMessage({ message, repeatCount, con
             </ReactMarkdown>
           </div>
           {message.timestamp && (
-            <span className="block text-[10px] mt-1 text-violet-400/50">
+            <span className="block text-[10px] mt-1 text-sky-400/50">
               {formatTime(message.timestamp)}
             </span>
           )}
