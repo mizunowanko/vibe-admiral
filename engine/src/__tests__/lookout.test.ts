@@ -94,8 +94,8 @@ describe("Lookout", () => {
   });
 
   describe("gate-wait-stall", () => {
-    it("alerts when a Ship has been waiting for gate response > 3 minutes", () => {
-      const staleRequestTime = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+    it("alerts when a Ship has been waiting for gate response > 10 minutes", () => {
+      const staleRequestTime = new Date(Date.now() - 11 * 60 * 1000).toISOString();
       const ship = makeShip({
         gateCheck: makeGateCheck({ requestedAt: staleRequestTime }),
       });
@@ -110,7 +110,7 @@ describe("Lookout", () => {
       expect(alerts[0]!.message).toContain("waiting for gate response");
     });
 
-    it("does not alert when gate wait is < 3 minutes", () => {
+    it("does not alert when gate wait is < 10 minutes", () => {
       const recentRequestTime = new Date(Date.now() - 1 * 60 * 1000).toISOString();
       const ship = makeShip({
         gateCheck: makeGateCheck({ requestedAt: recentRequestTime }),
@@ -138,9 +138,9 @@ describe("Lookout", () => {
   });
 
   describe("no-output-stall", () => {
-    it("alerts when Ship has no output for > 3 minutes and process is running", () => {
+    it("alerts when Ship has no output for > 10 minutes and process is running", () => {
       const ship = makeShip({
-        lastOutputAt: Date.now() - 4 * 60 * 1000,
+        lastOutputAt: Date.now() - 11 * 60 * 1000,
       });
       mockShipManager.getAllShips.mockReturnValue([ship]);
       mockProcessManager.isRunning.mockReturnValue(true);
