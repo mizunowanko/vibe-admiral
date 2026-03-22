@@ -1,12 +1,13 @@
 ---
 name: acceptance-test-gate
-description: Playwright E2E テスト Gate の Escort 実行手順。Escort sub-agent が自動起動時に使用
+description: Acceptance-test Gate の Escort 実行手順。Escort sub-agent が自動起動時に使用
 user-invocable: true
 ---
 
-# /acceptance-test-gate — Playwright E2E Test Gate (Engine Escort)
+# /acceptance-test-gate — Acceptance Test Gate (Engine Escort)
 
 Engine が acceptance-test-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
+Playwright E2E テストを実行し、Issue の受け入れ基準と照合して、結果を PR コメントに書き込む。
 
 ## 引数
 
@@ -34,10 +35,12 @@ Engine が acceptance-test-gate フェーズを検知したとき、独立プロ
    ```
    PR が見つからない場合は、gate を reject して feedback "PR not found" を書き込む。
 
-3. Issue の要件を確認:
+3. Issue の全コンテキストを取得:
    ```bash
-   gh issue view <ISSUE_NUMBER> --repo "$REPO" --json title,body
+   gh issue view <ISSUE_NUMBER> --repo "$REPO" --json title,body,comments
    ```
+   - Issue 本文の「受け入れ基準」セクションを特定する
+   - Implementation Plan コメントからテスト方針を把握する
 
 4. E2E テスト環境を準備:
    ```bash
@@ -67,35 +70,65 @@ Engine が acceptance-test-gate フェーズを検知したとき、独立プロ
 8. テスト結果を判定:
    - `TEST_EXIT=0` → 全テスト合格
    - `TEST_EXIT≠0` → テスト失敗あり
+   - Issue の受け入れ基準の各項目について、Playwright テスト結果と diff の内容から充足度を評価する
 
-9. **GitHub にテスト結果を記録**:
+9. **結果を PR コメントとして書き込む**:
+
+   以下のフォーマットで PR コメントを投稿する:
    ```bash
-   gh pr comment <PR_NUMBER> --repo "$REPO" --body "## Acceptance Test (Playwright E2E)
-
-   <テスト結果サマリ>
-
-   **Verdict: APPROVE** (or REJECT)"
+   gh pr comment <PR_NUMBER> --repo "$REPO" --body "<formatted result>"
    ```
+
+   コメントのフォーマット:
+   ```markdown
+   ## Acceptance Test Result: ✅ PASS / ❌ FAIL
+
+   ### テスト項目
+   - [x] テスト項目 1（pass の場合）
+   - [x] テスト項目 2（pass の場合）
+   - [ ] テスト項目 3（fail の場合）
+
+   ### 詳細
+   <details>
+   <summary>検証ログ</summary>
+
+   各テスト項目の検証内容と結果の詳細をここに記載する。
+   - どのテストファイル・テストケースを確認したか
+   - Playwright テスト実行の出力サマリ
+   - Issue 受け入れ基準との対応関係
+   - fail の場合は具体的な不足点
+
+   </details>
+
+   ### 判定
+   **APPROVE** / **REQUEST CHANGES** — 判定理由の説明
+
+   🤖 Generated with [Claude Code](https://claude.com/claude-code)
+   ```
+
+   > **重要**: ヘッダーの `✅ PASS` / `❌ FAIL` は全テスト項目の結果に基づいて決定する。
+   > 1 つでも fail があれば `❌ FAIL` とする。
 
 10. Engine REST API で gate verdict を送信:
 
-    承認の場合:
+    承認の場合（全テスト項目 pass）:
     ```bash
     curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
       -H 'Content-Type: application/json' \
       -d '{"verdict": "approve"}'
     ```
 
-    拒否の場合:
+    拒否の場合（1 つ以上の項目が fail）:
     ```bash
     curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
       -H 'Content-Type: application/json' \
-      -d '{"verdict": "reject", "feedback": "<失敗したテストと修正すべき点>"}'
+      -d '{"verdict": "reject", "feedback": "<fail した項目と修正すべき点の要約>"}'
     ```
 
-## Review Guidelines
+## Test Guidelines
 
 - All existing E2E tests must pass
 - If no E2E tests exist yet, approve (test coverage is tracked separately)
 - Flaky test failures: re-run once before rejecting
-- For re-reviews: verify previous feedback was addressed. Do NOT repeat same rejection if fixed
+- 受け入れ基準が明示されていない場合は、Issue タイトルと本文から暗黙の基準を推定する
+- For re-tests: 前回 fail した項目が修正されているかを重点的に確認する。修正済みなら pass に切り替える
