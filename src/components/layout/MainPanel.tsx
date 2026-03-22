@@ -36,7 +36,7 @@ export function MainPanel() {
           ) : (
             <>
               {(["dock", "flagship"] as const satisfies readonly CommanderRole[]).map((role) => (
-                <div key={role} className={activeCommanderTab === role ? "flex flex-1 min-h-0 flex-col" : "hidden"}>
+                <div key={role} className={activeCommanderTab === role ? "flex flex-1 h-full min-h-0 flex-col" : "hidden"}>
                   <Bridge fleetId={selectedFleetId} role={role} />
                 </div>
               ))}
