@@ -24,13 +24,13 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
   const [sortieRepo, setSortieRepo] = useState("");
   const [sortieIssue, setSortieIssue] = useState("");
   const [showSortieForm, setShowSortieForm] = useState(false);
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   const activeShips = useMemo(
     () => ships.filter((s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead),
     [ships],
   );
-  const completedShips = useMemo(
+  const inactiveShips = useMemo(
     () => ships.filter((s) => s.phase === "done" || s.phase === "stopped" || s.processDead),
     [ships],
   );
@@ -131,7 +131,7 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
 
       {/* Grid */}
       <div className="flex-1 overflow-auto p-4">
-        {activeShips.length === 0 && completedShips.length === 0 ? (
+        {activeShips.length === 0 && inactiveShips.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Ship className="h-12 w-12 mb-2 opacity-20" />
             <p className="text-sm">No ships deployed</p>
@@ -153,22 +153,22 @@ export const ShipGrid = memo(function ShipGrid({ fleetId }: ShipGridProps) {
                 ))}
               </div>
             )}
-            {completedShips.length > 0 && (
+            {inactiveShips.length > 0 && (
               <div className={activeShips.length > 0 ? "mt-4" : ""}>
                 <button
-                  onClick={() => setShowCompleted(!showCompleted)}
+                  onClick={() => setShowInactive(!showInactive)}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
                 >
-                  {showCompleted ? (
+                  {showInactive ? (
                     <ChevronDown className="h-3 w-3" />
                   ) : (
                     <ChevronRight className="h-3 w-3" />
                   )}
-                  Completed ({completedShips.length})
+                  Inactive ({inactiveShips.length})
                 </button>
-                {showCompleted && (
+                {showInactive && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {completedShips.map((ship) => (
+                    {inactiveShips.map((ship) => (
                       <ShipCard
                         key={ship.id}
                         ship={ship}
