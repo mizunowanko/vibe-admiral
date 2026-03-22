@@ -497,8 +497,9 @@ export class ShipManager {
       "implement-review",
       "implement-merge",
       // Gate skills (deployed to worktree; Engine launches Escort processes that use these)
-      "gate-plan-review",
-      "gate-code-review",
+      "planning-gate",
+      "implementing-gate",
+      "acceptance-test-gate",
       // Shared skills (Bridge/Ship common)
       "admiral-protocol",
       "read-issue",

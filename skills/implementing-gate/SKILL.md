@@ -1,12 +1,12 @@
 ---
-name: gate-code-review
+name: implementing-gate
 description: Code-review Gate の Escort 実行手順。Escort sub-agent が自動起動時に使用
 user-invocable: true
 ---
 
-# /gate-code-review — Code Review Gate (Engine Escort)
+# /implementing-gate — Code Review Gate (Engine Escort)
 
-Engine が code-review gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
+Engine が implementing-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 
 ## 引数
 
