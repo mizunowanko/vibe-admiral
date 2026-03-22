@@ -104,7 +104,7 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
 Phase 遷移後、Engine が Escort プロセスを起動する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-TIMEOUT=300; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in implementing) echo "Gate approved"; break ;; planning) echo "Gate rejected"; break ;; planning-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in implementing) echo "Gate approved"; break ;; planning) echo "Gate rejected"; break ;; planning-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
 - `implementing` に遷移済み → Escort が承認。`/implement-code` に進む
