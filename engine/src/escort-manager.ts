@@ -96,6 +96,20 @@ export class EscortManager {
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
     };
 
+    // For acceptance-test-gate, read qaRequired from the planning-gate transition metadata
+    if (gatePhase === "acceptance-test-gate") {
+      const db = this.getDatabase();
+      if (db) {
+        const transitions = db.getPhaseTransitions(shipId, 50);
+        const planningGateTransition = transitions.find(
+          (t) => t.toPhase === "planning-gate",
+        );
+        const metadata = planningGateTransition?.metadata as Record<string, unknown> | null;
+        const qaRequired = metadata?.qaRequired ?? true; // default true (conservative)
+        escortEnv.VIBE_ADMIRAL_QA_REQUIRED = String(qaRequired);
+      }
+    }
+
     this.processManager.launchEscort(
       escortId,
       ship.worktreePath,
