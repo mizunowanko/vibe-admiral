@@ -17,7 +17,7 @@ engine/dist/
 
 # Test
 test-results/
-e2e/qa-gate-e2e-patched.ts
+playwright-report/
 
 # Admiral local data
 .vibe-admiral/
