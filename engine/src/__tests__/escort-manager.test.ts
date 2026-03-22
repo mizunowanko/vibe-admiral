@@ -10,6 +10,8 @@ type MockProcessManager = {
 type MockShipManager = {
   getShip: ReturnType<typeof vi.fn>;
   getDbPath: ReturnType<typeof vi.fn>;
+  clearGateCheck: ReturnType<typeof vi.fn>;
+  syncPhaseFromDb: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Record<string, unknown> = {}) {
@@ -36,10 +38,13 @@ describe("EscortManager", () => {
     mockShipManager = {
       getShip: vi.fn().mockReturnValue(makeShip()),
       getDbPath: vi.fn().mockReturnValue("/tmp/fleet.db"),
+      clearGateCheck: vi.fn(),
+      syncPhaseFromDb: vi.fn(),
     };
     escortManager = new EscortManager(
       mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
       mockShipManager as unknown as ConstructorParameters<typeof EscortManager>[1],
+      () => null,
     );
   });
 
@@ -60,6 +65,7 @@ describe("EscortManager", () => {
         {
           VIBE_ADMIRAL_SHIP_ID: "ship-001",
           VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
+          VIBE_ADMIRAL_ENGINE_PORT: "9721",
         },
       );
     });

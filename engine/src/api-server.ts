@@ -2,8 +2,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { FlagshipRequestHandler } from "./bridge-request-handler.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
+import type { EscortManager } from "./escort-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
-import { isGatePhase, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { isGatePhase, DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 
 const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
@@ -11,6 +12,7 @@ interface ApiDeps {
   requestHandler: FlagshipRequestHandler;
   getDatabase: () => FleetDatabase | null;
   getShipManager: () => ShipManager;
+  getEscortManager: () => EscortManager;
   loadFleets: () => Promise<Array<{
     id: string;
     repos: FleetRepo[];
@@ -222,6 +224,16 @@ async function handleShipRoute(
 
       if (applied) {
         shipManager.syncPhaseFromDb(shipId);
+
+        // If transitioning TO a gate phase, set gateCheck and launch Escort
+        if (isGatePhase(targetPhase as Phase)) {
+          const gatePhase = targetPhase as GatePhase;
+          const gateType = DEFAULT_GATE_TYPES[gatePhase];
+          shipManager.setGateCheck(shipId, gatePhase, gateType);
+
+          const escortManager = deps.getEscortManager();
+          escortManager.launchEscort(shipId, gatePhase, gateType);
+        }
       }
 
       sendJson(res, 200, { ok: true, phase: targetPhase });
@@ -268,6 +280,7 @@ async function handleShipRoute(
     try {
       db.transitionPhase(shipId, currentPhase, targetPhase, "escort", metadata);
       shipManager.syncPhaseFromDb(shipId);
+      shipManager.clearGateCheck(shipId);
       sendJson(res, 200, { ok: true, phase: targetPhase });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

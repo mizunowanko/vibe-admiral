@@ -1,6 +1,8 @@
 import type { ProcessManager } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
-import type { GatePhase, GateType } from "./types.js";
+import type { FleetDatabase } from "./db.js";
+import type { GatePhase, GateType, Phase } from "./types.js";
+import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
 /** Maps gate phases to the skill name that the Escort CLI should invoke. */
 const GATE_SKILL_MAP: Record<GatePhase, string> = {
@@ -33,12 +35,20 @@ export interface EscortInfo {
 export class EscortManager {
   private processManager: ProcessManager;
   private shipManager: ShipManager;
+  private getDatabase: () => FleetDatabase | null;
   /** Active Escort processes indexed by shipId (one Escort per Ship at a time). */
   private escorts = new Map<string, EscortInfo>();
+  private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
 
-  constructor(processManager: ProcessManager, shipManager: ShipManager) {
+  constructor(processManager: ProcessManager, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
     this.processManager = processManager;
     this.shipManager = shipManager;
+    this.getDatabase = getDatabase;
+  }
+
+  /** Set callback for Escort death notifications (sent to Flagship). */
+  setEscortDeathHandler(handler: (shipId: string, message: string) => void): void {
+    this.onEscortDeathCallback = handler;
   }
 
   /**
@@ -77,6 +87,7 @@ export class EscortManager {
     const escortEnv: Record<string, string> = {
       VIBE_ADMIRAL_SHIP_ID: shipId,
       VIBE_ADMIRAL_MAIN_REPO: ship.repo,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
     };
 
     this.processManager.launchEscort(
@@ -137,7 +148,11 @@ export class EscortManager {
     return undefined;
   }
 
-  /** Handle Escort process exit. Cleans up tracking state. */
+  /**
+   * Handle Escort process exit.
+   * If the Escort exited without submitting a verdict (Ship phase is still a gate phase),
+   * treat it as a rejection: revert phase to pre-gate, clear gateCheck, and notify Flagship.
+   */
   onEscortExit(escortId: string, code: number | null): void {
     const shipId = this.findShipIdByEscortId(escortId);
     if (!shipId) return;
@@ -148,6 +163,44 @@ export class EscortManager {
     console.log(
       `[escort-manager] Escort ${escortId} exited (code=${code}) for Ship ${shipId.slice(0, 8)}... gate=${info?.gatePhase}`,
     );
+
+    // Check if verdict was submitted: if phase is still a gate phase, verdict was NOT submitted
+    const db = this.getDatabase();
+    if (!db || !info) return;
+
+    const ship = db.getShipById(shipId);
+    if (!ship) return;
+
+    const currentPhase = ship.phase as Phase;
+    if (!isGatePhase(currentPhase)) {
+      // Phase already moved past gate — verdict was submitted successfully
+      this.shipManager.clearGateCheck(shipId);
+      return;
+    }
+
+    // Escort died without submitting verdict — treat as rejection
+    const prevPhase = GATE_PREV_PHASE[currentPhase as GatePhase];
+    console.warn(
+      `[escort-manager] Escort ${escortId} died without verdict — reverting Ship ${shipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
+    );
+
+    // Revert phase to pre-gate (reject)
+    try {
+      db.transitionPhase(shipId, currentPhase, prevPhase, "escort", {
+        gate_result: "rejected",
+        feedback: `Escort process exited unexpectedly (code=${code}) without submitting verdict`,
+      });
+      this.shipManager.syncPhaseFromDb(shipId);
+    } catch (err) {
+      console.error(`[escort-manager] Failed to revert phase for Ship ${shipId.slice(0, 8)}...:`, err);
+    }
+
+    // Clear gate check state
+    this.shipManager.clearGateCheck(shipId);
+
+    // Notify Flagship
+    const message = `Escort died without verdict for Ship #${ship.issueNumber} (${ship.issueTitle}) during ${currentPhase}. Phase reverted to ${prevPhase}. (exit code=${code})`;
+    this.onEscortDeathCallback?.(shipId, message);
   }
 
   /** Kill all running Escort processes. */

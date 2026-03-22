@@ -68,14 +68,15 @@ export class EngineServer {
     this.dockManager = new DockManager(this.processManager);
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
-    this.escortManager = new EscortManager(this.processManager, this.shipManager);
-    this.lookout = new Lookout(this.shipManager, this.processManager);
+    this.escortManager = new EscortManager(this.processManager, this.shipManager, () => this.fleetDb);
+    this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
 
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
     const apiHandler = createApiHandler({
       requestHandler: this.requestHandler,
       getDatabase: () => this.fleetDb,
       getShipManager: () => this.shipManager,
+      getEscortManager: () => this.escortManager,
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
       broadcastRequestResult: (fleetId, result) => {
@@ -491,6 +492,34 @@ export class EngineServer {
     });
 
     this.lookout.start();
+
+    // Escort death notifications → Flagship chat
+    this.escortManager.setEscortDeathHandler((shipId, message) => {
+      const ship = this.shipManager.getShip(shipId);
+      if (!ship) return;
+
+      const deathMsg: StreamMessage = {
+        type: "system",
+        subtype: "ship-status",
+        content: `[Escort Death] ${message}`,
+        meta: {
+          category: "ship-status",
+          issueNumber: ship.issueNumber,
+          issueTitle: ship.issueTitle,
+        },
+        timestamp: Date.now(),
+      };
+      this.flagshipManager.addToHistory(ship.fleetId, deathMsg);
+      this.broadcast({
+        type: "flagship:stream",
+        data: { fleetId: ship.fleetId, message: deathMsg },
+      });
+
+      const flagshipId = `flagship-${ship.fleetId}`;
+      if (this.processManager.isRunning(flagshipId)) {
+        this.processManager.sendMessage(flagshipId, `[Escort Death] ${message}`);
+      }
+    });
   }
 
   private async handleMessage(
