@@ -270,7 +270,26 @@ async function handleShipRoute(
           // If no Escort is running (died or not yet launched), launch one now.
           const escortManager = deps.getEscortManager();
           if (!escortManager.isEscortRunning(shipId)) {
-            escortManager.launchEscort(shipId, gatePhase, gateType);
+            const escortId = escortManager.launchEscort(shipId, gatePhase, gateType);
+            if (!escortId) {
+              // Escort launch failed — revert phase to pre-gate to avoid permanent stall
+              const prevPhase = GATE_PREV_PHASE[gatePhase];
+              console.error(
+                `[api-server] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
+              );
+              try {
+                db.transitionPhase(shipId, gatePhase, prevPhase, "engine", {
+                  gate_result: "rejected",
+                  feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+                });
+                shipManager.syncPhaseFromDb(shipId);
+              } catch (revertErr) {
+                console.error(`[api-server] Failed to revert phase for Ship ${shipId.slice(0, 8)}...:`, revertErr);
+              }
+              shipManager.clearGateCheck(shipId);
+              sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
+              return;
+            }
           }
         } else if (targetPhase === "done") {
           actorManager.send(shipId, { type: "COMPLETE" });
