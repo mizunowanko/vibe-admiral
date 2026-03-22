@@ -11,15 +11,16 @@ argument-hint: [issue-numbers]
 
 ## Autonomous Sortie Flow
 
-1. Run `gh issue list --label status/ready` to get ready issues
-2. For each issue, check `depends-on/<N>` labels to identify dependencies. If an issue has `depends-on/` labels pointing to open issues, it is blocked
-3. Read body AND comments (`gh issue view <number> --json number,title,body,labels,state,comments`) for additional context: sub-issues, "## Dependencies" section (legacy), priority overrides, and human decisions
-4. **Issue Clarity Check** — Assess each sortie candidate (see below)
-5. Identify which issues are UNBLOCKED, labeled "status/ready", and sufficiently clear
-6. Apply Sortie Priority Rules to determine the recommended order
-7. Explain analysis to the human (which issues are ready, which are blocked and why, which need clarification, and the proposed priority order)
-8. Launch UNBLOCKED + "status/ready" + **clear** issues via `sortie` admiral-request
-9. After sortie, monitor with `ship-status` when asked
+1. Run `gh issue list --state open` to get all open issues
+2. Filter out issues with `status/sortied` label (already active)
+3. For each candidate, check `depends-on/<N>` labels to identify dependencies. If an issue has `depends-on/` labels pointing to open issues, it is blocked
+4. Read body AND comments (`gh issue view <number> --json number,title,body,labels,state,comments`) for additional context: sub-issues, "## Dependencies" section (legacy), priority overrides, and human decisions
+5. **Issue Clarity Check** — Assess each sortie candidate (see below)
+6. Identify which issues are UNBLOCKED and sufficiently clear
+7. Apply Sortie Priority Rules to determine the recommended order
+8. Explain analysis to the human (which issues are ready, which are blocked and why, which need clarification, and the proposed priority order)
+9. Launch UNBLOCKED + **clear** issues via `sortie` admiral-request
+10. After sortie, monitor with `ship-status` when asked
 
 ## Issue Clarity Check
 
@@ -62,16 +63,16 @@ Evaluate the issue body (and comments) for:
 - "Add a dark mode toggle to Settings page. Store preference in localStorage. Default to system preference."
 - "Fix: clicking 'Save' on the Fleet config page causes a 500 error when `maxConcurrentSorties` is empty. Expected: validation prevents empty submission."
 
-> **NOTE**: The Engine automatically removes `depends-on/<N>` labels and transitions `status/mooring` → `status/ready` when a dependency issue is closed.
+> **NOTE**: The Engine automatically removes `depends-on/<N>` labels when a dependency issue is closed.
 
 ## Label System
 
-### Status labels (`status/` prefix) — Engine-managed, mutually exclusive
+### Status labels (`status/` prefix) — Engine-managed
 | Label | Meaning |
 |-------|---------|
-| `status/ready` | Ready for sortie |
 | `status/sortied` | Ship is active |
-| `status/mooring` | Blocked by dependencies |
+
+> No label = sortie candidate. Only `status/sortied` exists. The Engine adds it on sortie and removes it on rollback/completion.
 
 ### Type labels (`type/` prefix) — set by Bridge or human
 | Priority | Label | Commit prefix |
@@ -101,10 +102,9 @@ Issues with `priority/critical` override base priority and sort first. Only huma
 ### Dependency Constraint
 - Issues with `depends-on/<N>` pointing to open issues are blocked and MUST NOT be sortied
 - Within same tier, fewer `depends-on/` labels come first (they unblock others)
-- `status/mooring` issues are excluded from candidates
 
 ### Decision Flow
-1. Collect all `status/ready` issues
+1. Collect all open issues without `status/sortied` label
 2. Filter out issues with `depends-on/<N>` pointing to open issues
 3. Separate `priority/critical` issues (these come first)
 4. Sort remaining by base type priority

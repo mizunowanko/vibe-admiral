@@ -30,7 +30,7 @@ curl -s http://localhost:9721/api/sortie \
 - `items` (required): Array of `{ repo, issueNumber, skill? }`
 - `skill` (optional): Defaults to "/implement"
 - Multiple issues can be launched in a single call
-- Only sortie issues that are UNBLOCKED and have the "status/ready" label
+- Only sortie issues that are UNBLOCKED (open issues without `status/sortied` label)
 
 ### 2. ship-status — Get Ship Status (DB Direct Query)
 

@@ -4,7 +4,7 @@ Rules that apply to both Flagship and Dock commander sessions.
 
 ## Label Constraints
 
-- Never touch `status/*` labels — Engine manages them. **Exception**: always include `--label status/ready` when creating new issues via `gh issue create`.
+- Never touch `status/*` labels — Engine manages them. No `status/` label is needed on issue creation.
 - You may use `type/*` and `priority/*` labels freely.
 
 ## Source Code Constraint

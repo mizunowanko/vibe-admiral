@@ -94,7 +94,7 @@ describe("ACTIVE_STATUS_LABELS", () => {
     expect(ACTIVE_STATUS_LABELS.size).toBe(1);
   });
 
-  it("excludes legacy per-phase labels", () => {
+  it("excludes legacy labels", () => {
     expect(ACTIVE_STATUS_LABELS.has("status/planning")).toBe(false);
     expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(false);
     expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(false);
@@ -289,7 +289,7 @@ describe("StateSync", () => {
       mockListIssues.mockResolvedValue([
         makeIssue({
           number: 50,
-          labels: ["depends-on/42", "status/mooring", "type/feature"],
+          labels: ["depends-on/42", "type/feature"],
         }),
       ]);
       mockUpdateLabels.mockResolvedValue(undefined);
@@ -299,53 +299,6 @@ describe("StateSync", () => {
       // Should remove the depends-on/42 label
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
         remove: "depends-on/42",
-      });
-    });
-
-    it("transitions status/mooring → status/ready when all deps resolved", async () => {
-      mockListIssues.mockResolvedValue([
-        makeIssue({
-          number: 50,
-          labels: ["depends-on/42", "status/mooring", "type/feature"],
-        }),
-      ]);
-      mockUpdateLabels.mockResolvedValue(undefined);
-
-      await stateSync.auditDependencies(REPO, 42);
-
-      // Should transition mooring → ready
-      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
-        remove: "status/mooring",
-        add: "status/ready",
-      });
-    });
-
-    it("does not unblock if other depends-on labels still reference open issues", async () => {
-      mockListIssues.mockResolvedValue([
-        makeIssue({
-          number: 50,
-          labels: [
-            "depends-on/42",
-            "depends-on/99",
-            "status/mooring",
-            "type/feature",
-          ],
-        }),
-      ]);
-      mockUpdateLabels.mockResolvedValue(undefined);
-      // depends-on/99 still points to an open issue
-      mockGetIssue.mockResolvedValue(makeIssue({ number: 99, state: "open" }));
-
-      await stateSync.auditDependencies(REPO, 42);
-
-      // Should remove depends-on/42 label
-      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
-        remove: "depends-on/42",
-      });
-      // Should NOT transition to status/ready because depends-on/99 is still open
-      expect(mockUpdateLabels).not.toHaveBeenCalledWith(REPO, 50, {
-        remove: "status/mooring",
-        add: "status/ready",
       });
     });
 
@@ -389,22 +342,24 @@ describe("StateSync", () => {
       expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 99, 3);
     });
 
-    it("rolls back legacy per-phase labels from pre-refactoring", async () => {
+    it("removes legacy labels (status/ready, status/mooring, etc.)", async () => {
       mockListIssues.mockImplementation(async (_repo, label) => {
-        if (label === "status/implementing") {
-          return [makeIssue({ number: 88, labels: ["status/implementing"] })];
+        if (label === "status/ready") {
+          return [makeIssue({ number: 88, labels: ["status/ready"] })];
         }
         return [];
       });
       mockGetRepoRoot.mockResolvedValue("/repo");
       mockListFeatureWorktrees.mockResolvedValue([]);
-      mockStatusManager.rollback.mockResolvedValue(undefined);
+      mockUpdateLabels.mockResolvedValue(undefined);
 
       await stateSync.reconcileOnStartup([
         { remote: REPO, localPath: "/repo" },
       ]);
 
-      expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 88, 3);
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 88, {
+        remove: "status/ready",
+      });
     });
 
     it("does not roll back labels for active ships", async () => {

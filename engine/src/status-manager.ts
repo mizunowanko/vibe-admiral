@@ -7,11 +7,12 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Mapping between internal IssueStatus and GitHub label names.
- * Only two labels exist: status/ready and status/sortied.
- * "done" has no label — the issue is simply closed.
+ * Only one status label exists: status/sortied.
+ * "ready" = open issue without status/sortied (no label).
+ * "done" = issue closed (no label).
  */
 const STATUS_TO_LABEL: ReadonlyMap<IssueStatus, string> = new Map([
-  ["ready", "status/ready"],
+  ["ready", ""], // ready = no status label (open issue)
   ["sortied", "status/sortied"],
   ["done", ""], // done = issue closed, no label
 ]);
@@ -32,7 +33,7 @@ const VALID_TRANSITIONS: ReadonlyMap<IssueStatus, readonly IssueStatus[]> =
  * All status changes (ready/sortied/done) MUST go through this manager.
  * The GitHub Issue label is the single source of truth for issue status.
  *
- * Labels use the `status/` prefix: `status/ready` and `status/sortied`.
+ * Only `status/sortied` exists as a label. "ready" means no status label.
  * Per-phase labels have been removed — Ship phase is tracked in the local DB only.
  */
 export class StatusManager {
@@ -72,7 +73,7 @@ export class StatusManager {
     if (issue.state === "closed") return { status: "done", currentLabel };
     if (currentLabel === "status/sortied")
       return { status: "sortied", currentLabel };
-    // Any other status/* label or no label → treat as ready
+    // No status/* label (or unknown label) → treat as ready
     return { status: "ready", currentLabel: currentLabel ?? undefined };
   }
 
@@ -128,7 +129,8 @@ export class StatusManager {
   }
 
   /**
-   * Rollback an issue from "sortied" to "ready" with exponential backoff retry.
+   * Rollback an issue from "sortied" to "ready" (removes status/sortied label)
+   * with exponential backoff retry.
    */
   async rollback(
     repo: string,
@@ -198,7 +200,7 @@ export class StatusManager {
   ): Promise<void> {
     switch (to) {
       case "sortied": {
-        // ready → sortied: remove "status/ready", add "status/sortied"
+        // ready → sortied: add "status/sortied" (remove any stale status/* label)
         await github.updateLabels(repo, issueNumber, {
           remove: currentLabel,
           add: STATUS_TO_LABEL.get("sortied"),
@@ -206,11 +208,12 @@ export class StatusManager {
         break;
       }
       case "ready": {
-        // sortied → ready (rollback): remove current status/* label, add "status/ready"
-        await github.updateLabels(repo, issueNumber, {
-          remove: currentLabel,
-          add: STATUS_TO_LABEL.get("ready"),
-        });
+        // sortied → ready (rollback): just remove current status/* label
+        if (currentLabel) {
+          await github.updateLabels(repo, issueNumber, {
+            remove: currentLabel,
+          });
+        }
         break;
       }
       case "done": {

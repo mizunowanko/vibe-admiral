@@ -43,9 +43,9 @@ describe("StatusManager", () => {
       expect(await manager.getStatus(REPO, 1)).toBe("done");
     });
 
-    it("returns 'ready' for issues with status/ready label", async () => {
+    it("returns 'ready' for issues with no status/ label", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/ready", "type/feature"] }),
+        makeIssue({ labels: ["type/feature"] }),
       );
       expect(await manager.getStatus(REPO, 1)).toBe("ready");
     });
@@ -57,8 +57,8 @@ describe("StatusManager", () => {
       expect(await manager.getStatus(REPO, 1)).toBe("sortied");
     });
 
-    it("returns 'ready' for issues with no status/ label", async () => {
-      mockGetIssue.mockResolvedValue(makeIssue({ labels: ["type/feature"] }));
+    it("returns 'ready' for issues with empty labels", async () => {
+      mockGetIssue.mockResolvedValue(makeIssue({ labels: [] }));
       expect(await manager.getStatus(REPO, 1)).toBe("ready");
     });
   });
@@ -82,11 +82,11 @@ describe("StatusManager", () => {
   describe("transition", () => {
     it("transitions ready → sortied", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/ready"] }),
+        makeIssue({ labels: ["type/feature"] }),
       );
       await manager.transition(REPO, 1, "sortied");
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 1, {
-        remove: "status/ready",
+        remove: undefined,
         add: "status/sortied",
       });
     });
@@ -102,20 +102,19 @@ describe("StatusManager", () => {
       expect(mockCloseIssue).toHaveBeenCalledWith(REPO, 1);
     });
 
-    it("transitions sortied → ready (rollback)", async () => {
+    it("transitions sortied → ready (rollback): just removes status/sortied", async () => {
       mockGetIssue.mockResolvedValue(
         makeIssue({ labels: ["status/sortied"] }),
       );
       await manager.transition(REPO, 1, "ready");
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 1, {
         remove: "status/sortied",
-        add: "status/ready",
       });
     });
 
     it("is a no-op when already at target status", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/ready"] }),
+        makeIssue({ labels: ["type/feature"] }),
       );
       await manager.transition(REPO, 1, "ready");
       expect(mockUpdateLabels).not.toHaveBeenCalled();
@@ -123,7 +122,7 @@ describe("StatusManager", () => {
 
     it("throws on invalid transition (ready → done)", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/ready"] }),
+        makeIssue({ labels: ["type/feature"] }),
       );
       await expect(manager.transition(REPO, 1, "done")).rejects.toThrow(
         "Invalid status transition for #1: ready → done",
@@ -153,7 +152,7 @@ describe("StatusManager", () => {
       await expect(second).rejects.toThrow("Concurrent status transition");
 
       // Resolve the first to clean up
-      resolveGetIssue!(makeIssue({ labels: ["status/ready"] }));
+      resolveGetIssue!(makeIssue({ labels: [] }));
       await first;
     });
   });
@@ -190,9 +189,9 @@ describe("StatusManager", () => {
       expect(await manager.isSortied(REPO, 1)).toBe(true);
     });
 
-    it("returns false for ready status", async () => {
+    it("returns false for ready status (no status label)", async () => {
       mockGetIssue.mockResolvedValue(
-        makeIssue({ labels: ["status/ready"] }),
+        makeIssue({ labels: ["type/feature"] }),
       );
       expect(await manager.isSortied(REPO, 1)).toBe(false);
     });

@@ -56,7 +56,7 @@ gh pr checks "$PR_NUM" --watch
 
 指摘の分類:
 - **BLOCKER**: この PR で修正必要 → 修正 → commit & push → Step 2 に戻る
-- **NICE TO HAVE**: 別 Issue で対応 → `gh issue create --label status/ready`
+- **NICE TO HAVE**: 別 Issue で対応 → `gh issue create`
 - **NO NEED**: 対応不要
 - **LGTM**: Step 4 へ
 

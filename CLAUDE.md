@@ -110,15 +110,14 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 
 ## ラベル体系
 
-### ステータスラベル（`status/` prefix）— 排他的
+### ステータスラベル（`status/` prefix）
 | ラベル | 意味 |
 |--------|------|
-| `status/ready` | 出撃準備完了（Sortie 可能） |
 | `status/sortied` | 出撃中（Ship 稼働中） |
-| `status/mooring` | 係留中（依存関係で出撃不可） |
 
+> ラベルなし = Sortie 候補（open issue）。`status/sortied` のみが存在する。
 > `stopped` は DB phase であり、ラベルではない。Ship 停止中も `status/sortied` を保持する。
-> per-phase labels (`status/planning`, `status/implementing` 等) は廃止済み。Ship phase は DB で管理。
+> 依存関係の追跡は `depends-on/*` ラベルで行う。
 
 ### カテゴリラベル（`type/` prefix）— 人間または Bridge が付与
 | 優先順位 | ラベル | コミット prefix |

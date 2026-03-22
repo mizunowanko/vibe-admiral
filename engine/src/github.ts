@@ -83,7 +83,7 @@ export async function createIssue(
     const depLines = dependsOn.map((n) => `- Depends on #${n}`).join("\n");
     finalBody = `${body}\n\n## Dependencies\n${depLines}`;
   }
-  const labelList = labels && labels.length > 0 ? labels : ["status/ready"];
+  const labelList = labels && labels.length > 0 ? labels : [];
   const args = [
     "issue",
     "create",

@@ -2,7 +2,6 @@ import type { ShipManager } from "./ship-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import { parseDependsOnLabels } from "./github.js";
 
 /** The only active status label is "status/sortied". */
 export const ACTIVE_STATUS_LABELS = new Set([
@@ -189,7 +188,7 @@ export class StateSync {
           );
         }
       } else {
-        // Genuinely failed: rollback sortied→ready
+        // Genuinely failed: rollback sortied→ready (removes status/sortied label)
         await this.rollbackLabel(ship.repo, ship.issueNumber);
       }
     }
@@ -247,37 +246,8 @@ export class StateSync {
 
     for (const issue of dependentIssues) {
       try {
+        // Remove the resolved depends-on label
         await github.updateLabels(repo, issue.number, { remove: label });
-
-        const remainingDeps = parseDependsOnLabels(
-          issue.labels.filter((l) => l !== label),
-        );
-
-        let allResolved = true;
-        if (remainingDeps.length > 0) {
-          for (const depNum of remainingDeps) {
-            try {
-              const dep = await github.getIssue(repo, depNum);
-              if (dep.state === "open") {
-                allResolved = false;
-                break;
-              }
-            } catch {
-              allResolved = false;
-              break;
-            }
-          }
-        }
-
-        if (allResolved && issue.labels.includes("status/mooring")) {
-          console.log(
-            `[state-sync] All dependencies resolved for #${issue.number} — unblocking (status/mooring → status/ready)`,
-          );
-          await github.updateLabels(repo, issue.number, {
-            remove: "status/mooring",
-            add: "status/ready",
-          });
-        }
       } catch (err) {
         console.warn(
           `[state-sync] Failed to audit dependency label for #${issue.number}:`,
@@ -310,7 +280,7 @@ export class StateSync {
           for (const issue of labeledIssues) {
             if (!isActive(issue.number)) {
               console.warn(
-                `[state-sync] Orphan "${label}" label on #${issue.number} — rolling back to "status/ready"`,
+                `[state-sync] Orphan "${label}" label on #${issue.number} — removing`,
               );
               await this.rollbackLabel(repo.remote!, issue.number);
             }
@@ -327,16 +297,21 @@ export class StateSync {
       }
 
       // Also clean up legacy labels from pre-refactoring
-      const legacyLabels = ["status/todo", "status/blocked", "status/planning", "status/implementing", "status/acceptance-test", "status/merging"];
+      const legacyLabels = ["status/ready", "status/mooring", "status/todo", "status/blocked", "status/planning", "status/implementing", "status/acceptance-test", "status/merging"];
       for (const label of legacyLabels) {
         try {
           const labeledIssues = await github.listIssues(repo.remote!, label);
           for (const issue of labeledIssues) {
-            if (!isActive(issue.number)) {
+            console.warn(
+              `[state-sync] Legacy label "${label}" on #${issue.number} — removing`,
+            );
+            try {
+              await github.updateLabels(repo.remote!, issue.number, { remove: label });
+            } catch (removeErr) {
               console.warn(
-                `[state-sync] Legacy label "${label}" on #${issue.number} — rolling back to "status/ready"`,
+                `[state-sync] Failed to remove legacy label "${label}" from #${issue.number}:`,
+                removeErr,
               );
-              await this.rollbackLabel(repo.remote!, issue.number);
             }
           }
         } catch {

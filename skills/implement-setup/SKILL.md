@@ -32,16 +32,15 @@ DEFAULT_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBran
   ```bash
   gh issue view <番号> --repo "$REPO" --json number,title,body,labels,comments
   ```
-  **重要: `status/` prefix のアクティブラベル（`status/ready` 以外）が付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
+  **重要: `status/sortied` ラベルが付いている場合は「この Issue は既に作業中です。続行しますか？」とユーザーに確認する。**
 
-- 指定がない場合: **必ず `--label status/ready` を指定して**取得:
+- 指定がない場合: open issues から `status/sortied` ラベルが付いていないものを取得:
   ```bash
-  gh issue list --repo "$REPO" --label status/ready --state open --json number,title
+  gh issue list --repo "$REPO" --state open --json number,title,labels
   ```
-  Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
-  **アクティブステータスラベルが付いている Issue は絶対に選択しない。**
+  `status/sortied` ラベルが付いている Issue を除外し、Sub-issues をチェックして unblocked なものの中から番号が若い順で選択する。
 
-- ラベル変更: Engine が `status/ready` → `status/sortied` の遷移を自動で行うため、スキル側でのラベル操作は不要。
+- ラベル変更: Engine が `status/sortied` の遷移を自動で行うため、スキル側でのラベル操作は不要。
 
 ## Step 2: Worktree 作成
 
