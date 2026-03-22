@@ -190,7 +190,7 @@ export class EngineServer {
         if (shipId) {
           const ship = this.shipManager.getShip(shipId);
           const parsed = parseStreamMessage(msg);
-          if (parsed) {
+          if (parsed && parsed.type !== "result") {
             // Mark assistant messages with escort-log metadata for visual distinction
             if (parsed.type === "assistant") {
               parsed.meta = {
@@ -301,14 +301,17 @@ export class EngineServer {
         // Ship stream — parse raw CLI JSON before broadcast
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          this.logShipMessage(id, parsed);
-          this.broadcast({
-            type: "ship:stream",
-            data: { id, message: parsed },
-          });
-
-          // Detect PR URL in assistant/result messages
+          // Detect PR URL in assistant/result messages (before filtering)
           this.detectPRCreation(id, parsed);
+
+          // Skip result messages — they duplicate the last assistant message
+          if (parsed.type !== "result") {
+            this.logShipMessage(id, parsed);
+            this.broadcast({
+              type: "ship:stream",
+              data: { id, message: parsed },
+            });
+          }
         }
       }
     });
