@@ -56,8 +56,9 @@ skills/                Skills（Claude Code が on-demand で注入）
   implement/           /implement オーケストレータ + 5 sub-skills
   adr/                 /adr スキル（ADR 作成・更新・検索）
   admiral-protocol/    admiral-request プロトコル仕様
-  gate-plan-review/    plan-review Gate Dispatch
-  gate-code-review/    code-review Gate Dispatch
+  planning-gate/       planning-gate Escort スキル
+  implementing-gate/   implementing-gate Escort スキル
+  acceptance-test-gate/ acceptance-test-gate Escort スキル
   sortie/              Sortie 計画・優先順位
   issue-manage/        Issue 作成・整理
   investigate/         調査 Dispatch テンプレート

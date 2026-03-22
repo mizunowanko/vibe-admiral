@@ -1,12 +1,12 @@
 ---
-name: gate-plan-review
+name: planning-gate
 description: Plan-review Gate の Escort 実行手順。Escort sub-agent が自動起動時に使用
 user-invocable: true
 ---
 
-# /gate-plan-review — Plan Review Gate (Engine Escort)
+# /planning-gate — Plan Review Gate (Engine Escort)
 
-Engine が plan-review gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
+Engine が planning-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 
 ## 引数
 

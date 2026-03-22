@@ -6,9 +6,9 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
 /** Maps gate phases to the skill name that the Escort CLI should invoke. */
 const GATE_SKILL_MAP: Record<GatePhase, string> = {
-  "planning-gate": "gate-plan-review",
-  "implementing-gate": "gate-code-review",
-  "acceptance-test-gate": "gate-code-review", // placeholder — playwright not yet implemented
+  "planning-gate": "planning-gate",
+  "implementing-gate": "implementing-gate",
+  "acceptance-test-gate": "acceptance-test-gate",
 };
 
 /** Information about a running Escort process. */
@@ -27,7 +27,7 @@ export interface EscortInfo {
  * Lifecycle:
  * 1. Engine detects gate phase via phase change polling
  * 2. EscortManager.launchEscort() spawns a Claude CLI process with the
- *    appropriate gate skill (e.g. /gate-plan-review)
+ *    appropriate gate skill (e.g. /planning-gate)
  * 3. Escort performs review, directly updates phases table and phase_transitions
  * 4. Ship polls phases table for phase changes
  * 5. On Escort process exit, EscortManager cleans up tracking state

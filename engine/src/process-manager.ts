@@ -95,7 +95,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Launch an Escort process for gate review (plan-review, code-review, etc.).
+   * Launch an Escort process for gate review (planning-gate, implementing-gate, etc.).
    * Escorts are non-interactive (-p mode) like Ships, but run a gate skill
    * instead of /implement. Launched by EscortManager when Engine detects
    * a gate phase.
