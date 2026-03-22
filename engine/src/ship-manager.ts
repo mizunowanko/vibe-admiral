@@ -266,6 +266,42 @@ export class ShipManager {
   }
 
   /**
+   * Abandon a Ship: transition from stopped → done.
+   * Used for zombie cleanup when a Ship cannot be resumed.
+   * Returns true if the ship was abandoned, false if not in "stopped" phase.
+   */
+  abandonShip(shipId: string): boolean {
+    const ship = this.getShip(shipId);
+    if (!ship || ship.phase !== "stopped") return false;
+
+    // Kill process if somehow still running
+    this.processManager.kill(shipId);
+
+    this.actorManager?.send(shipId, { type: "ABANDON" });
+    this.updatePhase(shipId, "done", "Abandoned (zombie cleanup)");
+    return true;
+  }
+
+  /**
+   * Delete a Ship from DB and runtime. For unrecoverable zombie cleanup.
+   * Kills the process if running, removes runtime state, Actor, and DB record.
+   * Returns true if the ship was deleted, false if not found.
+   */
+  deleteShip(shipId: string): boolean {
+    const ship = this.getShip(shipId);
+    if (!ship) return false;
+
+    // Kill process if running
+    this.processManager.kill(shipId);
+
+    // Clean up runtime, Actor, and DB
+    this.runtime.delete(shipId);
+    this.actorManager?.stopActor(shipId);
+    this.fleetDb?.deleteShip(shipId);
+    return true;
+  }
+
+  /**
    * Get a Ship by ID. Reads persistent data from DB and merges runtime state.
    * Returns a mutable ShipProcess with runtime data overlaid.
    */
@@ -334,16 +370,18 @@ export class ShipManager {
    * Bridge/frontend can display the derived "process dead" state.
    */
   notifyProcessDead(shipId: string): void {
+    const ship = this.getShip(shipId);
+    if (!ship) return;
+    // Process death in "done" phase is expected — no notification needed
+    if (ship.phase === "done") return;
+
     const rt = this.ensureRuntime(shipId);
     if (!rt) return;
     rt.processDead = true;
     this.actorManager?.send(shipId, { type: "PROCESS_DIED" });
     // Trigger notification without changing the phase — the UI derives
     // "process dead" from phase ≠ done && processDead flag.
-    const ship = this.getShip(shipId);
-    if (ship) {
-      this.onPhaseChange?.(shipId, ship.phase, "Process dead");
-    }
+    this.onPhaseChange?.(shipId, ship.phase, "Process dead");
   }
 
   updatePhase(id: string, phase: Phase, detail?: string): void {
@@ -662,6 +700,18 @@ export class ShipManager {
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
     };
 
+    // Sync phaseBeforeStopped from DB into Actor context before RESUME,
+    // so the RESUME guards have the correct phase to restore to.
+    if (ship.phase === "stopped") {
+      const phaseBeforeStopped = this.fleetDb?.getPhaseBeforeStopped(shipId);
+      if (phaseBeforeStopped) {
+        this.actorManager?.send(shipId, {
+          type: "SET_PHASE_BEFORE_STOPPED",
+          phase: phaseBeforeStopped,
+        });
+      }
+    }
+
     // Send RESUME event to Actor (transitions from stopped to previous phase)
     this.actorManager?.send(shipId, { type: "RESUME" });
 
@@ -792,7 +842,11 @@ export class ShipManager {
         });
 
         // Restore XState Actor for this Ship
-        this.actorManager?.restoreActor(ship);
+        // For stopped Ships, restore phaseBeforeStopped from DB so RESUME guards work
+        const phaseBeforeStopped = ship.phase === "stopped"
+          ? this.fleetDb?.getPhaseBeforeStopped(ship.id) ?? null
+          : null;
+        this.actorManager?.restoreActor(ship, phaseBeforeStopped);
 
         restored++;
       }

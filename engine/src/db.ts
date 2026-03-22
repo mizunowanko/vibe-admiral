@@ -235,13 +235,14 @@ export class FleetDatabase {
     this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
   }
 
-  /** Get all ships with non-terminal phase (for startup restoration). */
+  /** Get all ships with non-terminal phase (for startup restoration).
+   *  Includes "stopped" ships so they can be resumed after Engine restart. */
   getActiveShips(): ShipProcess[] {
     const rows = this.db.prepare(`
       SELECT s.*, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase NOT IN ('done', 'stopped')
+      WHERE s.phase != 'done'
     `).all() as ShipJoinRow[];
 
     return rows.map((row) => this.rowToShipProcess(row));

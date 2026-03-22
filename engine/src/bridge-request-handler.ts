@@ -29,6 +29,10 @@ export class FlagshipRequestHandler {
         return this.handleShipStop(request);
       case "ship-resume":
         return this.handleShipResume(request, shipExtraPrompt);
+      case "ship-abandon":
+        return this.handleShipAbandon(request);
+      case "ship-delete":
+        return this.handleShipDelete(request);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
     }
@@ -163,6 +167,34 @@ export class FlagshipRequestHandler {
 
     const method = ship.sessionId ? "session resume" : "re-sortie";
     return `[Ship Resumed] Ship #${ship.issueNumber} (${ship.issueTitle}) resumed via ${method}`;
+  }
+
+  private handleShipAbandon(
+    request: Extract<FlagshipRequest, { request: "ship-abandon" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId);
+    if (!ship) {
+      return `[Ship Abandon Failed] Ship ${request.shipId} not found`;
+    }
+    const abandoned = this.shipManager.abandonShip(ship.id);
+    if (abandoned) {
+      return `[Ship Abandoned] Ship #${ship.issueNumber} (${ship.issueTitle}) moved to done`;
+    }
+    return `[Ship Abandon Failed] Ship #${ship.issueNumber} is not in "stopped" phase (current: ${ship.phase})`;
+  }
+
+  private handleShipDelete(
+    request: Extract<FlagshipRequest, { request: "ship-delete" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId);
+    if (!ship) {
+      return `[Ship Delete Failed] Ship ${request.shipId} not found`;
+    }
+    const deleted = this.shipManager.deleteShip(ship.id);
+    if (deleted) {
+      return `[Ship Deleted] Ship #${ship.issueNumber} (${ship.issueTitle}) removed`;
+    }
+    return `[Ship Delete Failed] Could not delete Ship ${request.shipId}`;
   }
 
   private handlePRReviewResult(

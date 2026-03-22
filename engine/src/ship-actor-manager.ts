@@ -63,7 +63,7 @@ export class ShipActorManager {
    * Creates the actor at the correct initial state matching the DB phase.
    * Called during Engine startup reconciliation.
    */
-  restoreActor(ship: ShipProcess): Actor<typeof shipMachine> | null {
+  restoreActor(ship: ShipProcess, phaseBeforeStopped?: Phase | null): Actor<typeof shipMachine> | null {
     // Don't restore terminal states
     if (ship.phase === "done") return null;
 
@@ -80,6 +80,7 @@ export class ShipActorManager {
       sessionId: ship.sessionId,
       prUrl: ship.prUrl,
       qaRequired: ship.qaRequired,
+      phaseBeforeStopped: phaseBeforeStopped ?? null,
     };
 
     // Create actor — XState v5 always starts at "planning" (initial state).

@@ -74,6 +74,20 @@ function validateShipResumeRequest(body: unknown): FlagshipRequest | string {
   return { request: "ship-resume", shipId: b.shipId };
 }
 
+function validateShipAbandonRequest(body: unknown): FlagshipRequest | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
+  return { request: "ship-abandon", shipId: b.shipId };
+}
+
+function validateShipDeleteRequest(body: unknown): FlagshipRequest | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
+  return { request: "ship-delete", shipId: b.shipId };
+}
+
 function validatePRReviewResultRequest(body: unknown): FlagshipRequest | string {
   if (typeof body !== "object" || body === null) return "Invalid request body";
   const b = body as Record<string, unknown>;
@@ -180,6 +194,17 @@ async function handleShipRoute(
     const limit = Math.min(Number(url.searchParams.get("limit")) || 10, 100);
     const transitions = db.getPhaseTransitions(shipId, limit);
     sendJson(res, 200, { ok: true, transitions });
+    return;
+  }
+
+  // DELETE /api/ship/:shipId/delete — Force-delete a Ship (zombie cleanup)
+  if (action === "delete" && req.method === "DELETE") {
+    const deleted = shipManager.deleteShip(shipId);
+    if (deleted) {
+      sendJson(res, 200, { ok: true });
+    } else {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+    }
     return;
   }
 
@@ -335,6 +360,28 @@ async function handleShipRoute(
     return;
   }
 
+  // POST /api/ship/:shipId/abandon — Abandon a stopped Ship (transition to done)
+  if (action === "abandon") {
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    if (ship.phase !== "stopped") {
+      sendJson(res, 400, { ok: false, error: `Ship must be in "stopped" phase to abandon (current: ${ship.phase})` });
+      return;
+    }
+
+    const abandoned = shipManager.abandonShip(shipId);
+    if (abandoned) {
+      sendJson(res, 200, { ok: true, phase: "done" });
+    } else {
+      sendJson(res, 400, { ok: false, error: "Failed to abandon ship" });
+    }
+    return;
+  }
+
   sendJson(res, 404, { ok: false, error: `Unknown ship action: ${action}` });
 }
 
@@ -396,7 +443,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       }
 
       // Check if route is a known POST endpoint
-      const postRoutes = new Set(["sortie", "ship-stop", "ship-resume", "pr-review-result"]);
+      const postRoutes = new Set(["sortie", "ship-stop", "ship-resume", "ship-abandon", "ship-delete", "pr-review-result"]);
       if (!postRoutes.has(route)) {
         sendJson(res, 404, { ok: false, error: `Unknown endpoint: /api/${route}` });
         return;
@@ -436,6 +483,12 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           break;
         case "ship-resume":
           request = validateShipResumeRequest(body);
+          break;
+        case "ship-abandon":
+          request = validateShipAbandonRequest(body);
+          break;
+        case "ship-delete":
+          request = validateShipDeleteRequest(body);
           break;
         case "pr-review-result":
           request = validatePRReviewResultRequest(body);
