@@ -32,6 +32,8 @@ export interface ShipActorSideEffects {
 
 export class ShipActorManager {
   private actors = new Map<string, Actor<typeof shipMachine>>();
+  /** Tracks the effective DB phase for restored actors (Actor may be in a different XState state). */
+  private effectivePhase = new Map<string, Phase>();
   private sideEffects: ShipActorSideEffects | null = null;
 
   setSideEffects(effects: ShipActorSideEffects): void {
@@ -50,6 +52,8 @@ export class ShipActorManager {
     this.setupSubscription(input.shipId, actor);
     actor.start();
     this.actors.set(input.shipId, actor);
+    // New actors start at "planning" — no effective phase override needed
+    this.effectivePhase.delete(input.shipId);
 
     return actor;
   }
@@ -78,15 +82,18 @@ export class ShipActorManager {
       qaRequired: ship.qaRequired,
     };
 
-    // Create a fresh actor — XState v5 doesn't support arbitrary initial state
-    // restoration in the same way as v4. We create at "planning" and then
-    // the DB remains the source of truth for the current phase during restoration.
-    // The actor is used primarily for event-driven transitions going forward.
+    // Create actor — XState v5 always starts at "planning" (initial state).
+    // We track the effective DB phase separately to avoid spurious side effects.
+    // The actor is used for event-driven transitions going forward; getPhase()
+    // returns the effective phase (DB truth) rather than the Actor's XState state.
     const actor = createActor(shipMachine, { input });
-    this.setupSubscription(ship.id, actor);
+    this.setupSubscription(ship.id, actor, { suppressInitial: true });
     actor.start();
 
     this.actors.set(ship.id, actor);
+    // Store the DB phase as the effective phase — getPhase() returns this
+    // instead of the Actor's XState state until a real transition occurs.
+    this.effectivePhase.set(ship.id, ship.phase as Phase);
 
     return actor;
   }
@@ -104,9 +111,14 @@ export class ShipActorManager {
 
   /**
    * Get the current phase from the Actor's state.
-   * Falls back to undefined if no actor exists.
+   * For restored actors, returns the effective DB phase until a real
+   * transition occurs through the Actor. Falls back to undefined if no actor exists.
    */
   getPhase(shipId: string): Phase | undefined {
+    // Return effective phase if set (restored actors)
+    const effective = this.effectivePhase.get(shipId);
+    if (effective) return effective;
+
     const actor = this.actors.get(shipId);
     if (!actor) return undefined;
     const snapshot = actor.getSnapshot();
@@ -138,6 +150,7 @@ export class ShipActorManager {
       actor.stop();
       this.actors.delete(shipId);
     }
+    this.effectivePhase.delete(shipId);
   }
 
   /**
@@ -148,6 +161,7 @@ export class ShipActorManager {
       actor.stop();
     }
     this.actors.clear();
+    this.effectivePhase.clear();
   }
 
   /**
@@ -159,9 +173,16 @@ export class ShipActorManager {
 
   /**
    * Subscribe to Actor state changes and dispatch side effects.
+   * @param suppressInitial If true, suppress the initial state notification
+   *   (used for restored actors where the DB phase is the source of truth).
    */
-  private setupSubscription(shipId: string, actor: Actor<typeof shipMachine>): void {
+  private setupSubscription(
+    shipId: string,
+    actor: Actor<typeof shipMachine>,
+    options?: { suppressInitial?: boolean },
+  ): void {
     let previousPhase: string | null = null;
+    const suppressInitial = options?.suppressInitial ?? false;
 
     actor.subscribe((snapshot) => {
       const currentPhase = snapshot.value as string;
@@ -169,9 +190,18 @@ export class ShipActorManager {
       // Only dispatch on actual phase changes
       if (currentPhase === previousPhase) return;
 
+      const isInitial = previousPhase === null;
       previousPhase = currentPhase;
 
+      // Skip initial state notification for both new and restored actors
+      if (isInitial && suppressInitial) return;
+      if (isInitial) return;
+
       const phase = stateValueToPhase(currentPhase);
+
+      // When a real transition occurs on a restored actor, clear the effective
+      // phase override so getPhase() starts returning the Actor's XState state.
+      this.effectivePhase.delete(shipId);
 
       // Dispatch side effects
       this.sideEffects?.onPhaseChange(shipId, phase);
