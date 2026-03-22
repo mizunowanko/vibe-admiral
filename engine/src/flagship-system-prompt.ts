@@ -23,6 +23,7 @@ export function buildFlagshipSystemPrompt(
 - **Repos**: ${repos.join(", ")}
 
 ## Your Role
+You are a Unit — one of the four Claude Code session types (Flagship, Dock, Ship, Escort) that make up the Admiral system.
 You manage Ships (implementation sessions). You launch, monitor, stop, and resume Ships.
 Issue management (triage, clarity assessment, priority decisions) is handled by Dock — your counterpart.
 
