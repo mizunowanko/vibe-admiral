@@ -15,22 +15,6 @@ interface E2EContext {
   vitePort: number;
 }
 
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, () => {
-      const addr = server.address();
-      if (addr && typeof addr === "object") {
-        const port = addr.port;
-        server.close(() => resolve(port));
-      } else {
-        server.close(() => reject(new Error("Failed to get port")));
-      }
-    });
-    server.on("error", reject);
-  });
-}
-
 function waitForPort(port: number, timeoutMs = 30_000): Promise<void> {
   const start = Date.now();
   return new Promise((resolve, reject) => {
@@ -52,15 +36,20 @@ function waitForPort(port: number, timeoutMs = 30_000): Promise<void> {
   });
 }
 
+// Defaults must match the fallback values in playwright.e2e.config.ts so that
+// the config's synchronous port read and this async setup stay in sync.
+const DEFAULT_VITE_PORT = 1520;
+const DEFAULT_ENGINE_PORT = 9821;
+
 export default async function globalSetup(config: FullConfig) {
-  // Respect pre-set ports from env (the Playwright config reads these at
-  // load time, so they must stay consistent between config and setup).
-  const enginePort = process.env.E2E_ENGINE_PORT
-    ? parseInt(process.env.E2E_ENGINE_PORT, 10)
-    : await getRandomPort();
-  const vitePort = process.env.E2E_VITE_PORT
-    ? parseInt(process.env.E2E_VITE_PORT, 10)
-    : await getRandomPort();
+  const enginePort = parseInt(
+    process.env.E2E_ENGINE_PORT ?? String(DEFAULT_ENGINE_PORT),
+    10,
+  );
+  const vitePort = parseInt(
+    process.env.E2E_VITE_PORT ?? String(DEFAULT_VITE_PORT),
+    10,
+  );
   const admiralHome = await mkdtemp(join(tmpdir(), "vibe-admiral-test-"));
 
   // Store context for teardown and test access
