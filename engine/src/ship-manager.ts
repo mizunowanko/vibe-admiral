@@ -336,16 +336,17 @@ export class ShipManager {
       } else {
         this.fleetDb?.updateShipPhase(id, phase);
       }
-      // Record phase transition
+      // Only notify when the phase actually changed
       if (previousPhase !== phase) {
+        // Record phase transition
         try {
           this.fleetDb?.recordPhaseTransition(id, previousPhase, phase, "engine");
         } catch (err) {
           console.warn("[ship-manager] Failed to record phase transition:", err);
         }
+        // Notify frontend
+        this.onPhaseChange?.(id, phase, detail);
       }
-      // Notify frontend
-      this.onPhaseChange?.(id, phase, detail);
     }
   }
 
