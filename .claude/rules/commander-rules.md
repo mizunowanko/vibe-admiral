@@ -1,6 +1,6 @@
 # Commander Rules (Flagship / Dock Shared)
 
-Rules that apply to both Flagship and Dock commander sessions.
+Rules that apply to both Flagship and Dock — the two commander Units.
 
 ## Label Constraints
 

@@ -3,6 +3,9 @@
 Rules for spawning and communicating with Claude Code CLI as a subprocess.
 See `engine/src/process-manager.ts` for the implementation.
 
+> **Unit** = Claude Code セッション主体の総称（Ship, Flagship, Dock, Escort）。
+> **Actor** = XState の状態機械インスタンス（`ShipActorManager` が管理）。混同しないこと。
+
 ## stdio Configuration
 
 - **Ship / Session Resume / Escort**: `stdio: ['ignore', 'pipe', 'pipe']`
