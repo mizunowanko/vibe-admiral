@@ -1,4 +1,5 @@
 import { WebSocketServer, type WebSocket } from "ws";
+import { createServer, type Server as HttpServer } from "node:http";
 import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
 import { join, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -19,9 +20,6 @@ import * as github from "./github.js";
 import {
   parseStreamMessage,
   extractSessionId,
-  extractRequests,
-  stripRequestBlocks,
-  isBridgeRequest,
 } from "./stream-parser.js";
 import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
 import { buildDockSystemPrompt } from "./dock-system-prompt.js";
@@ -31,12 +29,14 @@ import { EscortManager } from "./escort-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, FlagshipRequest, StreamMessage, CommanderRole } from "./types.js";
+import { createApiHandler } from "./api-server.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
 
 export class EngineServer {
+  private httpServer: HttpServer;
   private wss: WebSocketServer;
   private processManager: ProcessManager;
   private shipManager: ShipManager;
@@ -71,7 +71,36 @@ export class EngineServer {
     this.escortManager = new EscortManager(this.processManager, this.shipManager);
     this.lookout = new Lookout(this.shipManager, this.processManager);
 
-    this.wss = new WebSocketServer({ port });
+    // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
+    const apiHandler = createApiHandler({
+      requestHandler: this.requestHandler,
+      loadFleets: () => this.loadFleets(),
+      loadRules: (paths) => this.loadRules(paths),
+      broadcastRequestResult: (fleetId, result) => {
+        const resultMessage: StreamMessage = {
+          type: "system",
+          subtype: "request-result",
+          content: result,
+        };
+        this.flagshipManager.addToHistory(fleetId, resultMessage);
+        this.broadcast({
+          type: "flagship:stream",
+          data: { fleetId, message: resultMessage },
+        });
+      },
+    });
+
+    this.httpServer = createServer(apiHandler);
+    this.wss = new WebSocketServer({ noServer: true });
+
+    this.httpServer.on("upgrade", (request, socket, head) => {
+      this.wss.handleUpgrade(request, socket, head, (ws) => {
+        this.wss.emit("connection", ws, request);
+      });
+    });
+
+    this.httpServer.listen(port);
+
     this.setupWSS();
     this.setupProcessEvents();
     this.setupShipStatusHandler();
@@ -79,10 +108,8 @@ export class EngineServer {
     this.startQuestionTimeoutScanner();
     this.setupLookout();
     this.startProcessLivenessCheck();
-    // Note: ShipStatusWatcher (file-based IPC) has been replaced by
-    // admiral-request protocol for Ship → Engine status transitions.
 
-    console.log(`Engine WebSocket server running on port ${port}`);
+    console.log(`Engine HTTP+WebSocket server running on port ${port}`);
   }
 
   private setupWSS(): void {
@@ -206,27 +233,6 @@ export class EngineServer {
               type: questionType,
               data: { fleetId, message: questionMessage },
             });
-          // Check for admiral-request blocks in assistant text
-          } else if (parsed.type === "assistant" && parsed.content) {
-            const allRequests = extractRequests(parsed.content);
-            // Only Flagship can issue ship-control requests
-            const requests = role === "flagship" ? allRequests.filter(isBridgeRequest) : [];
-            const cleanContent = stripRequestBlocks(parsed.content);
-
-            // Broadcast clean text (without request blocks) to frontend
-            if (cleanContent) {
-              const cleanMessage = { ...parsed, content: cleanContent };
-              manager.addToHistory(fleetId, cleanMessage);
-              this.broadcast({
-                type: streamType,
-                data: { fleetId, message: cleanMessage },
-              });
-            }
-
-            // Execute Flagship requests sequentially
-            if (requests.length > 0) {
-              this.executeFlagshipRequestsSequentially(fleetId, id, requests);
-            }
           } else if (parsed.type !== "result") {
             manager.addToHistory(fleetId, parsed);
             this.broadcast({
@@ -257,44 +263,14 @@ export class EngineServer {
         // Ship stream — parse raw CLI JSON before broadcast
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          // Check for admiral-request blocks in Ship assistant text
-          if (parsed.type === "assistant" && parsed.content) {
-            const requests = extractRequests(parsed.content);
-            const cleanContent = stripRequestBlocks(parsed.content);
+          this.logShipMessage(id, parsed);
+          this.broadcast({
+            type: "ship:stream",
+            data: { id, message: parsed },
+          });
 
-            // Broadcast clean text (without request blocks) to frontend
-            if (cleanContent) {
-              const cleanMessage = { ...parsed, content: cleanContent };
-              this.logShipMessage(id, cleanMessage);
-              this.broadcast({
-                type: "ship:stream",
-                data: { id, message: cleanMessage },
-              });
-            }
-
-            // Detect PR URL in assistant messages
-            if (cleanContent) {
-              const cleanMsg = { ...parsed, content: cleanContent };
-              this.detectPRCreation(id, cleanMsg);
-            }
-
-            // Reject any Flagship-only requests from Ship
-            // Ships should not issue admiral-requests (removed in #442)
-            if (requests.length > 0) {
-              console.warn(
-                `[ws-server] Ship ${id} attempted admiral-requests (not allowed): ${requests.map((r) => r.request).join(", ")}`,
-              );
-            }
-          } else {
-            this.logShipMessage(id, parsed);
-            this.broadcast({
-              type: "ship:stream",
-              data: { id, message: parsed },
-            });
-
-            // Detect PR URL in result messages
-            this.detectPRCreation(id, parsed);
-          }
+          // Detect PR URL in assistant/result messages
+          this.detectPRCreation(id, parsed);
         }
       }
     });
@@ -996,69 +972,6 @@ export class EngineServer {
     });
   }
 
-  private async executeFlagshipRequestsSequentially(
-    fleetId: string,
-    flagshipId: string,
-    requests: FlagshipRequest[],
-  ): Promise<void> {
-    const fleets = await this.loadFleets();
-    const fleet = fleets.find((f) => f.id === fleetId);
-    const fleetRepos = fleet?.repos ?? [];
-    const repoRemotes = fleetRepos
-      .map((r) => r.remote)
-      .filter((r): r is string => r !== undefined);
-
-    // Pre-load ship rules for sortie requests
-    const sharedRules = await this.loadRules(fleet?.sharedRulePaths ?? []);
-    const shipRules = await this.loadRules(fleet?.shipRulePaths ?? []);
-    const shipExtraPrompt = [sharedRules, shipRules].filter(Boolean).join("\n\n") || undefined;
-
-    const results: string[] = [];
-
-    for (const request of requests) {
-      try {
-        const result = await this.requestHandler.handle(
-          fleetId,
-          request,
-          fleetRepos,
-          repoRemotes,
-          fleet?.skillSources,
-          shipExtraPrompt,
-          fleet?.maxConcurrentSorties,
-        );
-        results.push(result);
-
-        const resultMessage = {
-          type: "system" as const,
-          subtype: "request-result" as const,
-          content: result,
-        };
-        this.flagshipManager.addToHistory(fleetId, resultMessage);
-        this.broadcast({
-          type: "flagship:stream",
-          data: { fleetId, message: resultMessage },
-        });
-      } catch (err) {
-        const errorResult = `[Request Error] ${err instanceof Error ? err.message : String(err)}`;
-        results.push(errorResult);
-
-        const errorMessage = {
-          type: "system" as const,
-          subtype: "request-result" as const,
-          content: errorResult,
-        };
-        this.flagshipManager.addToHistory(fleetId, errorMessage);
-        this.broadcast({
-          type: "flagship:stream",
-          data: { fleetId, message: errorMessage },
-        });
-      }
-    }
-
-    // Send batched results to Flagship stdin
-    this.processManager.sendMessage(flagshipId, results.join("\n\n"));
-  }
-
   private runStartupReconciliation(): void {
     this.initDatabase()
       .then(() => this.loadFleets())
@@ -1308,5 +1221,6 @@ export class EngineServer {
     this.processManager.killAll();
     this.fleetDb?.close();
     this.wss.close();
+    this.httpServer.close();
   }
 }
