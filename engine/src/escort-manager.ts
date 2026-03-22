@@ -1,6 +1,7 @@
 import type { ProcessManager } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FleetDatabase } from "./db.js";
+import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { GatePhase, GateType, Phase } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
@@ -36,6 +37,7 @@ export class EscortManager {
   private processManager: ProcessManager;
   private shipManager: ShipManager;
   private getDatabase: () => FleetDatabase | null;
+  private actorManager: ShipActorManager | null = null;
   /** Active Escort processes indexed by shipId (one Escort per Ship at a time). */
   private escorts = new Map<string, EscortInfo>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
@@ -44,6 +46,10 @@ export class EscortManager {
     this.processManager = processManager;
     this.shipManager = shipManager;
     this.getDatabase = getDatabase;
+  }
+
+  setActorManager(actorManager: ShipActorManager): void {
+    this.actorManager = actorManager;
   }
 
   /** Set callback for Escort death notifications (sent to Flagship). */
@@ -183,6 +189,13 @@ export class EscortManager {
     console.warn(
       `[escort-manager] Escort ${escortId} died without verdict — reverting Ship ${shipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
     );
+
+    // Send ESCORT_DIED event to XState Actor
+    this.actorManager?.send(shipId, {
+      type: "ESCORT_DIED",
+      exitCode: code,
+      feedback: `Escort process exited unexpectedly (code=${code}) without submitting verdict`,
+    });
 
     // Revert phase to pre-gate (reject)
     try {

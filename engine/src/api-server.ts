@@ -4,6 +4,7 @@ import type { FlagshipRequestHandler } from "./bridge-request-handler.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
+import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
 import { isGatePhase, DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 
@@ -17,6 +18,7 @@ interface ApiDeps {
   getDatabase: () => FleetDatabase | null;
   getShipManager: () => ShipManager;
   getEscortManager: () => EscortManager;
+  getActorManager: () => ShipActorManager;
   loadFleets: () => Promise<Array<{
     id: string;
     repos: FleetRepo[];
@@ -229,14 +231,20 @@ async function handleShipRoute(
       if (applied) {
         shipManager.syncPhaseFromDb(shipId);
 
-        // If transitioning TO a gate phase, set gateCheck and launch Escort
+        // Send event to XState Actor for gate transitions
+        const actorManager = deps.getActorManager();
         if (isGatePhase(targetPhase as Phase)) {
           const gatePhase = targetPhase as GatePhase;
           const gateType = DEFAULT_GATE_TYPES[gatePhase];
           shipManager.setGateCheck(shipId, gatePhase, gateType);
 
+          // Notify Actor of gate entry
+          actorManager.send(shipId, { type: "GATE_ENTER" });
+
           const escortManager = deps.getEscortManager();
           escortManager.launchEscort(shipId, gatePhase, gateType);
+        } else if (targetPhase === "done") {
+          actorManager.send(shipId, { type: "COMPLETE" });
         }
       }
 
@@ -285,6 +293,15 @@ async function handleShipRoute(
       db.transitionPhase(shipId, currentPhase, targetPhase, "escort", metadata);
       shipManager.syncPhaseFromDb(shipId);
       shipManager.clearGateCheck(shipId);
+
+      // Send gate verdict event to XState Actor
+      const actorManager = deps.getActorManager();
+      if (verdict === "approve") {
+        actorManager.send(shipId, { type: "GATE_APPROVED" });
+      } else {
+        actorManager.send(shipId, { type: "GATE_REJECTED", feedback: feedback ?? "" });
+      }
+
       sendJson(res, 200, { ok: true, phase: targetPhase });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -305,6 +322,11 @@ async function handleShipRoute(
     try {
       db.transitionPhase(shipId, ship.phase as Phase, "done", "ship", { reason, nothingToDo: true });
       shipManager.syncPhaseFromDb(shipId);
+
+      // Send nothing-to-do event to XState Actor
+      const actorManager = deps.getActorManager();
+      actorManager.send(shipId, { type: "NOTHING_TO_DO", reason });
+
       sendJson(res, 200, { ok: true, phase: "done" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
