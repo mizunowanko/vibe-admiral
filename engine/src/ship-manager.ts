@@ -228,6 +228,7 @@ export class ShipManager {
     const shipEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: repo,
       VIBE_ADMIRAL_SHIP_ID: shipId,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
     };
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
@@ -590,6 +591,7 @@ export class ShipManager {
     const shipEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: ship.repo,
       VIBE_ADMIRAL_SHIP_ID: shipId,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
     };
 
     if (ship.sessionId) {

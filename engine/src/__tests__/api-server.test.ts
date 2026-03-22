@@ -15,6 +15,7 @@ function createMockDeps() {
     requestHandler: { handle } as unknown as FlagshipRequestHandler,
     getDatabase: vi.fn().mockReturnValue(null),
     getShipManager: vi.fn().mockReturnValue({ syncPhaseFromDb: vi.fn() }),
+    getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn() }),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",
       repos: [{ localPath: "/home/user/repo", remote: "owner/repo" }] as FleetRepo[],
@@ -38,9 +39,11 @@ function createMockDepsWithDb() {
   };
 
   deps.getDatabase.mockReturnValue(mockDb as unknown as FleetDatabase);
-  deps.getShipManager.mockReturnValue({ syncPhaseFromDb } as unknown as ShipManager);
+  const setGateCheck = vi.fn();
+  const clearGateCheck = vi.fn();
+  deps.getShipManager.mockReturnValue({ syncPhaseFromDb, setGateCheck, clearGateCheck } as unknown as ShipManager);
 
-  return { ...deps, _mockDb: mockDb, _syncPhaseFromDb: syncPhaseFromDb };
+  return { ...deps, _mockDb: mockDb, _syncPhaseFromDb: syncPhaseFromDb, _setGateCheck: setGateCheck, _clearGateCheck: clearGateCheck };
 }
 
 // === HTTP test helpers ===

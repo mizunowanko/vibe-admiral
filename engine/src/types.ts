@@ -163,7 +163,8 @@ export type StreamMessageSubtype =
 export type LookoutAlertType =
   | "gate-wait-stall"
   | "no-output-stall"
-  | "excessive-retries";
+  | "excessive-retries"
+  | "escort-death";
 
 export interface SystemMessageMeta {
   category: StreamMessageSubtype;
