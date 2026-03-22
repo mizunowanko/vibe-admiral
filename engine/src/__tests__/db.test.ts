@@ -348,6 +348,43 @@ describe("FleetDatabase", () => {
     });
   });
 
+  describe("getPhaseBeforeStopped", () => {
+    it("returns the phase before the most recent stop", () => {
+      db.upsertShip(makeShip({ phase: "acceptance-test-gate" }));
+      db.recordPhaseTransition("ship-001", "acceptance-test-gate", "stopped", "engine");
+      db.updateShipPhase("ship-001", "stopped");
+
+      const phase = db.getPhaseBeforeStopped("ship-001");
+      expect(phase).toBe("acceptance-test-gate");
+    });
+
+    it("returns the most recent stop's from_phase when stopped multiple times", () => {
+      db.upsertShip(makeShip({ phase: "implementing" }));
+      db.recordPhaseTransition("ship-001", "implementing", "stopped", "engine");
+      db.updateShipPhase("ship-001", "stopped");
+
+      // Resume to implementing-gate, then stop again
+      db.recordPhaseTransition("ship-001", "stopped", "implementing-gate", "engine");
+      db.updateShipPhase("ship-001", "implementing-gate");
+      db.recordPhaseTransition("ship-001", "implementing-gate", "stopped", "engine");
+      db.updateShipPhase("ship-001", "stopped");
+
+      const phase = db.getPhaseBeforeStopped("ship-001");
+      expect(phase).toBe("implementing-gate");
+    });
+
+    it("returns null when no stop transition exists", () => {
+      db.upsertShip(makeShip());
+      const phase = db.getPhaseBeforeStopped("ship-001");
+      expect(phase).toBeNull();
+    });
+
+    it("returns null for non-existent ship", () => {
+      const phase = db.getPhaseBeforeStopped("non-existent");
+      expect(phase).toBeNull();
+    });
+  });
+
   describe("concurrent phase updates (gate exclusivity)", () => {
     it("transitionPhase rejects stale expectedPhase (optimistic locking)", () => {
       db.upsertShip(makeShip({ phase: "planning-gate" }));

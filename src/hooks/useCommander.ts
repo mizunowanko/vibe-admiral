@@ -8,6 +8,11 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const pendingToolUseId = useRef<string | null>(null);
   const historyLoadedRef = useRef(false);
+  // Track the timestamp when we requested history so we can identify
+  // which optimistic messages arrived after the request and must be preserved.
+  const historyRequestedAtRef = useRef<number>(0);
+  // Track previous fleetId/role to detect actual changes vs. effect re-runs
+  const prevFleetRef = useRef<{ fleetId: string | null; role: CommanderRole }>({ fleetId: null, role });
 
   const streamType = `${role}:stream` as const;
   const questionType = `${role}:question` as const;
@@ -21,10 +26,21 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
       setPendingQuestion(null);
       pendingToolUseId.current = null;
       historyLoadedRef.current = false;
+      prevFleetRef.current = { fleetId, role };
       return;
     }
 
-    historyLoadedRef.current = false;
+    // Only clear messages when fleetId or role actually changed to prevent
+    // cross-role leakage. Skip clearing if the effect re-runs with the
+    // same values (e.g. due to dependency identity changes from parent re-renders).
+    const prev = prevFleetRef.current;
+    if (prev.fleetId !== fleetId || prev.role !== role) {
+      setMessages([]);
+      setPendingQuestion(null);
+      pendingToolUseId.current = null;
+      historyLoadedRef.current = false;
+    }
+    prevFleetRef.current = { fleetId, role };
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
       if (msg.type === streamType) {
@@ -37,7 +53,26 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
               const history = JSON.parse(
                 data.message.content ?? "[]",
               ) as StreamMessage[];
-              setMessages(history);
+              // Merge: preserve any optimistic messages (user messages added
+              // after the history request) that aren't in the server history.
+              const requestedAt = historyRequestedAtRef.current;
+              setMessages((prev) => {
+                // Collect messages the user added optimistically after we
+                // requested history — these won't be in the server payload yet.
+                const optimistic = prev.filter(
+                  (m) => (m.timestamp ?? 0) >= requestedAt && m.type === "user",
+                );
+                if (optimistic.length === 0) return history;
+                // Deduplicate: if the history already contains a message with
+                // the same timestamp+content, skip it.
+                const historySet = new Set(
+                  history.map((h) => `${h.timestamp}:${h.content}`),
+                );
+                const unique = optimistic.filter(
+                  (m) => !historySet.has(`${m.timestamp}:${m.content}`),
+                );
+                return unique.length > 0 ? [...history, ...unique] : history;
+              });
               historyLoadedRef.current = true;
               // Restore pending question if the last history message is a question
               const last = history[history.length - 1];
@@ -98,13 +133,16 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     });
 
     // Request history on initial connect
+    historyRequestedAtRef.current = Date.now();
     wsClient.send({ type: `${role}:history`, data: { fleetId } });
 
-    // Re-fetch history on reconnect only if we haven't loaded yet
+    // Re-fetch history on reconnect to pick up any messages
+    // that arrived while disconnected. The merge logic above
+    // preserves any optimistic messages the user already sent.
     const unsubConnect = wsClient.onConnect(() => {
-      if (!historyLoadedRef.current) {
-        wsClient.send({ type: `${role}:history`, data: { fleetId } });
-      }
+      historyLoadedRef.current = false;
+      historyRequestedAtRef.current = Date.now();
+      wsClient.send({ type: `${role}:history`, data: { fleetId } });
     });
 
     return () => {

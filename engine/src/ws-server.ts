@@ -26,6 +26,7 @@ import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { EscortManager } from "./escort-manager.js";
+import { ShipActorManager } from "./ship-actor-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
@@ -46,6 +47,7 @@ export class EngineServer {
   private stateSync: StateSync;
   private requestHandler: FlagshipRequestHandler;
   private escortManager: EscortManager;
+  private actorManager: ShipActorManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
@@ -68,12 +70,39 @@ export class EngineServer {
     this.dockManager = new DockManager(this.processManager);
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
-    this.escortManager = new EscortManager(this.processManager, this.shipManager);
-    this.lookout = new Lookout(this.shipManager, this.processManager);
+    this.escortManager = new EscortManager(this.processManager, this.shipManager, () => this.fleetDb);
+    this.actorManager = new ShipActorManager();
+    this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
+
+    // Wire up ShipActorManager to ShipManager and EscortManager
+    this.shipManager.setActorManager(this.actorManager);
+    this.escortManager.setActorManager(this.actorManager);
+
+    // Configure Actor side effects
+    this.actorManager.setSideEffects({
+      onPhaseChange: (shipId, phase, detail) => {
+        // Actor-driven phase changes are informational — DB updates are
+        // still handled by the existing flow (ship-manager.updatePhase / db.transitionPhase).
+        // The Actor tracks state in parallel to validate transitions.
+        console.log(`[actor] Ship ${shipId.slice(0, 8)}... phase: ${phase}${detail ? ` (${detail})` : ""}`);
+      },
+      onRecordTransition: (shipId, fromPhase, toPhase, triggeredBy, _metadata) => {
+        console.log(`[actor] Ship ${shipId.slice(0, 8)}... transition: ${fromPhase} → ${toPhase} by ${triggeredBy}`);
+      },
+      onLaunchEscort: (shipId, gatePhase, gateType) => {
+        // Escort launch is already handled by the API server / ship-manager flow.
+        // The Actor entry action is informational for now.
+        console.log(`[actor] Ship ${shipId.slice(0, 8)}... gate entry: ${gatePhase} (${gateType})`);
+      },
+    });
 
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
     const apiHandler = createApiHandler({
       requestHandler: this.requestHandler,
+      getDatabase: () => this.fleetDb,
+      getShipManager: () => this.shipManager,
+      getEscortManager: () => this.escortManager,
+      getActorManager: () => this.actorManager,
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
       broadcastRequestResult: (fleetId, result) => {
@@ -81,6 +110,7 @@ export class EngineServer {
           type: "system",
           subtype: "request-result",
           content: result,
+          timestamp: Date.now(),
         };
         this.flagshipManager.addToHistory(fleetId, resultMessage);
         this.broadcast({
@@ -160,7 +190,14 @@ export class EngineServer {
         if (shipId) {
           const ship = this.shipManager.getShip(shipId);
           const parsed = parseStreamMessage(msg);
-          if (parsed) {
+          if (parsed && parsed.type !== "result") {
+            // Mark assistant messages with escort-log metadata for visual distinction
+            if (parsed.type === "assistant") {
+              parsed.meta = {
+                ...parsed.meta,
+                category: "escort-log",
+              };
+            }
             this.broadcast({
               type: "escort:stream",
               data: {
@@ -201,6 +238,7 @@ export class EngineServer {
             type: "system" as const,
             subtype: "commander-status" as const,
             content: `${roleLabel} CLI connected${pid ? ` (pid: ${pid})` : ""}`,
+            timestamp: Date.now(),
           };
           manager.addToHistory(fleetId, connMsg);
           this.broadcast({
@@ -263,14 +301,17 @@ export class EngineServer {
         // Ship stream — parse raw CLI JSON before broadcast
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          this.logShipMessage(id, parsed);
-          this.broadcast({
-            type: "ship:stream",
-            data: { id, message: parsed },
-          });
-
-          // Detect PR URL in assistant/result messages
+          // Detect PR URL in assistant/result messages (before filtering)
           this.detectPRCreation(id, parsed);
+
+          // Skip result messages — they duplicate the last assistant message
+          if (parsed.type !== "result") {
+            this.logShipMessage(id, parsed);
+            this.broadcast({
+              type: "ship:stream",
+              data: { id, message: parsed },
+            });
+          }
         }
       }
     });
@@ -304,6 +345,7 @@ export class EngineServer {
                 issueNumber: ship.issueNumber,
                 issueTitle: ship.issueTitle,
               },
+              timestamp: Date.now(),
             };
             this.flagshipManager.addToHistory(ship.fleetId, escortMsg);
             this.broadcast({
@@ -331,6 +373,7 @@ export class EngineServer {
                 code === 0
                   ? `${roleLabel} session ended.`
                   : `${roleLabel} process exited with code ${code}.`,
+              timestamp: Date.now(),
             },
           },
         });
@@ -378,6 +421,7 @@ export class EngineServer {
             type: "system" as const,
             subtype: "commander-status" as const,
             content: `Failed to start ${roleLabel} CLI: ${error.message}`,
+            timestamp: Date.now(),
           };
           manager.addToHistory(fleetId, errMsg);
           this.broadcast({
@@ -424,12 +468,22 @@ export class EngineServer {
             issueNumber: ship.issueNumber,
             issueTitle: ship.issueTitle,
           },
+          timestamp: Date.now(),
         };
         this.flagshipManager.addToHistory(ship.fleetId, statusMessage);
         this.broadcast({
           type: "flagship:stream",
           data: { fleetId: ship.fleetId, message: statusMessage },
         });
+
+        // Send phase change to Flagship stdin if Flagship is running
+        const flagshipId = `flagship-${ship.fleetId}`;
+        if (this.processManager.isRunning(flagshipId)) {
+          this.processManager.sendMessage(
+            flagshipId,
+            statusMessage.content,
+          );
+        }
       }
     });
   }
@@ -454,6 +508,7 @@ export class EngineServer {
           shipId: alert.shipId,
           branchName: ship.branchName,
         },
+        timestamp: Date.now(),
       };
 
       // Add to Flagship history and broadcast to frontend
@@ -473,6 +528,34 @@ export class EngineServer {
     });
 
     this.lookout.start();
+
+    // Escort death notifications → Flagship chat
+    this.escortManager.setEscortDeathHandler((shipId, message) => {
+      const ship = this.shipManager.getShip(shipId);
+      if (!ship) return;
+
+      const deathMsg: StreamMessage = {
+        type: "system",
+        subtype: "ship-status",
+        content: `[Escort Death] ${message}`,
+        meta: {
+          category: "ship-status",
+          issueNumber: ship.issueNumber,
+          issueTitle: ship.issueTitle,
+        },
+        timestamp: Date.now(),
+      };
+      this.flagshipManager.addToHistory(ship.fleetId, deathMsg);
+      this.broadcast({
+        type: "flagship:stream",
+        data: { fleetId: ship.fleetId, message: deathMsg },
+      });
+
+      const flagshipId = `flagship-${ship.fleetId}`;
+      if (this.processManager.isRunning(flagshipId)) {
+        this.processManager.sendMessage(flagshipId, `[Escort Death] ${message}`);
+      }
+    });
   }
 
   private async handleMessage(
@@ -529,7 +612,7 @@ export class EngineServer {
           break;
         }
         case "flagship:history": {
-          this.handleCommanderHistory(ws, data, "flagship");
+          await this.handleCommanderHistory(ws, data, "flagship");
           break;
         }
 
@@ -543,58 +626,11 @@ export class EngineServer {
           break;
         }
         case "dock:history": {
-          this.handleCommanderHistory(ws, data, "dock");
+          await this.handleCommanderHistory(ws, data, "dock");
           break;
         }
 
-        // Ship operations
-        case "ship:sortie": {
-          const fleets = await this.loadFleets();
-          const fleet = fleets.find((f) => f.id === (data.fleetId as string));
-          const repoStr = data.repo as string;
-          const repoEntry = fleet?.repos.find(
-            (r) => r.remote === repoStr || r.localPath === repoStr,
-          );
-          if (!repoEntry) {
-            throw new Error(
-              `Repo "${data.repo}" not found in fleet. Register the local path first.`,
-            );
-          }
-
-          // Sortie guard check
-          const remoteId = repoEntry.remote ?? repoStr;
-          const guard = await this.stateSync.sortieGuard(remoteId, data.issueNumber as number);
-          if (!guard.ok) {
-            throw new Error(guard.reason ?? "Sortie guard check failed");
-          }
-
-          // Load shared + ship rules for extraPrompt
-          const sharedRulesForShip = await this.loadRules(fleet?.sharedRulePaths ?? []);
-          const shipRules = await this.loadRules(fleet?.shipRulePaths ?? []);
-          const shipExtraPrompt = [sharedRulesForShip, shipRules].filter(Boolean).join("\n\n") || undefined;
-
-          const ship = await this.shipManager.sortie(
-            data.fleetId as string,
-            data.repo as string,
-            data.issueNumber as number,
-            repoEntry.localPath,
-            fleet?.skillSources,
-            shipExtraPrompt,
-          );
-          this.broadcast({
-            type: "ship:created",
-            data: {
-              id: ship.id,
-              fleetId: ship.fleetId,
-              repo: ship.repo,
-              issueNumber: ship.issueNumber,
-              issueTitle: ship.issueTitle,
-              phase: ship.phase,
-              branchName: ship.branchName,
-            },
-          });
-          break;
-        }
+        // Ship operations (sortie/stop/retry/list moved to REST API — see api-server.ts)
         case "ship:chat": {
           const ship = this.shipManager.getShip(data.id as string);
           if (ship?.sessionId) {
@@ -607,45 +643,14 @@ export class EngineServer {
           }
           break;
         }
-        case "ship:retry": {
-          const retryId = data.id as string;
-          const retryShip = this.shipManager.getShip(retryId);
-          if (!retryShip || retryShip.phase === "done" || this.processManager.isRunning(retryId)) {
-            throw new Error(`Ship "${retryId}" is not eligible for retry`);
-          }
-
-          // Load ship rules for re-sortie fallback
-          const retriedFleets = await this.loadFleets();
-          const retryFleet = retriedFleets.find((f) => f.id === retryShip.fleetId);
-          const retrySharedRules = await this.loadRules(retryFleet?.sharedRulePaths ?? []);
-          const retryShipRules = await this.loadRules(retryFleet?.shipRulePaths ?? []);
-          const retryExtraPrompt = [retrySharedRules, retryShipRules].filter(Boolean).join("\n\n") || undefined;
-
-          const result = this.shipManager.retryShip(retryId, retryExtraPrompt);
-          if (!result) {
-            throw new Error(`Failed to retry Ship "${retryId}"`);
-          }
-          break;
-        }
-        case "ship:stop": {
-          const stopId = data.id as string;
-          const stopShip = this.shipManager.getShip(stopId);
-          this.shipManager.stopShip(stopId);
-          // Explicitly rollback label — don't rely solely on process exit handler
-          if (stopShip) {
-            this.stateSync.rollbackLabel(stopShip.repo, stopShip.issueNumber).catch((err) => {
-              console.warn(`[ws-server] Failed to rollback label on ship:stop for #${stopShip.issueNumber}:`, err);
-            });
-          }
-          break;
-        }
         case "ship:logs": {
-          // Ship logs are streamed in real-time, no separate endpoint needed
-          break;
-        }
-        case "ship:list": {
-          const ships = this.shipManager.getAllShips();
-          this.sendTo(ws, { type: "ship:data", data: ships });
+          const shipId = data.id as string;
+          const limit = data.limit as number | undefined;
+          const logs = await this.shipManager.loadShipLogs(shipId, limit);
+          this.sendTo(ws, {
+            type: "ship:history",
+            data: { id: shipId, messages: logs },
+          });
           break;
         }
 
@@ -917,6 +922,7 @@ export class EngineServer {
           type: "system" as const,
           subtype: "commander-status" as const,
           content: `Starting ${roleLabel} session...`,
+          timestamp: Date.now(),
         };
         manager.addToHistory(fleetId, startMsg);
         this.broadcast({
@@ -955,14 +961,16 @@ export class EngineServer {
     }
   }
 
-  private handleCommanderHistory(
+  private async handleCommanderHistory(
     ws: WebSocket,
     data: Record<string, unknown>,
     role: CommanderRole,
-  ): void {
+  ): Promise<void> {
     const manager = role === "flagship" ? this.flagshipManager : this.dockManager;
     const fleetId = data.fleetId as string;
-    const history = manager.getHistory(fleetId);
+    // Use disk fallback so history is available even after Engine restart
+    // (before the Commander process is re-launched by a user message).
+    const history = await manager.getHistoryWithDiskFallback(fleetId);
     this.sendTo(ws, {
       type: `${role}:stream`,
       data: {
@@ -986,11 +994,40 @@ export class EngineServer {
 
   private async initDatabase(): Promise<void> {
     try {
-      this.fleetDb = await initFleetDatabase(getAdmiralHome());
+      const admiralHome = getAdmiralHome();
+      const dbPath = join(admiralHome, "fleet.db");
+      console.log(`[engine] Opening fleet database at: ${dbPath}`);
+
+      this.fleetDb = await initFleetDatabase(admiralHome);
       this.shipManager.setDatabase(this.fleetDb);
+
+      // Verify DB path consistency: warn if ADMIRAL_HOME changed since last run
+      await this.checkDbPathConsistency(admiralHome);
+
       console.log("[engine] Fleet database initialized");
     } catch (err) {
       console.warn("[engine] Failed to initialize fleet database:", err);
+    }
+  }
+
+  /**
+   * Check if the DB path matches the one used in the previous run.
+   * Warns if ADMIRAL_HOME changed, which would create a new empty DB.
+   */
+  private async checkDbPathConsistency(currentHome: string): Promise<void> {
+    const markerPath = join(currentHome, ".db-home-marker");
+    try {
+      const previousHome = await readFile(markerPath, "utf-8").catch(() => null);
+      if (previousHome !== null && previousHome.trim() !== currentHome) {
+        console.warn(
+          `[engine] WARNING: ADMIRAL_HOME changed from "${previousHome.trim()}" to "${currentHome}". ` +
+          `Ship data from the previous path may be inaccessible.`,
+        );
+      }
+      await writeFile(markerPath, currentHome, "utf-8");
+    } catch (err) {
+      // Non-fatal: best-effort consistency tracking
+      console.warn("[engine] Could not check DB path consistency:", err);
     }
   }
 
@@ -1056,6 +1093,7 @@ export class EngineServer {
         type: "system" as const,
         subtype: "ship-status" as const,
         content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
+        timestamp: Date.now(),
       };
       this.flagshipManager.addToHistory(ship.fleetId, compactMsg);
       this.broadcast({
@@ -1161,6 +1199,7 @@ export class EngineServer {
         const answerMsg: StreamMessage = {
           type: "user",
           content: autoAnswer,
+          timestamp: Date.now(),
         };
         manager.addToHistory(fleetId, answerMsg);
 
@@ -1169,6 +1208,7 @@ export class EngineServer {
           type: "system",
           subtype: "commander-status",
           content: `${roleLabel} question timed out — auto-answered with default response.`,
+          timestamp: Date.now(),
         };
         manager.addToHistory(fleetId, timeoutMsg);
         this.broadcast({
@@ -1215,6 +1255,7 @@ export class EngineServer {
       this.processLivenessTimer = null;
     }
     this.escortManager.killAll();
+    this.actorManager.stopAll();
     this.shipManager.stopAll();
     this.flagshipManager.stopAll();
     this.dockManager.stopAll();

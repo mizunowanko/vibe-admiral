@@ -1,5 +1,6 @@
 import type { ShipManager } from "./ship-manager.js";
 import type { ProcessManager } from "./process-manager.js";
+import type { EscortManager } from "./escort-manager.js";
 import type { LookoutAlertType, ShipProcess } from "./types.js";
 
 export interface LookoutAlert {
@@ -11,8 +12,8 @@ export interface LookoutAlert {
   fleetId: string;
 }
 
-const GATE_WAIT_STALL_MS = 3 * 60 * 1000;
-const NO_OUTPUT_STALL_MS = 3 * 60 * 1000;
+const GATE_WAIT_STALL_MS = 10 * 60 * 1000;
+const NO_OUTPUT_STALL_MS = 10 * 60 * 1000;
 const EXCESSIVE_RETRY_THRESHOLD = 2;
 const REALERT_INTERVAL_MS = 10 * 60 * 1000;
 const SCAN_INTERVAL_MS = 30_000;
@@ -20,13 +21,15 @@ const SCAN_INTERVAL_MS = 30_000;
 export class Lookout {
   private shipManager: ShipManager;
   private processManager: ProcessManager;
+  private escortManager: EscortManager;
   private timer: ReturnType<typeof setInterval> | null = null;
   private onAlert: ((alert: LookoutAlert) => void) | null = null;
   private alertsSent = new Map<string, number>();
 
-  constructor(shipManager: ShipManager, processManager: ProcessManager) {
+  constructor(shipManager: ShipManager, processManager: ProcessManager, escortManager: EscortManager) {
     this.shipManager = shipManager;
     this.processManager = processManager;
+    this.escortManager = escortManager;
   }
 
   setAlertHandler(handler: (alert: LookoutAlert) => void): void {
@@ -60,6 +63,7 @@ export class Lookout {
       this.checkGateWaitStall(ship, now);
       this.checkNoOutputStall(ship, now);
       this.checkExcessiveRetries(ship, now);
+      this.checkEscortDeath(ship, now);
     }
 
     const activeIds = new Set(activeShips.map((s) => s.id));
@@ -102,6 +106,15 @@ export class Lookout {
 
     this.emitAlert(ship, "excessive-retries", now,
       `Ship #${ship.issueNumber} (${ship.issueTitle}) has retried ${ship.retryCount} times (phase: ${ship.phase})`,
+    );
+  }
+
+  private checkEscortDeath(ship: ShipProcess, now: number): void {
+    if (!ship.gateCheck || ship.gateCheck.status !== "pending") return;
+    if (this.escortManager.isEscortRunning(ship.id)) return;
+
+    this.emitAlert(ship, "escort-death", now,
+      `Ship #${ship.issueNumber} (${ship.issueTitle}): Escort process not found for pending gate check (${ship.gateCheck.gatePhase})`,
     );
   }
 

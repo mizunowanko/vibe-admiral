@@ -1,4 +1,4 @@
-name: E2E Tests
+name: UI Tests
 
 on:
   push:
@@ -26,8 +26,8 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run E2E tests
-        run: npm run test:e2e
+      - name: Run UI tests
+        run: npm run test:ui
 
       - name: Upload test artifacts
         if: ${{ !cancelled() }}

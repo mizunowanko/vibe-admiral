@@ -90,6 +90,8 @@ export interface FleetRepo {
 export interface FleetSkillSources {
   implement?: string;
   devSharedDir?: string;
+  /** Absolute path to the Admiral repo's skills/ directory. Auto-populated by Engine. */
+  admiralSkillsDir?: string;
 }
 
 export interface Fleet {
@@ -157,13 +159,15 @@ export type StreamMessageSubtype =
   | "gate-check-request"
   | "lookout-alert"
   | "task-notification"
-  | "dispatch-log";
+  | "dispatch-log"
+  | "escort-log";
 
 // === Lookout ===
 export type LookoutAlertType =
   | "gate-wait-stall"
   | "no-output-stall"
-  | "excessive-retries";
+  | "excessive-retries"
+  | "escort-death";
 
 export interface SystemMessageMeta {
   category: StreamMessageSubtype;
@@ -231,6 +235,8 @@ export type FlagshipRequest =
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
   | { request: "ship-resume"; shipId: string }
+  | { request: "ship-abandon"; shipId: string }
+  | { request: "ship-delete"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
 ;
 

@@ -1,10 +1,13 @@
-import { useState, useMemo, useEffect } from "react";
+import { memo, useState, useMemo, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
 import type { ImageAttachment, StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 import { getStatusColor } from "@/lib/ship-status";
 import { formatTime } from "@/lib/format-time";
+import { useFleetStore } from "@/stores/fleetStore";
+import { remarkIssueLink } from "@/lib/remark-issue-link";
 
 /** Convert base64 ImageAttachments to object URLs, revoking on cleanup. */
 function useImageObjectUrls(images: ImageAttachment[] | undefined): string[] {
@@ -28,7 +31,11 @@ function useImageObjectUrls(images: ImageAttachment[] | undefined): string[] {
   return urls;
 }
 
-const REMARK_PLUGINS = [remarkGfm];
+/** Extract "owner/repo" from a GitHub remote URL (HTTPS or SSH). */
+function extractOwnerRepo(remote: string): string | null {
+  const m = remote.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
+  return m?.[1] ?? null;
+}
 
 const MARKDOWN_COMPONENTS = {
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
@@ -45,10 +52,19 @@ interface ChatMessageProps {
   context?: "command" | "bridge" | "ship";
 }
 
-export function ChatMessage({ message, repeatCount, context }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, repeatCount, context }: ChatMessageProps) {
   const [toolExpanded, setToolExpanded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
   const imageUrls = useImageObjectUrls(message.images);
+  const selectedFleet = useFleetStore((s) => s.selectedFleet);
+
+  const remarkPlugins: PluggableList = useMemo(() => {
+    const ownerRepo = selectedFleet?.repos[0]?.remote
+      ? extractOwnerRepo(selectedFleet.repos[0].remote)
+      : null;
+    if (!ownerRepo) return [remarkGfm];
+    return [remarkGfm, [remarkIssueLink, { ownerRepo }]];
+  }, [selectedFleet]);
 
   const isUser = message.type === "user";
   const isError = message.type === "error";
@@ -220,7 +236,7 @@ export function ChatMessage({ message, repeatCount, context }: ChatMessageProps)
           </span>
           <div className="bridge-markdown break-words text-card-foreground">
             <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
+              remarkPlugins={remarkPlugins}
               components={MARKDOWN_COMPONENTS}
               disallowedElements={["img"]}
               unwrapDisallowed
@@ -228,6 +244,39 @@ export function ChatMessage({ message, repeatCount, context }: ChatMessageProps)
               {message.content ?? ""}
             </ReactMarkdown>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Escort log — Escort process messages displayed left-aligned with light blue styling
+  if (message.meta?.category === "escort-log") {
+    return (
+      <div className="flex w-full justify-start">
+        <div
+          className={cn(
+            "max-w-[90%] rounded-lg px-3 py-2 text-sm border",
+            "border-sky-500/30 bg-sky-500/10",
+          )}
+        >
+          <span className="text-xs font-mono block mb-1 text-sky-400/80">
+            [Escort]
+          </span>
+          <div className="bridge-markdown break-words text-card-foreground">
+            <ReactMarkdown
+              remarkPlugins={remarkPlugins}
+              components={MARKDOWN_COMPONENTS}
+              disallowedElements={["img"]}
+              unwrapDisallowed
+            >
+              {message.content ?? ""}
+            </ReactMarkdown>
+          </div>
+          {message.timestamp && (
+            <span className="block text-[10px] mt-1 text-sky-400/50">
+              {formatTime(message.timestamp)}
+            </span>
+          )}
         </div>
       </div>
     );
@@ -287,7 +336,7 @@ export function ChatMessage({ message, repeatCount, context }: ChatMessageProps)
         ) : (
           <div className="bridge-markdown break-words">
             <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
+              remarkPlugins={remarkPlugins}
               components={MARKDOWN_COMPONENTS}
               disallowedElements={["img"]}
               unwrapDisallowed
@@ -307,4 +356,4 @@ export function ChatMessage({ message, repeatCount, context }: ChatMessageProps)
       </div>
     </div>
   );
-}
+});

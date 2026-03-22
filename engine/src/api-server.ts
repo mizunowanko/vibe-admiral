@@ -1,11 +1,24 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import type { FlagshipRequestHandler } from "./bridge-request-handler.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources } from "./types.js";
+import type { FleetDatabase } from "./db.js";
+import type { ShipManager } from "./ship-manager.js";
+import type { EscortManager } from "./escort-manager.js";
+import type { ShipActorManager } from "./ship-actor-manager.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
+import { isGatePhase, DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+
+/** Admiral repo's skills/ directory, resolved from Engine's own source location. */
+const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
 
 const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
 interface ApiDeps {
   requestHandler: FlagshipRequestHandler;
+  getDatabase: () => FleetDatabase | null;
+  getShipManager: () => ShipManager;
+  getEscortManager: () => EscortManager;
+  getActorManager: () => ShipActorManager;
   loadFleets: () => Promise<Array<{
     id: string;
     repos: FleetRepo[];
@@ -22,6 +35,9 @@ interface ApiResponse {
   ok: boolean;
   result?: string;
   error?: string;
+  phase?: string;
+  transitions?: Array<Record<string, unknown>>;
+  ships?: unknown[];
 }
 
 function validateSortieRequest(body: unknown): FlagshipRequest | string {
@@ -56,6 +72,20 @@ function validateShipResumeRequest(body: unknown): FlagshipRequest | string {
   const b = body as Record<string, unknown>;
   if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
   return { request: "ship-resume", shipId: b.shipId };
+}
+
+function validateShipAbandonRequest(body: unknown): FlagshipRequest | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
+  return { request: "ship-abandon", shipId: b.shipId };
+}
+
+function validateShipDeleteRequest(body: unknown): FlagshipRequest | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
+  return { request: "ship-delete", shipId: b.shipId };
 }
 
 function validatePRReviewResultRequest(body: unknown): FlagshipRequest | string {
@@ -119,10 +149,240 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     fleetId: fleet.id,
     fleetRepos,
     repoRemotes,
-    skillSources: fleet.skillSources,
+    skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
     maxConcurrentSorties: fleet.maxConcurrentSorties,
   };
+}
+
+// === Ship/Escort API route handler ===
+
+async function handleShipRoute(
+  deps: ApiDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+  shipId: string,
+  action: string,
+): Promise<void> {
+  const db = deps.getDatabase();
+  if (!db) {
+    sendJson(res, 503, { ok: false, error: "Database not initialized" });
+    return;
+  }
+
+  const shipManager = deps.getShipManager();
+
+  // GET /api/ship/:shipId/phase — poll current phase
+  if (action === "phase" && req.method === "GET") {
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+    sendJson(res, 200, { ok: true, phase: ship.phase });
+    return;
+  }
+
+  // GET /api/ship/:shipId/phase-transition-log — get recent phase transitions
+  if (action === "phase-transition-log" && req.method === "GET") {
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const limit = Math.min(Number(url.searchParams.get("limit")) || 10, 100);
+    const transitions = db.getPhaseTransitions(shipId, limit);
+    sendJson(res, 200, { ok: true, transitions });
+    return;
+  }
+
+  // DELETE /api/ship/:shipId/delete — Force-delete a Ship (zombie cleanup)
+  if (action === "delete" && req.method === "DELETE") {
+    const deleted = shipManager.deleteShip(shipId);
+    if (deleted) {
+      sendJson(res, 200, { ok: true });
+    } else {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+    }
+    return;
+  }
+
+  // POST-only routes below
+  if (req.method !== "POST") {
+    sendJson(res, 405, { ok: false, error: "Method not allowed" });
+    return;
+  }
+
+  const rawBody = await readBody(req);
+  let body: Record<string, unknown>;
+  try {
+    body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Invalid JSON body" });
+    return;
+  }
+
+  // POST /api/ship/:shipId/phase-transition — Ship transitions its own phase
+  if (action === "phase-transition") {
+    const targetPhase = body.phase as string | undefined;
+    if (!targetPhase) {
+      sendJson(res, 400, { ok: false, error: "phase is required" });
+      return;
+    }
+    if (!PHASE_ORDER.includes(targetPhase as Phase)) {
+      sendJson(res, 400, { ok: false, error: `Invalid phase: ${targetPhase}` });
+      return;
+    }
+
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    const metadata = (body.metadata as Record<string, unknown>) ?? {};
+    const triggeredBy = (body.triggeredBy as string) ?? "ship";
+
+    try {
+      const applied = db.transitionPhase(
+        shipId,
+        ship.phase as Phase,
+        targetPhase as Phase,
+        triggeredBy,
+        metadata,
+      );
+
+      if (applied) {
+        shipManager.syncPhaseFromDb(shipId);
+
+        // Send event to XState Actor for gate transitions
+        const actorManager = deps.getActorManager();
+        if (isGatePhase(targetPhase as Phase)) {
+          const gatePhase = targetPhase as GatePhase;
+          const gateType = DEFAULT_GATE_TYPES[gatePhase];
+          shipManager.setGateCheck(shipId, gatePhase, gateType);
+
+          // Notify Actor of gate entry
+          actorManager.send(shipId, { type: "GATE_ENTER" });
+
+          const escortManager = deps.getEscortManager();
+          escortManager.launchEscort(shipId, gatePhase, gateType);
+        } else if (targetPhase === "done") {
+          actorManager.send(shipId, { type: "COMPLETE" });
+        }
+      }
+
+      sendJson(res, 200, { ok: true, phase: targetPhase });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { ok: false, error: message });
+    }
+    return;
+  }
+
+  // POST /api/ship/:shipId/gate-verdict — Escort submits gate result
+  if (action === "gate-verdict") {
+    const verdict = body.verdict as string | undefined;
+    if (verdict !== "approve" && verdict !== "reject") {
+      sendJson(res, 400, { ok: false, error: 'verdict must be "approve" or "reject"' });
+      return;
+    }
+
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    const currentPhase = ship.phase as Phase;
+    if (!isGatePhase(currentPhase)) {
+      sendJson(res, 400, { ok: false, error: `Ship is not in a gate phase (current: ${currentPhase})` });
+      return;
+    }
+
+    const gatePhase = currentPhase as GatePhase;
+    const feedback = body.feedback as string | undefined;
+    let targetPhase: Phase;
+    let metadata: Record<string, unknown>;
+
+    if (verdict === "approve") {
+      targetPhase = GATE_NEXT_PHASE[gatePhase];
+      metadata = { gate_result: "approved" };
+    } else {
+      targetPhase = GATE_PREV_PHASE[gatePhase];
+      metadata = { gate_result: "rejected", feedback: feedback ?? "" };
+    }
+
+    try {
+      db.transitionPhase(shipId, currentPhase, targetPhase, "escort", metadata);
+      shipManager.syncPhaseFromDb(shipId);
+      shipManager.clearGateCheck(shipId);
+
+      // Send gate verdict event to XState Actor
+      const actorManager = deps.getActorManager();
+      if (verdict === "approve") {
+        actorManager.send(shipId, { type: "GATE_APPROVED" });
+      } else {
+        actorManager.send(shipId, { type: "GATE_REJECTED", feedback: feedback ?? "" });
+      }
+
+      sendJson(res, 200, { ok: true, phase: targetPhase });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { ok: false, error: message });
+    }
+    return;
+  }
+
+  // POST /api/ship/:shipId/nothing-to-do — Ship declares nothing to do
+  if (action === "nothing-to-do") {
+    const reason = (body.reason as string) ?? "No reason provided";
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    try {
+      db.transitionPhase(shipId, ship.phase as Phase, "done", "ship", { reason, nothingToDo: true });
+      shipManager.syncPhaseFromDb(shipId);
+
+      // Send nothing-to-do event to XState Actor
+      const actorManager = deps.getActorManager();
+      actorManager.send(shipId, { type: "NOTHING_TO_DO", reason });
+
+      sendJson(res, 200, { ok: true, phase: "done" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { ok: false, error: message });
+    }
+    return;
+  }
+
+  // POST /api/ship/:shipId/abandon — Abandon a stopped Ship (transition to done)
+  if (action === "abandon") {
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    if (ship.phase !== "stopped") {
+      sendJson(res, 400, { ok: false, error: `Ship must be in "stopped" phase to abandon (current: ${ship.phase})` });
+      return;
+    }
+
+    const abandoned = shipManager.abandonShip(shipId);
+    if (abandoned) {
+      sendJson(res, 200, { ok: true, phase: "done" });
+    } else {
+      sendJson(res, 400, { ok: false, error: "Failed to abandon ship" });
+    }
+    return;
+  }
+
+  sendJson(res, 404, { ok: false, error: `Unknown ship action: ${action}` });
 }
 
 export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: ServerResponse) => void {
@@ -139,6 +399,30 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
     const route = path.slice(5); // strip "/api/"
 
     try {
+      // === Ship/Escort API endpoints ===
+      // Pattern: /api/ship/:shipId/<action>
+      const shipRouteMatch = route.match(/^ship\/([^/]+)\/(.+)$/);
+      if (shipRouteMatch) {
+        const [, shipId, action] = shipRouteMatch;
+        await handleShipRoute(deps, req, res, shipId!, action!);
+        return;
+      }
+
+      // === Frontend API endpoints ===
+
+      // GET /api/ships — Ship list as JSON array (for Frontend)
+      if (route === "ships" && req.method === "GET") {
+        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        const shipManager = deps.getShipManager();
+        const ships = fleetId
+          ? shipManager.getShipsByFleet(fleetId)
+          : shipManager.getAllShips();
+        sendJson(res, 200, { ok: true, ships });
+        return;
+      }
+
+      // === Flagship API endpoints (legacy routes) ===
+
       // GET /api/ship-status
       if (route === "ship-status" && req.method === "GET") {
         const fleetId = url.searchParams.get("fleetId") ?? undefined;
@@ -159,7 +443,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       }
 
       // Check if route is a known POST endpoint
-      const postRoutes = new Set(["sortie", "ship-stop", "ship-resume", "pr-review-result"]);
+      const postRoutes = new Set(["sortie", "ship-stop", "ship-resume", "ship-abandon", "ship-delete", "pr-review-result"]);
       if (!postRoutes.has(route)) {
         sendJson(res, 404, { ok: false, error: `Unknown endpoint: /api/${route}` });
         return;
@@ -199,6 +483,12 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           break;
         case "ship-resume":
           request = validateShipResumeRequest(body);
+          break;
+        case "ship-abandon":
+          request = validateShipAbandonRequest(body);
+          break;
+        case "ship-delete":
+          request = validateShipDeleteRequest(body);
           break;
         case "pr-review-result":
           request = validatePRReviewResultRequest(body);

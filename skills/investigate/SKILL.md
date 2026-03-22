@@ -94,6 +94,15 @@ Do NOT create issues or make any changes. Only investigate and report.
 `)
 ```
 
+## Ship Log Reading
+
+Ship logs are stored at `<worktree>/.claude/ship-log.jsonl`. Read them via Dispatch using these patterns:
+
+- **Recent assistant messages**: `tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30`
+- **Final result**: `tail -n 100 <worktree>/.claude/ship-log.jsonl | grep '"type":"result"'`
+
+Always read logs via Dispatch — Commanders must not read files directly.
+
 ## Ship Error Recovery Flow
 
 When a Ship's process dies (processDead), Bridge receives a system message with resume eligibility:

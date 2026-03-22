@@ -12,11 +12,24 @@ engine/dist/
 .vscode/
 .idea/
 
+# Build cache
+*.tsbuildinfo
+
 # Test
 test-results/
+playwright-report/
 
 # Admiral local data
 .vibe-admiral/
+*.db
+
+# Claude work files (transient per-session; must not propagate via main)
+.claude/skills/
+.claude/ship-log.jsonl
+.claude/escort-log.jsonl
+.claude/workflow-state.json
+.claude/gate-request.json
+.claude/gate-response.json
 
 # Environment
 .env

@@ -6,7 +6,7 @@ user-invocable: false
 
 # /implement-merge — CI, Acceptance Test, Merge & Cleanup
 
-> **CRITICAL: Step 1 → Step 2 → Step 3 → Step 4 の順序は絶対にスキップ・逆転してはならない。**
+> **CRITICAL: Step 1 → Step 2 → Step 3 → Step 4 → Step 5 の順序は絶対にスキップ・逆転してはならない。**
 
 ## Step 1: 受け入れテスト
 
@@ -38,7 +38,7 @@ gh pr checks "$PR_NUM" --watch
 ```
 
 - CI が全てパスしたら Step 3 へ
-- CI が失敗した場合は Step 6（CI 修正ループ）へ
+- CI が失敗した場合は Step 7（CI 修正ループ）へ
 - **CI が未設定の場合**（`no checks reported`）: スキップして Step 3 へ
 
 ## Step 3: レビュー結果の対応（マージ前に必須）
@@ -62,38 +62,24 @@ gh pr checks "$PR_NUM" --watch
 
 ## Step 4: マージ
 
-**`VIBE_ADMIRAL` 設定時**: `acceptance-test-gate` に直接 DB 更新で遷移し、`playwright` Gate を開始する:
+**`VIBE_ADMIRAL` 設定時**: Engine REST API で `acceptance-test-gate` に遷移し、`playwright` Gate を開始する:
 
 ```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'acceptance-test-gate', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'acceptance-test-gate'
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'acceptance-test';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'acceptance-test', 'acceptance-test-gate', 'ship', '{}');
-COMMIT;
-"
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "acceptance-test-gate", "metadata": {}}'
 ```
 
-Ship 自身が Escort (sub-agent) を起動して playwright テストを実施する。
-
-Engine が Escort を起動済み。Escort が完了すると DB の `phases` テーブルが直接更新される。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
+Engine が Escort プロセスを起動して playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-- `merging` に遷移済み → Escort が承認し phase を更新済み。マージを実行
-- `acceptance-test` に戻された → Escort が reject した。`phase_transitions` からフィードバックを取得して修正:
+- `merging` に遷移済み → Escort が承認。マージを実行
+- `acceptance-test` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して修正:
   ```bash
-  FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-    SELECT json_extract(metadata, '$.feedback')
-    FROM phase_transitions
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
-    ORDER BY created_at DESC LIMIT 1
-  ")
+  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
   ```
 
 Gate 承認後（`merging` phase）、マージを実行:
@@ -107,21 +93,59 @@ gh pr merge "$PR_NUM" --squash
 - `--delete-branch` は付けない（worktree と競合するため）
 - マージ後の `already used by worktree` エラーは、`gh pr view --json state --jq '.state'` が `MERGED` なら無視
 
-## Step 5: 完了表明と掃除
+## Step 5: 振り返り & 改善 Issue 起票
 
-**`VIBE_ADMIRAL` 設定時**: `done` に直接 DB 更新:
+マージ完了後、Ship は自身の実装セッションを振り返り、苦戦した点や改善できる点があれば `gh issue create` で改善 Issue を起票する。
+
+### 振り返り対象
+
+以下の観点でセッションを回顧する:
+
+- **rebase / merge 競合**: どのファイルで競合が起きたか、なぜか
+- **テスト失敗**: CI/E2E で何が落ちたか、修正にどれくらいかかったか
+- **skill の不備**: `/implement` の手順で不明確・不足だった点
+- **環境の問題**: rate limit、Bun バグ、gate 待ちタイムアウト等
+- **phase 遷移の問題**: DB 更新が失敗する、gate ポーリングがタイムアウトする等
+- **スコープの問題**: issue の要件が曖昧で判断に迷った箇所
+
+### 起票ルール
+
+- **改善点がない場合はスキップする**（無理に issue を作らない）
+- 改善可能な点がある場合のみ、以下の形式で issue を起票する:
 
 ```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'done', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'done', completed_at = datetime('now')
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'merging';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'merging', 'done', 'ship', '{}');
-COMMIT;
-"
+gh issue create --repo "$REPO" \
+  --title "improve: <苦戦ポイントの要約>" \
+  --label "type/improve" \
+  --body "$(cat <<'RETROEOF'
+## 発生状況
+Ship #<ISSUE_NUMBER> (<Issue タイトル>) の <phase 名> で発生。
+<具体的な状況の説明>
+
+## 再現条件
+<どのような条件で問題が発生するか>
+
+## 提案する改善策
+- <改善案 1>
+- <改善案 2>
+
+---
+🤖 Auto-generated by Ship #<ISSUE_NUMBER> retrospective
+RETROEOF
+)"
+```
+
+- `type/improve` ラベルが存在しない場合は `type/feature` を使用する
+- 1 つの苦戦ポイントにつき 1 issue（複数の問題があった場合は複数 issue を起票してよい）
+
+## Step 6: 完了表明と掃除
+
+**`VIBE_ADMIRAL` 設定時**: Engine REST API で `done` に遷移:
+
+```bash
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "done", "metadata": {}}'
 ```
 
 1. workflow-state.json の削除:
@@ -151,7 +175,7 @@ COMMIT;
    gh run watch $RUN_ID
    ```
 
-## Step 6: CI 失敗時の修正ループ
+## Step 7: CI 失敗時の修正ループ
 
 1. `gh run view <run-id> --log-failed` で失敗ログを取得
 2. エラーを分析

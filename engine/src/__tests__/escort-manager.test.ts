@@ -10,6 +10,8 @@ type MockProcessManager = {
 type MockShipManager = {
   getShip: ReturnType<typeof vi.fn>;
   getDbPath: ReturnType<typeof vi.fn>;
+  clearGateCheck: ReturnType<typeof vi.fn>;
+  syncPhaseFromDb: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Record<string, unknown> = {}) {
@@ -36,10 +38,13 @@ describe("EscortManager", () => {
     mockShipManager = {
       getShip: vi.fn().mockReturnValue(makeShip()),
       getDbPath: vi.fn().mockReturnValue("/tmp/fleet.db"),
+      clearGateCheck: vi.fn(),
+      syncPhaseFromDb: vi.fn(),
     };
     escortManager = new EscortManager(
       mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
       mockShipManager as unknown as ConstructorParameters<typeof EscortManager>[1],
+      () => null,
     );
   });
 
@@ -55,23 +60,23 @@ describe("EscortManager", () => {
       expect(mockProcessManager.launchEscort).toHaveBeenCalledWith(
         "escort-ship-001-planning-gate",
         "/repo/.worktrees/feature/42-test",
-        "gate-plan-review",
+        "planning-gate",
         42,
-        expect.objectContaining({
+        {
           VIBE_ADMIRAL_SHIP_ID: "ship-001",
           VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
-          VIBE_ADMIRAL_DB_PATH: "/tmp/fleet.db",
-        }),
+          VIBE_ADMIRAL_ENGINE_PORT: "9721",
+        },
       );
     });
 
-    it("maps implementing-gate to gate-code-review skill", () => {
+    it("maps implementing-gate to implementing-gate skill", () => {
       escortManager.launchEscort("ship-001", "implementing-gate", "code-review");
 
       expect(mockProcessManager.launchEscort).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        "gate-code-review",
+        "implementing-gate",
         expect.any(Number),
         expect.any(Object),
       );
@@ -107,8 +112,7 @@ describe("EscortManager", () => {
       expect(result).toBeNull();
     });
 
-    it("omits VIBE_ADMIRAL_DB_PATH when no DB path available", () => {
-      mockShipManager.getDbPath.mockReturnValue(undefined);
+    it("does not pass VIBE_ADMIRAL_DB_PATH (API-based communication)", () => {
       escortManager.launchEscort("ship-001", "planning-gate", "plan-review");
 
       const envArg = mockProcessManager.launchEscort.mock.calls[0]![4] as Record<string, string>;

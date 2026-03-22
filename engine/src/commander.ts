@@ -158,6 +158,17 @@ export class CommanderManager {
     return this.sessions.get(fleetId)?.history ?? [];
   }
 
+  /**
+   * Load history from disk when no in-memory session exists.
+   * Used to serve history requests after Engine restart (before
+   * the Commander process is re-launched by a user message).
+   */
+  async getHistoryWithDiskFallback(fleetId: string): Promise<StreamMessage[]> {
+    const inMemory = this.sessions.get(fleetId)?.history;
+    if (inMemory && inMemory.length > 0) return inMemory;
+    return this.loadHistory(fleetId);
+  }
+
   setPendingQuestion(fleetId: string, toolUseId: string): void {
     const session = this.sessions.get(fleetId);
     if (session) {

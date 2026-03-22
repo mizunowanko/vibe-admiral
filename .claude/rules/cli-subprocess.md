@@ -24,13 +24,20 @@ See `engine/src/process-manager.ts` for the implementation.
   - Commanders are restricted to read-only and analysis tools (no Write/Edit).
   - `AskUserQuestion` is allowed; the Engine intercepts it, forwards to the frontend, and returns the answer via stdin `tool_result`.
 
-## VIBE_ADMIRAL Environment Variable
+## VIBE_ADMIRAL Environment Variables
 
-Set `VIBE_ADMIRAL=true` for all Ship, Escort, and session resume processes. This signals to skills (e.g., `/implement`, `/gate-plan-review`) that they are running inside the Admiral:
-- Skip worktree creation/deletion (Admiral handles it)
-- Skip label changes (Engine handles it)
-- Skip plan mode (`EnterPlanMode`) and output plan as text instead
-- Use direct DB phase updates for gate flow instead of `AskUserQuestion`
+Set the following environment variables for all Ship, Escort, and session resume processes:
+
+- `VIBE_ADMIRAL=true` — Signals that skills are running inside the Admiral:
+  - Skip worktree creation/deletion (Admiral handles it)
+  - Skip label changes (Engine handles it)
+  - Skip plan mode (`EnterPlanMode`) and output plan as text instead
+  - Use Engine REST API for phase transitions and gate flow instead of `AskUserQuestion`
+- `VIBE_ADMIRAL_SHIP_ID` — The Ship's unique ID (set by Engine at sortie/retry)
+- `VIBE_ADMIRAL_MAIN_REPO` — The fleet's main repository (owner/repo)
+- `VIBE_ADMIRAL_ENGINE_PORT` — Engine API port (default: 9721)
+
+Ships and Escorts communicate with Engine exclusively via REST API (`curl`). They do NOT access the database directly.
 
 ## Exit Code 0 Does Not Guarantee Success
 

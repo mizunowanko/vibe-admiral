@@ -168,8 +168,14 @@ export class FleetDatabase {
 
     const repoId = this.ensureRepo(owner, name);
 
-    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict
-    this.db.prepare(`DELETE FROM ships WHERE repo_id = ? AND issue_number = ?`).run(repoId, ship.issueNumber);
+    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict.
+    // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
+    const existingShip = this.db.prepare(
+      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ?",
+    ).get(repoId, ship.issueNumber) as { id: string } | undefined;
+    if (existingShip) {
+      this.deleteShip(existingShip.id);
+    }
 
     this.db.prepare(`
       INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
@@ -229,13 +235,14 @@ export class FleetDatabase {
     this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
   }
 
-  /** Get all ships with non-terminal phase (for startup restoration). */
+  /** Get all ships with non-terminal phase (for startup restoration).
+   *  Includes "stopped" ships so they can be resumed after Engine restart. */
   getActiveShips(): ShipProcess[] {
     const rows = this.db.prepare(`
       SELECT s.*, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase NOT IN ('done', 'stopped')
+      WHERE s.phase != 'done'
     `).all() as ShipJoinRow[];
 
     return rows.map((row) => this.rowToShipProcess(row));
@@ -293,6 +300,21 @@ export class FleetDatabase {
     return row ? this.rowToShipProcess(row) : undefined;
   }
 
+  /** Get a ship by repo and issue number (any phase, including done/stopped). */
+  getShipByIssueAnyPhase(repo: string, issueNumber: number): ShipProcess | undefined {
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) return undefined;
+
+    const row = this.db.prepare(`
+      SELECT s.*, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ?
+    `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
+
+    return row ? this.rowToShipProcess(row) : undefined;
+  }
+
   /** Get active ship issue numbers (phase != done). */
   getActiveShipIssueNumbers(): Array<{ repo: string; issueNumber: number }> {
     const rows = this.db.prepare(`
@@ -338,11 +360,18 @@ export class FleetDatabase {
         throw new Error(`Phase mismatch: expected ${expectedPhase}, got ${current.phase}`);
       }
 
-      // Validate forward-only
+      // Validate forward-only (with gate-reject exception)
       const currentIdx = PHASE_ORDER.indexOf(expectedPhase as Phase);
       const newIdx = PHASE_ORDER.indexOf(newPhase);
       if (newIdx <= currentIdx) {
-        throw new Error(`Cannot go backward: ${expectedPhase} → ${newPhase}`);
+        // Allow gate rejection: gate-phase → preceding work phase
+        const isGateReject =
+          (expectedPhase === "planning-gate" && newPhase === "planning") ||
+          (expectedPhase === "implementing-gate" && newPhase === "implementing") ||
+          (expectedPhase === "acceptance-test-gate" && newPhase === "acceptance-test");
+        if (!isGateReject) {
+          throw new Error(`Cannot go backward: ${expectedPhase} → ${newPhase}`);
+        }
       }
 
       // Idempotency: check if same transition was recorded in last 5 seconds
@@ -387,6 +416,16 @@ export class FleetDatabase {
     return txn();
   }
 
+  /** Get the phase a ship was in before it was stopped. */
+  getPhaseBeforeStopped(shipId: string): Phase | null {
+    const row = this.db.prepare(`
+      SELECT from_phase FROM phase_transitions
+      WHERE ship_id = ? AND to_phase = 'stopped'
+      ORDER BY id DESC LIMIT 1
+    `).get(shipId) as { from_phase: string | null } | undefined;
+    return (row?.from_phase as Phase) ?? null;
+  }
+
   /** Record a phase transition in the audit log (non-transactional, for backward compat). */
   recordPhaseTransition(
     shipId: string,
@@ -413,6 +452,35 @@ export class FleetDatabase {
         phase = excluded.phase,
         updated_at = excluded.updated_at
     `).run(shipId, toPhase);
+  }
+
+  /** Get recent phase transitions for a ship, ordered by most recent first. */
+  getPhaseTransitions(shipId: string, limit: number = 10): Array<Record<string, unknown>> {
+    const rows = this.db.prepare(`
+      SELECT id, ship_id, from_phase, to_phase, triggered_by, metadata, created_at
+      FROM phase_transitions
+      WHERE ship_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(shipId, limit) as Array<{
+      id: number;
+      ship_id: string;
+      from_phase: string | null;
+      to_phase: string;
+      triggered_by: string;
+      metadata: string | null;
+      created_at: string;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      shipId: row.ship_id,
+      fromPhase: row.from_phase,
+      toPhase: row.to_phase,
+      triggeredBy: row.triggered_by,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+      createdAt: row.created_at,
+    }));
   }
 
   /** Delete all records for ships in terminal states. */

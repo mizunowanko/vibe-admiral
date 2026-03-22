@@ -1,23 +1,12 @@
-// === Phase (Ship lifecycle) ===
-// Gate is a phase: planning → planning-gate → implementing → implementing-gate
-// → acceptance-test → acceptance-test-gate → merging → done
-// "error" is a derived state: phase ≠ done && process dead.
-export type Phase =
-  | "planning"
-  | "planning-gate"
-  | "implementing"
-  | "implementing-gate"
-  | "acceptance-test"
-  | "acceptance-test-gate"
-  | "merging"
-  | "done"
-  | "stopped";
+// Phase definitions re-exported from the single source of truth.
+// See shared-phases.ts for the canonical definitions.
+import type { Phase as _Phase, GatePhase as _GatePhase } from "./shared-phases";
+export type Phase = _Phase;
+export type GatePhase = _GatePhase;
+export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
-
-/** Gate phases where Bridge review is required. */
-export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
 
 // === Fleet ===
 export interface FleetRepo {
@@ -48,6 +37,21 @@ export interface Fleet {
 
 // === Commander (Dock/Flagship shared role type) ===
 export type CommanderRole = "dock" | "flagship";
+
+// === Session ===
+export type SessionType = "dock" | "flagship" | "ship" | "dispatch";
+
+export interface Session {
+  id: string;
+  type: SessionType;
+  fleetId: string;
+  label: string;
+  hasInput: boolean;
+  /** Ship ID for ship sessions (same as session id suffix). */
+  shipId?: string;
+  /** Parent session ID for dispatch sub-agents. */
+  parentSessionId?: string;
+}
 
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
@@ -103,7 +107,8 @@ export type StreamMessageSubtype =
   | "gate-check-request"
   | "lookout-alert"
   | "task-notification"
-  | "dispatch-log";
+  | "dispatch-log"
+  | "escort-log";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -180,15 +185,8 @@ export type ClientMessage =
   | { type: "dock:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
   | { type: "dock:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "dock:history"; data: { fleetId: string } }
-  | {
-      type: "ship:sortie";
-      data: { fleetId: string; issueNumber: number; repo: string };
-    }
   | { type: "ship:chat"; data: { id: string; message: string } }
-  | { type: "ship:retry"; data: { id: string } }
-  | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
-  | { type: "ship:list" }
   | { type: "issue:list"; data: { repo: string } }
   | { type: "issue:get"; data: { repo: string; number: number } }
   | { type: "fs:list-dir"; data: { path?: string } };
@@ -220,6 +218,17 @@ export type ServerMessage =
       data: { fleetId: string };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
+  | {
+      type: "escort:stream";
+      data: {
+        id: string;
+        escortId: string;
+        fleetId?: string;
+        issueNumber?: number;
+        message: StreamMessage;
+      };
+    }
+  | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
   | {
       type: "ship:status";
       data: { id: string; phase: Phase; detail?: string };

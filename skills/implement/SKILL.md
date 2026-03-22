@@ -59,51 +59,49 @@ STATEEOF
 if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "VIBE_ADMIRAL_DISABLED"; fi
 ```
 
-- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキップ、DB メッセージボード方式
+- `VIBE_ADMIRAL_ENABLED`（Admiral モード）: Worktree/ラベル管理スキップ、Engine REST API 経由で phase 遷移
 - `VIBE_ADMIRAL_DISABLED`（スタンドアロン）: Worktree/ラベル管理をスキル内で実行
 
-## ステータス遷移（直接 DB 更新）
+## ステータス遷移（Engine REST API）
 
-**`VIBE_ADMIRAL` 設定時のみ。** Ship は phase 遷移時に直接 DB の `phases` テーブルを更新する。
+**`VIBE_ADMIRAL` 設定時のみ。** Ship は phase 遷移時に Engine REST API を呼び出す。
 
 ### Phase 更新テンプレート
 
 ```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = '<targetPhase>', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = '<targetPhase>'
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = '<currentPhase>';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', '<currentPhase>', '<targetPhase>', 'ship', '{}');
-COMMIT;
-"
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "<targetPhase>", "metadata": {}}'
 ```
 
-### Gate 待ち（phases テーブルポーリング）
+### Gate 待ち（REST API ポーリング）
 
 Gate phase に入った後、Escort が phase を更新するのを待つ:
 
 ```bash
-while true; do
-  PHASE=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "SELECT phase FROM phases WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'")
+TIMEOUT=900; ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase)
+  PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4)
   case "$PHASE" in
     <expected-next-phase>) echo "Gate approved"; break ;;
     <rejection-phase>) echo "Gate rejected"; break ;;
-    <current-gate-phase>) sleep 2 ;;
+    <current-gate-phase>) sleep 60 ;;
+    *) echo "UNEXPECTED_PHASE: $PHASE"; break ;;
   esac
+  ELAPSED=$((ELAPSED + 60))
 done
+[ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-### Gate フロー（Ship Escort 方式）
+### Gate フロー（Engine Escort 方式）
 
-1. Ship が直接 DB で gate phase に遷移（例: `planning` → `planning-gate`）
-2. Ship が Escort (sub-agent) を Task tool で起動（`/gate-plan-review` or `/gate-code-review` スキル参照）
-3. Escort がレビュー実施 → GitHub に記録 → DB の `phases` テーブルを直接更新（phase 遷移 + `phase_transitions` に結果記録）
-4. Ship が `phases` テーブルをポーリングして phase 変更を検知
-5. approved → Escort が phase を次の作業 phase に更新済み → Ship が検知して次の作業を開始
-6. rejected → `phase_transitions` からフィードバックを取得、修正して再度 gate phase に遷移 → Escort 起動ループ
+1. Ship が Engine REST API で gate phase に遷移（例: `planning` → `planning-gate`）
+2. Engine が Escort プロセスを起動（`/planning-gate`, `/implementing-gate`, `/acceptance-test-gate` スキル）
+3. Escort がレビュー実施 → GitHub に記録 → Engine REST API で gate-verdict を送信
+4. Ship が REST API をポーリングして phase 変更を検知
+5. approved → Engine が phase を次の作業 phase に更新済み → Ship が検知して次の作業を開始
+6. rejected → phase-transition-log API からフィードバックを取得、修正して再度 gate phase に遷移 → Engine が Escort 再起動
 
 ### Gate 付き遷移
 
@@ -123,7 +121,7 @@ done
 | 3-4 | `/implement-plan` | Steps 1-2 | 調査、計画、plan-review gate |
 | 5-8 | `/implement-code` | Steps 1-4 | **Issue 再読み込み** → 実装、ビルド、統合、再テスト |
 | 9-10 | `/implement-review` | Steps 1-2 | コミット、PR、**code-review gate** |
-| 11-16 | `/implement-merge` | Steps 1-6 | 受入テスト、CI、マージ、done 遷移、クリーンアップ |
+| 11-17 | `/implement-merge` | Steps 1-7 | 受入テスト、CI、マージ、**振り返り**、done 遷移、クリーンアップ |
 
 > **フェーズ順序制約**: 各 sub-skill は上から順に実行する。code-review gate (`/implement-review`) の承認を得てから受け入れテスト (`/implement-merge`) に進む。順序のスキップ・逆転は禁止。
 

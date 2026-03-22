@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { getAdmiralHome } from "./admiral-home.js";
 
 /** Retryable error patterns in stderr / error output from Claude CLI.
  *  Covers rate limits (429), overload (529), server errors (500),
@@ -94,7 +95,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Launch an Escort process for gate review (plan-review, code-review, etc.).
+   * Launch an Escort process for gate review (planning-gate, implementing-gate, etc.).
    * Escorts are non-interactive (-p mode) like Ships, but run a gate skill
    * instead of /implement. Launched by EscortManager when Engine detects
    * a gate phase.
@@ -175,6 +176,10 @@ export class ProcessManager extends EventEmitter {
 
     const proc = spawn("claude", args, {
       cwd: fleetPath,
+      env: {
+        ...process.env,
+        VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -277,6 +282,10 @@ export class ProcessManager extends EventEmitter {
 
     const proc = spawn("claude", args, {
       cwd: fleetPath,
+      env: {
+        ...process.env,
+        VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
