@@ -192,6 +192,8 @@ export class ShipManager {
       retryCount: 0,
       createdAt: new Date().toISOString(),
       lastOutputAt: null,
+      kind: "ship",
+      parentShipId: null,
     };
 
     // Persist to DB first — DB record is a precondition for process spawn.
@@ -252,6 +254,109 @@ export class ShipManager {
 
     this.updatePhase(shipId, "planning");
     return ship;
+  }
+
+  /**
+   * Launch a persistent Escort as a Ship. Reuses the parent Ship's worktree,
+   * branch, and repo — skips worktree creation, skill deployment, npm install,
+   * issue label changes, and PR detection.
+   *
+   * The Escort Ship runs the `/escort` skill, which polls the parent Ship's
+   * phase via REST API and performs gate reviews when gate phases are detected.
+   */
+  sortieEscort(parentShip: ShipProcess): ShipProcess {
+    const escortId = randomUUID();
+
+    const escort: ShipProcess = {
+      id: escortId,
+      fleetId: parentShip.fleetId,
+      repo: parentShip.repo,
+      issueNumber: parentShip.issueNumber,
+      issueTitle: parentShip.issueTitle,
+      phase: "planning",
+      isCompacting: false,
+      branchName: parentShip.branchName,
+      worktreePath: parentShip.worktreePath,
+      sessionId: null,
+      prUrl: null,
+      prReviewStatus: null,
+      gateCheck: null,
+      qaRequired: false,
+      retryCount: 0,
+      createdAt: new Date().toISOString(),
+      lastOutputAt: null,
+      kind: "escort",
+      parentShipId: parentShip.id,
+    };
+
+    // Persist to DB
+    try {
+      this.persistToDb(escort);
+    } catch (err) {
+      console.error(`[ship-manager] DB INSERT failed for escort ${escortId} (parent: ${parentShip.id.slice(0, 8)}...):`, err);
+      throw new Error(`Failed to persist escort to DB: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Store runtime state
+    this.runtime.set(escortId, {
+      isCompacting: false,
+      lastOutputAt: null,
+      processDead: false,
+      gateCheck: null,
+      prReviewStatus: null,
+      retryCount: 0,
+    });
+
+    // Create XState Actor
+    this.actorManager?.createActor({
+      shipId: escortId,
+      fleetId: parentShip.fleetId,
+      repo: parentShip.repo,
+      issueNumber: parentShip.issueNumber,
+      worktreePath: parentShip.worktreePath,
+      branchName: parentShip.branchName,
+      sessionId: null,
+      prUrl: null,
+      qaRequired: false,
+    });
+
+    // Launch via processManager.sortie() with /escort skill
+    const escortEnv: Record<string, string> = {
+      VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
+      VIBE_ADMIRAL_SHIP_ID: escortId,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
+      VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+    };
+    this.processManager.sortie(
+      escortId,
+      parentShip.worktreePath,
+      parentShip.issueNumber,
+      undefined,
+      "/escort",
+      escortEnv,
+    );
+
+    console.log(
+      `[ship-manager] Launched persistent Escort ${escortId.slice(0, 8)}... for Ship ${parentShip.id.slice(0, 8)}... (issue #${parentShip.issueNumber})`,
+    );
+
+    return escort;
+  }
+
+  /** Check if a Ship is an Escort by its kind field. */
+  isEscort(shipId: string): boolean {
+    const ship = this.getShip(shipId);
+    return ship?.kind === "escort";
+  }
+
+  /** Get the Escort Ship for a parent Ship, if any. */
+  getEscortForShip(parentShipId: string): ShipProcess | undefined {
+    if (!this.fleetDb) return undefined;
+    const allShips = this.fleetDb.getAllShips();
+    const escort = allShips.find(
+      (s) => s.kind === "escort" && s.parentShipId === parentShipId && s.phase !== "done",
+    );
+    return escort ? this.mergeRuntime(escort) : undefined;
   }
 
   stopShip(shipId: string): boolean {
@@ -559,10 +664,12 @@ export class ShipManager {
       "implement-code",
       "implement-review",
       "implement-merge",
-      // Gate skills (deployed to worktree; Engine launches Escort processes that use these)
+      // Gate skills (deployed to worktree for reference by Escort)
       "planning-gate",
       "implementing-gate",
       "acceptance-test-gate",
+      // Persistent Escort skill (unified gate reviewer)
+      "escort",
       // Shared skills (Bridge/Ship common)
       "admiral-protocol",
       "read-issue",

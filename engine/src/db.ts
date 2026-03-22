@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ShipProcess, Phase } from "./types.js";
+import type { ShipProcess, Phase, ShipKind } from "./types.js";
 import { PHASE_ORDER } from "./types.js";
 
 /** Persisted ship row stored in SQLite. */
@@ -21,6 +21,8 @@ export interface ShipRow {
   phase: string;
   created_at: string;
   completed_at: string | null;
+  kind: string | null;
+  parent_ship_id: string | null;
 }
 
 /** Row returned by the ships+repos join query. */
@@ -61,6 +63,9 @@ export class FleetDatabase {
     }
     if (version < 3) {
       this.applyV3();
+    }
+    if (version < 4) {
+      this.applyV4();
     }
   }
 
@@ -148,6 +153,22 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV4(): void {
+    // V4: Add kind + parent_ship_id columns for persistent Escort-as-Ship model.
+    // Relax UNIQUE(repo_id, issue_number) to UNIQUE(repo_id, issue_number, kind)
+    // so both a Ship and its Escort can coexist for the same issue.
+    this.db.exec(`
+      ALTER TABLE ships ADD COLUMN kind TEXT NOT NULL DEFAULT 'ship';
+      ALTER TABLE ships ADD COLUMN parent_ship_id TEXT;
+
+      -- Recreate unique index to include kind
+      DROP INDEX IF EXISTS idx_ships_repo_issue;
+      CREATE UNIQUE INDEX idx_ships_repo_issue_kind ON ships (repo_id, issue_number, kind);
+
+      INSERT INTO schema_version (version) VALUES (4);
+    `);
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -168,18 +189,19 @@ export class FleetDatabase {
 
     const repoId = this.ensureRepo(owner, name);
 
-    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict.
+    // Delete any existing row with the same repo+issue+kind to avoid UNIQUE constraint conflict.
     // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
+    const kind = ship.kind ?? "ship";
     const existingShip = this.db.prepare(
-      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ?",
-    ).get(repoId, ship.issueNumber) as { id: string } | undefined;
+      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ? AND kind = ?",
+    ).get(repoId, ship.issueNumber, kind) as { id: string } | undefined;
     if (existingShip) {
       this.deleteShip(existingShip.id);
     }
 
     this.db.prepare(`
-      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at, kind, parent_ship_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         issue_title = excluded.issue_title,
         worktree_path = excluded.worktree_path,
@@ -190,7 +212,9 @@ export class FleetDatabase {
         qa_required = excluded.qa_required,
         fleet_id = excluded.fleet_id,
         phase = excluded.phase,
-        completed_at = excluded.completed_at
+        completed_at = excluded.completed_at,
+        kind = excluded.kind,
+        parent_ship_id = excluded.parent_ship_id
     `).run(
       ship.id,
       repoId,
@@ -206,6 +230,8 @@ export class FleetDatabase {
       ship.phase,
       ship.createdAt,
       ship.completedAt ? new Date(ship.completedAt).toISOString() : null,
+      kind,
+      ship.parentShipId,
     );
   }
 
@@ -526,6 +552,8 @@ export class FleetDatabase {
       createdAt: row.created_at,
       completedAt: row.completed_at ? new Date(row.completed_at).getTime() : undefined,
       lastOutputAt: null,
+      kind: (row.kind as ShipKind) ?? "ship",
+      parentShipId: row.parent_ship_id,
     };
   }
 }

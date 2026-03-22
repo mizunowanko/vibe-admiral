@@ -5,41 +5,25 @@ import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { GatePhase, GateType, Phase } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
-/** Maps gate phases to the skill name that the Escort CLI should invoke. */
-const GATE_SKILL_MAP: Record<GatePhase, string> = {
-  "planning-gate": "planning-gate",
-  "implementing-gate": "implementing-gate",
-  "acceptance-test-gate": "acceptance-test-gate",
-};
-
-/** Information about a running Escort process. */
-export interface EscortInfo {
-  escortId: string;
-  shipId: string;
-  gatePhase: GatePhase;
-  gateType: GateType;
-  startedAt: string;
-}
-
 /**
- * Manages Escort processes — independent Claude CLI gate-review agents
- * launched by the Engine when a Ship enters a gate phase.
+ * Thin coordination layer for persistent Escort Ships.
  *
- * Lifecycle:
- * 1. Engine detects gate phase via phase change polling
- * 2. EscortManager.launchEscort() spawns a Claude CLI process with the
- *    appropriate gate skill (e.g. /planning-gate)
- * 3. Escort performs review, directly updates phases table and phase_transitions
- * 4. Ship polls phases table for phase changes
- * 5. On Escort process exit, EscortManager cleans up tracking state
+ * Escort is "just another Ship with a different skill" — launched via
+ * ShipManager.sortieEscort() at parent Ship's sortie time.
+ *
+ * EscortManager's responsibilities:
+ * 1. Track parentShipId → escortShipId mapping (in-memory)
+ * 2. Launch persistent Escort via ShipManager.sortieEscort()
+ * 3. Handle Escort-Ship exit (gate revert if verdict not submitted)
+ * 4. Kill Escort when parent Ship completes
  */
 export class EscortManager {
   private processManager: ProcessManager;
   private shipManager: ShipManager;
   private getDatabase: () => FleetDatabase | null;
   private actorManager: ShipActorManager | null = null;
-  /** Active Escort processes indexed by shipId (one Escort per Ship at a time). */
-  private escorts = new Map<string, EscortInfo>();
+  /** parentShipId → escortShipId mapping (one Escort per parent Ship). */
+  private escorts = new Map<string, string>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
 
   constructor(processManager: ProcessManager, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
@@ -58,183 +42,153 @@ export class EscortManager {
   }
 
   /**
-   * Launch an Escort process for a gate phase.
-   * Returns the escort ID if launched, null if an Escort is already running for this Ship.
+   * Launch a persistent Escort Ship for a parent Ship.
+   * Called once at parent Ship's sortie time.
+   * Returns the escort Ship ID if launched, null if an Escort already exists.
    */
   launchEscort(
-    shipId: string,
-    gatePhase: GatePhase,
-    gateType: GateType,
+    parentShipId: string,
+    _gatePhase?: GatePhase,
+    _gateType?: GateType,
   ): string | null {
-    // Prevent duplicate Escorts for the same Ship
-    const existing = this.escorts.get(shipId);
-    if (existing && this.processManager.isRunning(existing.escortId)) {
+    // Prevent duplicate Escorts for the same parent Ship
+    const existingEscortId = this.escorts.get(parentShipId);
+    if (existingEscortId && this.processManager.isRunning(existingEscortId)) {
       console.log(
-        `[escort-manager] Escort already running for Ship ${shipId.slice(0, 8)}... (${existing.escortId.slice(0, 8)}...)`,
+        `[escort-manager] Escort already running for Ship ${parentShipId.slice(0, 8)}... (${existingEscortId.slice(0, 8)}...)`,
       );
       return null;
     }
 
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) {
-      console.warn(`[escort-manager] Ship ${shipId} not found — cannot launch Escort`);
+    const parentShip = this.shipManager.getShip(parentShipId);
+    if (!parentShip) {
+      console.warn(`[escort-manager] Parent Ship ${parentShipId} not found — cannot launch Escort`);
       return null;
     }
 
-    const skill = GATE_SKILL_MAP[gatePhase];
-    if (!skill) {
-      console.warn(`[escort-manager] No skill mapped for gate phase: ${gatePhase}`);
+    try {
+      const escort = this.shipManager.sortieEscort(parentShip);
+      this.escorts.set(parentShipId, escort.id);
+
+      console.log(
+        `[escort-manager] Launched persistent Escort ${escort.id.slice(0, 8)}... for Ship ${parentShipId.slice(0, 8)}... (issue #${parentShip.issueNumber})`,
+      );
+
+      return escort.id;
+    } catch (err) {
+      console.error(`[escort-manager] Failed to launch Escort for Ship ${parentShipId.slice(0, 8)}...:`, err);
       return null;
     }
+  }
 
-    const escortId = `escort-${shipId.slice(0, 8)}-${gatePhase}`;
-
-    // Build environment variables for the Escort process
-    const escortEnv: Record<string, string> = {
-      VIBE_ADMIRAL_SHIP_ID: shipId,
-      VIBE_ADMIRAL_MAIN_REPO: ship.repo,
-      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
-    };
-
-    // For acceptance-test-gate, read qaRequired from the planning-gate transition metadata
-    if (gatePhase === "acceptance-test-gate") {
-      const db = this.getDatabase();
-      if (db) {
-        const transitions = db.getPhaseTransitions(shipId, 50);
-        const planningGateTransition = transitions.find(
-          (t) => t.toPhase === "planning-gate",
-        );
-        const metadata = planningGateTransition?.metadata as Record<string, unknown> | null;
-        const qaRequired = metadata?.qaRequired ?? true; // default true (conservative)
-        escortEnv.VIBE_ADMIRAL_QA_REQUIRED = String(qaRequired);
+  /** Check if an Escort process is currently running for a parent Ship. */
+  isEscortRunning(parentShipId: string): boolean {
+    const escortId = this.escorts.get(parentShipId);
+    if (!escortId) {
+      // Check DB for restored Escort Ships (after Engine restart)
+      const escort = this.shipManager.getEscortForShip(parentShipId);
+      if (escort) {
+        this.escorts.set(parentShipId, escort.id);
+        return this.processManager.isRunning(escort.id);
       }
+      return false;
     }
-
-    this.processManager.launchEscort(
-      escortId,
-      ship.worktreePath,
-      skill,
-      ship.issueNumber,
-      escortEnv,
-    );
-
-    const info: EscortInfo = {
-      escortId,
-      shipId,
-      gatePhase,
-      gateType,
-      startedAt: new Date().toISOString(),
-    };
-    this.escorts.set(shipId, info);
-
-    console.log(
-      `[escort-manager] Launched Escort ${escortId} for Ship ${shipId.slice(0, 8)}... — /${skill} #${ship.issueNumber}`,
-    );
-
-    return escortId;
+    return this.processManager.isRunning(escortId);
   }
 
-  /** Get the active Escort for a Ship, if any. */
-  getEscort(shipId: string): EscortInfo | undefined {
-    return this.escorts.get(shipId);
-  }
-
-  /** Check if an Escort process is currently running for a Ship. */
-  isEscortRunning(shipId: string): boolean {
-    const info = this.escorts.get(shipId);
-    if (!info) return false;
-    return this.processManager.isRunning(info.escortId);
-  }
-
-  /** Kill the Escort process for a Ship. */
-  killEscort(shipId: string): boolean {
-    const info = this.escorts.get(shipId);
-    if (!info) return false;
-    const killed = this.processManager.kill(info.escortId);
-    this.escorts.delete(shipId);
+  /** Kill the Escort for a parent Ship. */
+  killEscort(parentShipId: string): boolean {
+    const escortId = this.escorts.get(parentShipId);
+    if (!escortId) return false;
+    const killed = this.processManager.kill(escortId);
+    this.escorts.delete(parentShipId);
     return killed;
   }
 
-  /** Check if a process ID belongs to an Escort. */
+  /** Check if a process ID belongs to an Escort Ship. */
   isEscortProcess(processId: string): boolean {
-    return processId.startsWith("escort-");
+    return this.shipManager.isEscort(processId);
   }
 
-  /** Find the Ship ID associated with an Escort process ID. */
-  findShipIdByEscortId(escortId: string): string | undefined {
-    for (const [shipId, info] of this.escorts) {
-      if (info.escortId === escortId) return shipId;
+  /** Find the parent Ship ID for an Escort Ship process ID. */
+  findShipIdByEscortId(escortShipId: string): string | undefined {
+    for (const [parentId, escortId] of this.escorts) {
+      if (escortId === escortShipId) return parentId;
+    }
+    // Fallback: check DB
+    const escort = this.shipManager.getShip(escortShipId);
+    if (escort?.kind === "escort" && escort.parentShipId) {
+      this.escorts.set(escort.parentShipId, escortShipId);
+      return escort.parentShipId;
     }
     return undefined;
   }
 
   /**
-   * Handle Escort process exit.
-   * If the Escort exited without submitting a verdict (Ship phase is still a gate phase),
-   * treat it as a rejection: revert phase to pre-gate, clear gateCheck, and notify Flagship.
+   * Handle Escort Ship process exit.
+   * If the parent Ship is still in a gate phase (verdict not submitted),
+   * treat as rejection: revert phase and notify Flagship.
    */
-  onEscortExit(escortId: string, code: number | null): void {
-    const shipId = this.findShipIdByEscortId(escortId);
-    if (!shipId) return;
+  onEscortExit(escortShipId: string, code: number | null): void {
+    const parentShipId = this.findShipIdByEscortId(escortShipId);
+    if (!parentShipId) return;
 
-    const info = this.escorts.get(shipId);
-    this.escorts.delete(shipId);
+    this.escorts.delete(parentShipId);
 
     console.log(
-      `[escort-manager] Escort ${escortId} exited (code=${code}) for Ship ${shipId.slice(0, 8)}... gate=${info?.gatePhase}`,
+      `[escort-manager] Escort ${escortShipId.slice(0, 8)}... exited (code=${code}) for parent Ship ${parentShipId.slice(0, 8)}...`,
     );
 
-    // Check if verdict was submitted: if phase is still a gate phase, verdict was NOT submitted
     const db = this.getDatabase();
-    if (!db || !info) return;
+    if (!db) return;
 
-    const ship = db.getShipById(shipId);
-    if (!ship) return;
+    const parentShip = db.getShipById(parentShipId);
+    if (!parentShip) return;
 
-    const currentPhase = ship.phase as Phase;
+    const currentPhase = parentShip.phase as Phase;
     if (!isGatePhase(currentPhase)) {
       // Phase already moved past gate — verdict was submitted successfully
-      this.shipManager.clearGateCheck(shipId);
+      this.shipManager.clearGateCheck(parentShipId);
       return;
     }
 
-    // Escort died without submitting verdict — treat as rejection
+    // Escort died without submitting verdict while parent is in gate phase — treat as rejection
     const prevPhase = GATE_PREV_PHASE[currentPhase as GatePhase];
     console.warn(
-      `[escort-manager] Escort ${escortId} died without verdict — reverting Ship ${shipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
+      `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict — reverting Ship ${parentShipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
     );
 
-    // Send ESCORT_DIED event to XState Actor
-    this.actorManager?.send(shipId, {
+    // Send ESCORT_DIED event to parent Ship's XState Actor
+    this.actorManager?.send(parentShipId, {
       type: "ESCORT_DIED",
       exitCode: code,
       feedback: `Escort process exited unexpectedly (code=${code}) without submitting verdict`,
     });
 
-    // Revert phase to pre-gate (reject)
+    // Revert phase to pre-gate
     try {
-      db.transitionPhase(shipId, currentPhase, prevPhase, "escort", {
+      db.transitionPhase(parentShipId, currentPhase, prevPhase, "escort", {
         gate_result: "rejected",
         feedback: `Escort process exited unexpectedly (code=${code}) without submitting verdict`,
       });
-      this.shipManager.syncPhaseFromDb(shipId);
+      this.shipManager.syncPhaseFromDb(parentShipId);
     } catch (err) {
-      console.error(`[escort-manager] Failed to revert phase for Ship ${shipId.slice(0, 8)}...:`, err);
+      console.error(`[escort-manager] Failed to revert phase for Ship ${parentShipId.slice(0, 8)}...:`, err);
     }
 
     // Clear gate check state
-    this.shipManager.clearGateCheck(shipId);
+    this.shipManager.clearGateCheck(parentShipId);
 
     // Notify Flagship
-    const message = `Escort died without verdict for Ship #${ship.issueNumber} (${ship.issueTitle}) during ${currentPhase}. Phase reverted to ${prevPhase}. (exit code=${code})`;
-    this.onEscortDeathCallback?.(shipId, message);
+    const message = `Escort died without verdict for Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) during ${currentPhase}. Phase reverted to ${prevPhase}. (exit code=${code})`;
+    this.onEscortDeathCallback?.(parentShipId, message);
   }
 
   /** Kill all running Escort processes. */
   killAll(): void {
-    for (const [shipId, info] of this.escorts) {
-      this.processManager.kill(info.escortId);
-      this.escorts.delete(shipId);
+    for (const [parentShipId, escortId] of this.escorts) {
+      this.processManager.kill(escortId);
+      this.escorts.delete(parentShipId);
     }
   }
 }

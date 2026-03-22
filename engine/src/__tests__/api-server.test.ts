@@ -15,7 +15,7 @@ function createMockDeps() {
     requestHandler: { handle } as unknown as FlagshipRequestHandler,
     getDatabase: vi.fn().mockReturnValue(null),
     getShipManager: vi.fn().mockReturnValue({ syncPhaseFromDb: vi.fn() }),
-    getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn() }),
+    getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn(), isEscortRunning: vi.fn().mockReturnValue(false) }),
     getActorManager: vi.fn().mockReturnValue({ send: vi.fn() }),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",

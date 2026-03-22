@@ -35,6 +35,8 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
+    kind: "ship",
+    parentShipId: null,
     ...overrides,
   };
 }
