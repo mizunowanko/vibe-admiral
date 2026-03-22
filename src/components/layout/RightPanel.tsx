@@ -87,7 +87,7 @@ function CommanderSection({
 function ShipsSection({ fleetId }: { fleetId: string }) {
   const stopShip = useShipStore((s) => s.stopShip);
   const setViewingShipId = useUIStore((s) => s.setViewingShipId);
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
   const allFleetShips = useShipStore((s) => {
@@ -102,10 +102,10 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
 
   const fleetShips = useMemo(
     () =>
-      showCompleted
+      showInactive
         ? allFleetShips
         : allFleetShips.filter((s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead),
-    [allFleetShips, showCompleted],
+    [allFleetShips, showInactive],
   );
 
   return (
@@ -121,11 +121,11 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
           <label className="flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
-              checked={showCompleted}
-              onChange={(e) => setShowCompleted(e.target.checked)}
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
               className="h-3 w-3 rounded border-border accent-primary"
             />
-            <span className="text-[10px] text-muted-foreground">Show completed</span>
+            <span className="text-[10px] text-muted-foreground">Show inactive</span>
           </label>
         </div>
       </div>
