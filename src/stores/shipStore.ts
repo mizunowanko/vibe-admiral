@@ -53,7 +53,6 @@ interface ShipState {
   sortie: (fleetId: string, repo: string, issueNumber: number) => Promise<void>;
   chatWithShip: (id: string, message: string) => void;
   retryShip: (id: string) => Promise<void>;
-  stopShip: (id: string) => Promise<void>;
 }
 
 export const useShipStore = create<ShipState>((set) => ({
@@ -223,11 +222,4 @@ export const useShipStore = create<ShipState>((set) => ({
     }
   },
 
-  stopShip: async (id) => {
-    try {
-      await api.stopShip(id);
-    } catch (err) {
-      console.error("[shipStore] stopShip failed:", err);
-    }
-  },
 }));

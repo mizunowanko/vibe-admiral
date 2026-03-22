@@ -39,18 +39,6 @@ export async function sortie(
   return data.result ?? "OK";
 }
 
-export async function stopShip(
-  shipId: string,
-  fleetId?: string,
-): Promise<string> {
-  const data = await request(`/ship-stop`, {
-    method: "POST",
-    body: JSON.stringify({ shipId, fleetId }),
-  });
-  if (!data.ok) throw new Error(data.error ?? "Stop failed");
-  return data.result ?? "OK";
-}
-
 export async function resumeShip(
   shipId: string,
   fleetId?: string,

@@ -4,21 +4,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
-import { Square, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 
 interface ShipCardProps {
   ship: Ship;
   onSelect: () => void;
-  onStop: () => void;
   onRetry?: () => void;
 }
 
-export const ShipCard = memo(function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
+export const ShipCard = memo(function ShipCard({ ship, onSelect, onRetry }: ShipCardProps) {
   const config = ship.processDead
     ? PROCESS_DEAD_CONFIG
     : STATUS_CONFIG[ship.phase];
-  const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
-
   return (
     <div
       onClick={onSelect}
@@ -52,19 +49,6 @@ export const ShipCard = memo(function ShipCard({ ship, onSelect, onStop, onRetry
             </Badge>
           )}
         </div>
-        {isActive && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onStop();
-            }}
-          >
-            <Square className="h-3 w-3" />
-          </Button>
-        )}
         {ship.processDead && onRetry && (
           <Button
             variant="ghost"

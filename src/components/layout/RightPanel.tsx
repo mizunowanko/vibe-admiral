@@ -3,11 +3,10 @@ import { useUIStore } from "@/stores/uiStore";
 import { useShipStore } from "@/stores/shipStore";
 import { ActiveShipSummary } from "@/components/ship/ActiveShipSummary";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
-import { Flag, Anchor, Square } from "lucide-react";
+import { Flag, Anchor } from "lucide-react";
 import type { Ship, CommanderRole } from "@/types";
 
 interface RightPanelProps {
@@ -86,7 +85,6 @@ function CommanderSection({
 }
 
 function ShipsSection({ fleetId }: { fleetId: string }) {
-  const stopShip = useShipStore((s) => s.stopShip);
   const viewingShipId = useUIStore((s) => s.viewingShipId);
   const setViewingShipId = useUIStore((s) => s.setViewingShipId);
   const [showInactive, setShowInactive] = useState(false);
@@ -141,8 +139,6 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
           const config = ship.processDead
             ? PROCESS_DEAD_CONFIG
             : STATUS_CONFIG[ship.phase];
-          const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
-
           return (
             <div
               key={ship.id}
@@ -180,19 +176,6 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
                     </Badge>
                   )}
                 </div>
-                {isActive && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      stopShip(ship.id);
-                    }}
-                  >
-                    <Square className="h-2.5 w-2.5" />
-                  </Button>
-                )}
               </div>
               <p className="truncate text-foreground">
                 {ship.issueTitle || `Issue #${ship.issueNumber}`}
