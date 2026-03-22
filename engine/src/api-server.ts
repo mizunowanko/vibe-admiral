@@ -29,6 +29,7 @@ interface ApiResponse {
   error?: string;
   phase?: string;
   transitions?: Array<Record<string, unknown>>;
+  ships?: unknown[];
 }
 
 function validateSortieRequest(body: unknown): FlagshipRequest | string {
@@ -318,6 +319,19 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       if (shipRouteMatch) {
         const [, shipId, action] = shipRouteMatch;
         await handleShipRoute(deps, req, res, shipId!, action!);
+        return;
+      }
+
+      // === Frontend API endpoints ===
+
+      // GET /api/ships — Ship list as JSON array (for Frontend)
+      if (route === "ships" && req.method === "GET") {
+        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        const shipManager = deps.getShipManager();
+        const ships = fleetId
+          ? shipManager.getShipsByFleet(fleetId)
+          : shipManager.getAllShips();
+        sendJson(res, 200, { ok: true, ships });
         return;
       }
 

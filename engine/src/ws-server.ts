@@ -556,54 +556,7 @@ export class EngineServer {
           break;
         }
 
-        // Ship operations
-        case "ship:sortie": {
-          const fleets = await this.loadFleets();
-          const fleet = fleets.find((f) => f.id === (data.fleetId as string));
-          const repoStr = data.repo as string;
-          const repoEntry = fleet?.repos.find(
-            (r) => r.remote === repoStr || r.localPath === repoStr,
-          );
-          if (!repoEntry) {
-            throw new Error(
-              `Repo "${data.repo}" not found in fleet. Register the local path first.`,
-            );
-          }
-
-          // Sortie guard check
-          const remoteId = repoEntry.remote ?? repoStr;
-          const guard = await this.stateSync.sortieGuard(remoteId, data.issueNumber as number);
-          if (!guard.ok) {
-            throw new Error(guard.reason ?? "Sortie guard check failed");
-          }
-
-          // Load shared + ship rules for extraPrompt
-          const sharedRulesForShip = await this.loadRules(fleet?.sharedRulePaths ?? []);
-          const shipRules = await this.loadRules(fleet?.shipRulePaths ?? []);
-          const shipExtraPrompt = [sharedRulesForShip, shipRules].filter(Boolean).join("\n\n") || undefined;
-
-          const ship = await this.shipManager.sortie(
-            data.fleetId as string,
-            data.repo as string,
-            data.issueNumber as number,
-            repoEntry.localPath,
-            fleet?.skillSources,
-            shipExtraPrompt,
-          );
-          this.broadcast({
-            type: "ship:created",
-            data: {
-              id: ship.id,
-              fleetId: ship.fleetId,
-              repo: ship.repo,
-              issueNumber: ship.issueNumber,
-              issueTitle: ship.issueTitle,
-              phase: ship.phase,
-              branchName: ship.branchName,
-            },
-          });
-          break;
-        }
+        // Ship operations (sortie/stop/retry/list moved to REST API — see api-server.ts)
         case "ship:chat": {
           const ship = this.shipManager.getShip(data.id as string);
           if (ship?.sessionId) {
@@ -616,45 +569,8 @@ export class EngineServer {
           }
           break;
         }
-        case "ship:retry": {
-          const retryId = data.id as string;
-          const retryShip = this.shipManager.getShip(retryId);
-          if (!retryShip || retryShip.phase === "done" || this.processManager.isRunning(retryId)) {
-            throw new Error(`Ship "${retryId}" is not eligible for retry`);
-          }
-
-          // Load ship rules for re-sortie fallback
-          const retriedFleets = await this.loadFleets();
-          const retryFleet = retriedFleets.find((f) => f.id === retryShip.fleetId);
-          const retrySharedRules = await this.loadRules(retryFleet?.sharedRulePaths ?? []);
-          const retryShipRules = await this.loadRules(retryFleet?.shipRulePaths ?? []);
-          const retryExtraPrompt = [retrySharedRules, retryShipRules].filter(Boolean).join("\n\n") || undefined;
-
-          const result = this.shipManager.retryShip(retryId, retryExtraPrompt);
-          if (!result) {
-            throw new Error(`Failed to retry Ship "${retryId}"`);
-          }
-          break;
-        }
-        case "ship:stop": {
-          const stopId = data.id as string;
-          const stopShip = this.shipManager.getShip(stopId);
-          this.shipManager.stopShip(stopId);
-          // Explicitly rollback label — don't rely solely on process exit handler
-          if (stopShip) {
-            this.stateSync.rollbackLabel(stopShip.repo, stopShip.issueNumber).catch((err) => {
-              console.warn(`[ws-server] Failed to rollback label on ship:stop for #${stopShip.issueNumber}:`, err);
-            });
-          }
-          break;
-        }
         case "ship:logs": {
           // Ship logs are streamed in real-time, no separate endpoint needed
-          break;
-        }
-        case "ship:list": {
-          const ships = this.shipManager.getAllShips();
-          this.sendTo(ws, { type: "ship:data", data: ships });
           break;
         }
 

@@ -183,15 +183,8 @@ export type ClientMessage =
   | { type: "dock:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
   | { type: "dock:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "dock:history"; data: { fleetId: string } }
-  | {
-      type: "ship:sortie";
-      data: { fleetId: string; issueNumber: number; repo: string };
-    }
   | { type: "ship:chat"; data: { id: string; message: string } }
-  | { type: "ship:retry"; data: { id: string } }
-  | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
-  | { type: "ship:list" }
   | { type: "issue:list"; data: { repo: string } }
   | { type: "issue:get"; data: { repo: string; number: number } }
   | { type: "fs:list-dir"; data: { path?: string } };

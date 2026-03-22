@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Ship, Phase, StreamMessage, GateCheckState } from "@/types";
 import { wsClient } from "@/lib/ws-client";
+import * as api from "@/lib/api-client";
 
 interface ShipPhaseData {
   fleetId?: string;
@@ -22,11 +23,11 @@ interface ShipState {
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
 
   syncShips: (ships: Ship[]) => void;
-  fetchShips: () => void;
-  sortie: (fleetId: string, repo: string, issueNumber: number) => void;
+  fetchShips: (fleetId?: string) => Promise<void>;
+  sortie: (fleetId: string, repo: string, issueNumber: number) => Promise<void>;
   chatWithShip: (id: string, message: string) => void;
-  retryShip: (id: string) => void;
-  stopShip: (id: string) => void;
+  retryShip: (id: string) => Promise<void>;
+  stopShip: (id: string) => Promise<void>;
 }
 
 export const useShipStore = create<ShipState>((set) => ({
@@ -161,26 +162,40 @@ export const useShipStore = create<ShipState>((set) => ({
     });
   },
 
-  fetchShips: () => {
-    wsClient.send({ type: "ship:list" });
+  fetchShips: async (fleetId) => {
+    try {
+      const ships = await api.fetchShips(fleetId);
+      useShipStore.getState().syncShips(ships);
+    } catch (err) {
+      console.error("[shipStore] fetchShips failed:", err);
+    }
   },
 
-  sortie: (fleetId, repo, issueNumber) => {
-    wsClient.send({
-      type: "ship:sortie",
-      data: { fleetId, issueNumber, repo },
-    });
+  sortie: async (fleetId, repo, issueNumber) => {
+    try {
+      await api.sortie(fleetId, repo, issueNumber);
+    } catch (err) {
+      console.error("[shipStore] sortie failed:", err);
+    }
   },
 
   chatWithShip: (id, message) => {
     wsClient.send({ type: "ship:chat", data: { id, message } });
   },
 
-  retryShip: (id) => {
-    wsClient.send({ type: "ship:retry", data: { id } });
+  retryShip: async (id) => {
+    try {
+      await api.resumeShip(id);
+    } catch (err) {
+      console.error("[shipStore] retryShip failed:", err);
+    }
   },
 
-  stopShip: (id) => {
-    wsClient.send({ type: "ship:stop", data: { id } });
+  stopShip: async (id) => {
+    try {
+      await api.stopShip(id);
+    } catch (err) {
+      console.error("[shipStore] stopShip failed:", err);
+    }
   },
 }));
