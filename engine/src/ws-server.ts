@@ -965,11 +965,40 @@ export class EngineServer {
 
   private async initDatabase(): Promise<void> {
     try {
-      this.fleetDb = await initFleetDatabase(getAdmiralHome());
+      const admiralHome = getAdmiralHome();
+      const dbPath = join(admiralHome, "fleet.db");
+      console.log(`[engine] Opening fleet database at: ${dbPath}`);
+
+      this.fleetDb = await initFleetDatabase(admiralHome);
       this.shipManager.setDatabase(this.fleetDb);
+
+      // Verify DB path consistency: warn if ADMIRAL_HOME changed since last run
+      await this.checkDbPathConsistency(admiralHome);
+
       console.log("[engine] Fleet database initialized");
     } catch (err) {
       console.warn("[engine] Failed to initialize fleet database:", err);
+    }
+  }
+
+  /**
+   * Check if the DB path matches the one used in the previous run.
+   * Warns if ADMIRAL_HOME changed, which would create a new empty DB.
+   */
+  private async checkDbPathConsistency(currentHome: string): Promise<void> {
+    const markerPath = join(currentHome, ".db-home-marker");
+    try {
+      const previousHome = await readFile(markerPath, "utf-8").catch(() => null);
+      if (previousHome !== null && previousHome.trim() !== currentHome) {
+        console.warn(
+          `[engine] WARNING: ADMIRAL_HOME changed from "${previousHome.trim()}" to "${currentHome}". ` +
+          `Ship data from the previous path may be inaccessible.`,
+        );
+      }
+      await writeFile(markerPath, currentHome, "utf-8");
+    } catch (err) {
+      // Non-fatal: best-effort consistency tracking
+      console.warn("[engine] Could not check DB path consistency:", err);
     }
   }
 

@@ -93,14 +93,13 @@ export class ShipManager {
     extraPrompt?: string,
     skill?: string,
   ): Promise<ShipProcess> {
-    // Clean up all completed ships (done) on every new sortie
+    // Clean up previous ship for the same issue (allows re-sortie).
+    // Other completed ships are preserved for history.
     if (this.fleetDb) {
-      const allShips = this.fleetDb.getAllShips();
-      for (const ship of allShips) {
-        if (ship.phase === "done" || ship.phase === "stopped") {
-          this.runtime.delete(ship.id);
-          this.fleetDb.deleteShip(ship.id);
-        }
+      const existingShip = this.fleetDb.getShipByIssueAnyPhase(repo, issueNumber);
+      if (existingShip && (existingShip.phase === "done" || existingShip.phase === "stopped")) {
+        this.runtime.delete(existingShip.id);
+        this.fleetDb.deleteShip(existingShip.id);
       }
     }
 
