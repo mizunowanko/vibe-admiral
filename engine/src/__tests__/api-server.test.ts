@@ -16,6 +16,7 @@ function createMockDeps() {
     getDatabase: vi.fn().mockReturnValue(null),
     getShipManager: vi.fn().mockReturnValue({ syncPhaseFromDb: vi.fn() }),
     getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn() }),
+    getActorManager: vi.fn().mockReturnValue({ send: vi.fn() }),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",
       repos: [{ localPath: "/home/user/repo", remote: "owner/repo" }] as FleetRepo[],

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
+import type { ShipActorManager } from "./ship-actor-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, StreamMessage } from "./types.js";
@@ -57,6 +58,7 @@ export class ShipManager {
   private processManager: ProcessManager;
   private statusManager: StatusManager;
   private fleetDb: FleetDatabase | null = null;
+  private actorManager: ShipActorManager | null = null;
   private onPhaseChange:
     | ((id: string, phase: Phase, detail?: string) => void)
     | null = null;
@@ -67,6 +69,10 @@ export class ShipManager {
   ) {
     this.processManager = processManager;
     this.statusManager = statusManager;
+  }
+
+  setActorManager(actorManager: ShipActorManager): void {
+    this.actorManager = actorManager;
   }
 
   setDatabase(db: FleetDatabase): void {
@@ -223,7 +229,20 @@ export class ShipManager {
       .filter(Boolean)
       .join("\n\n") || undefined;
 
-    // 10. Launch Claude CLI process with Engine API access
+    // 10. Create XState Actor for this Ship
+    this.actorManager?.createActor({
+      shipId,
+      fleetId,
+      repo,
+      issueNumber,
+      worktreePath,
+      branchName,
+      sessionId: null,
+      prUrl: existingPrUrl,
+      qaRequired: true,
+    });
+
+    // 11. Launch Claude CLI process with Engine API access
     const shipEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: repo,
       VIBE_ADMIRAL_SHIP_ID: shipId,
@@ -240,6 +259,7 @@ export class ShipManager {
     if (killed) {
       const rt = this.runtime.get(shipId);
       if (rt) rt.isCompacting = false;
+      this.actorManager?.send(shipId, { type: "STOP" });
       this.updatePhase(shipId, "stopped", "Manually stopped");
     }
     return killed;
@@ -317,6 +337,7 @@ export class ShipManager {
     const rt = this.ensureRuntime(shipId);
     if (!rt) return;
     rt.processDead = true;
+    this.actorManager?.send(shipId, { type: "PROCESS_DIED" });
     // Trigger notification without changing the phase — the UI derives
     // "process dead" from phase ≠ done && processDead flag.
     const ship = this.getShip(shipId);
@@ -361,9 +382,10 @@ export class ShipManager {
     }
   }
 
-  /** Update a Ship's session ID (runtime + DB). */
+  /** Update a Ship's session ID (runtime + DB + Actor). */
   setSessionId(id: string, sessionId: string): void {
     this.fleetDb?.updateShipSessionId(id, sessionId);
+    this.actorManager?.send(id, { type: "SET_SESSION_ID", sessionId });
   }
 
   /** Update a Ship's PR URL (DB). */
@@ -376,16 +398,18 @@ export class ShipManager {
     }
   }
 
-  /** Update a Ship's lastOutputAt timestamp (runtime only). */
+  /** Update a Ship's lastOutputAt timestamp (runtime + Actor). */
   setLastOutputAt(id: string, timestamp: number): void {
     const rt = this.ensureRuntime(id);
     if (rt) rt.lastOutputAt = timestamp;
+    this.actorManager?.send(id, { type: "PROCESS_OUTPUT", timestamp });
   }
 
-  /** Update a Ship's isCompacting state (runtime only). */
+  /** Update a Ship's isCompacting state (runtime + Actor). */
   setIsCompacting(id: string, isCompacting: boolean): void {
     const rt = this.ensureRuntime(id);
     if (rt) rt.isCompacting = isCompacting;
+    this.actorManager?.send(id, { type: isCompacting ? "COMPACT_START" : "COMPACT_END" });
   }
 
   setQaRequired(id: string, qaRequired: boolean): void {
@@ -395,6 +419,7 @@ export class ShipManager {
       dbShip.qaRequired = qaRequired;
       this.fleetDb.upsertShip(dbShip);
     }
+    this.actorManager?.send(id, { type: "SET_QA_REQUIRED", qaRequired });
   }
 
   respondToPRReview(
@@ -594,6 +619,7 @@ export class ShipManager {
         !this.processManager.isRunning(ship.id)
       ) {
         this.runtime.delete(ship.id);
+        this.actorManager?.stopActor(ship.id);
         this.fleetDb.deleteShip(ship.id);
         purged++;
       }
@@ -636,6 +662,9 @@ export class ShipManager {
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
     };
 
+    // Send RESUME event to Actor (transitions from stopped to previous phase)
+    this.actorManager?.send(shipId, { type: "RESUME" });
+
     if (ship.sessionId) {
       // Resume existing session
       this.processManager.resumeSession(
@@ -674,6 +703,8 @@ export class ShipManager {
     for (const [id] of this.runtime) {
       this.processManager.kill(id);
     }
+    // Stop all XState Actors
+    this.actorManager?.stopAll();
   }
 
   private static readonly MAX_SHIP_LOGS = 500;
@@ -759,6 +790,10 @@ export class ShipManager {
           prReviewStatus: null,
           retryCount: 0,
         });
+
+        // Restore XState Actor for this Ship
+        this.actorManager?.restoreActor(ship);
+
         restored++;
       }
       if (restored > 0) {

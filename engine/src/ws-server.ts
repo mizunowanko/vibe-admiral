@@ -26,6 +26,7 @@ import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { EscortManager } from "./escort-manager.js";
+import { ShipActorManager } from "./ship-actor-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
@@ -46,6 +47,7 @@ export class EngineServer {
   private stateSync: StateSync;
   private requestHandler: FlagshipRequestHandler;
   private escortManager: EscortManager;
+  private actorManager: ShipActorManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
@@ -69,7 +71,30 @@ export class EngineServer {
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
     this.escortManager = new EscortManager(this.processManager, this.shipManager, () => this.fleetDb);
+    this.actorManager = new ShipActorManager();
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
+
+    // Wire up ShipActorManager to ShipManager and EscortManager
+    this.shipManager.setActorManager(this.actorManager);
+    this.escortManager.setActorManager(this.actorManager);
+
+    // Configure Actor side effects
+    this.actorManager.setSideEffects({
+      onPhaseChange: (shipId, phase, detail) => {
+        // Actor-driven phase changes are informational — DB updates are
+        // still handled by the existing flow (ship-manager.updatePhase / db.transitionPhase).
+        // The Actor tracks state in parallel to validate transitions.
+        console.log(`[actor] Ship ${shipId.slice(0, 8)}... phase: ${phase}${detail ? ` (${detail})` : ""}`);
+      },
+      onRecordTransition: (shipId, fromPhase, toPhase, triggeredBy, _metadata) => {
+        console.log(`[actor] Ship ${shipId.slice(0, 8)}... transition: ${fromPhase} → ${toPhase} by ${triggeredBy}`);
+      },
+      onLaunchEscort: (shipId, gatePhase, gateType) => {
+        // Escort launch is already handled by the API server / ship-manager flow.
+        // The Actor entry action is informational for now.
+        console.log(`[actor] Ship ${shipId.slice(0, 8)}... gate entry: ${gatePhase} (${gateType})`);
+      },
+    });
 
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
     const apiHandler = createApiHandler({
@@ -77,6 +102,7 @@ export class EngineServer {
       getDatabase: () => this.fleetDb,
       getShipManager: () => this.shipManager,
       getEscortManager: () => this.escortManager,
+      getActorManager: () => this.actorManager,
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
       broadcastRequestResult: (fleetId, result) => {
@@ -1226,6 +1252,7 @@ export class EngineServer {
       this.processLivenessTimer = null;
     }
     this.escortManager.killAll();
+    this.actorManager.stopAll();
     this.shipManager.stopAll();
     this.flagshipManager.stopAll();
     this.dockManager.stopAll();
