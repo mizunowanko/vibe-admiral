@@ -1,15 +1,12 @@
 import { useRef, useEffect, useMemo, useCallback } from "react";
 import { useShip } from "@/hooks/useShip";
-import { useUIStore } from "@/stores/uiStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
 import { cn } from "@/lib/utils";
-import { ArrowLeft } from "lucide-react";
 
 const LOG_TAIL_LIMIT = 200;
 
@@ -19,7 +16,6 @@ interface ShipDetailPanelProps {
 
 export function ShipDetailPanel({ shipId }: ShipDetailPanelProps) {
   const { ship, logs } = useShip(shipId);
-  const setViewingShipId = useUIStore((s) => s.setViewingShipId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
 
@@ -57,14 +53,6 @@ export function ShipDetailPanel({ shipId }: ShipDetailPanelProps) {
       {/* Header */}
       <div className="px-3 py-2 border-b border-border shrink-0">
         <div className="flex items-center gap-2 mb-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0"
-            onClick={() => setViewingShipId(null)}
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </Button>
           <span className="font-mono text-xs text-muted-foreground">
             #{ship.issueNumber}
           </span>
@@ -87,10 +75,10 @@ export function ShipDetailPanel({ shipId }: ShipDetailPanelProps) {
             </Badge>
           )}
         </div>
-        <p className="text-xs font-medium truncate pl-8">
+        <p className="text-xs font-medium truncate">
           {ship.issueTitle || `Issue #${ship.issueNumber}`}
         </p>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground mt-1 pl-8">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground mt-1">
           <span>{ship.repo}</span>
           {ship.prUrl && (
             <a

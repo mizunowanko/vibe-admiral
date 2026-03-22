@@ -52,8 +52,9 @@ function CommanderSection({
   icon: typeof Flag;
 }) {
   const activeCommanderTab = useUIStore((s) => s.activeCommanderTab);
+  const viewingShipId = useUIStore((s) => s.viewingShipId);
   const setActiveCommanderTab = useUIStore((s) => s.setActiveCommanderTab);
-  const isActive = activeCommanderTab === role;
+  const isActive = activeCommanderTab === role && viewingShipId === null;
 
   return (
     <div className="px-3 py-2">
@@ -86,6 +87,7 @@ function CommanderSection({
 
 function ShipsSection({ fleetId }: { fleetId: string }) {
   const stopShip = useShipStore((s) => s.stopShip);
+  const viewingShipId = useUIStore((s) => s.viewingShipId);
   const setViewingShipId = useUIStore((s) => s.setViewingShipId);
   const [showInactive, setShowInactive] = useState(false);
 
@@ -147,7 +149,10 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
               onClick={() => setViewingShipId(ship.id)}
               className={cn(
                 "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
+                viewingShipId === ship.id &&
+                  "border-primary bg-primary/5",
                 ship.gateCheck?.status === "pending" &&
+                  viewingShipId !== ship.id &&
                   "border-sky-500/50 ring-1 ring-sky-500/20",
               )}
             >
