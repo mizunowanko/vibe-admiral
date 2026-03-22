@@ -8,7 +8,7 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 const GATE_SKILL_MAP: Record<GatePhase, string> = {
   "planning-gate": "gate-plan-review",
   "implementing-gate": "gate-code-review",
-  "acceptance-test-gate": "gate-code-review", // placeholder — playwright not yet implemented
+  "acceptance-test-gate": "gate-acceptance-test",
 };
 
 /** Information about a running Escort process. */
