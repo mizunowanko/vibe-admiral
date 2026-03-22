@@ -3,6 +3,8 @@ import { createServer, type Server } from "node:http";
 import { createApiHandler } from "../api-server.js";
 import type { FleetRepo } from "../types.js";
 import type { FlagshipRequestHandler } from "../bridge-request-handler.js";
+import type { FleetDatabase } from "../db.js";
+import type { ShipManager } from "../ship-manager.js";
 
 // === Mock deps ===
 
@@ -11,6 +13,8 @@ function createMockDeps() {
 
   return {
     requestHandler: { handle } as unknown as FlagshipRequestHandler,
+    getDatabase: vi.fn().mockReturnValue(null),
+    getShipManager: vi.fn().mockReturnValue({ syncPhaseFromDb: vi.fn() }),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",
       repos: [{ localPath: "/home/user/repo", remote: "owner/repo" }] as FleetRepo[],
@@ -20,6 +24,23 @@ function createMockDeps() {
     broadcastRequestResult: vi.fn(),
     _handle: handle,
   };
+}
+
+/** Create mock deps with a mock FleetDatabase for Ship/Escort API tests */
+function createMockDepsWithDb() {
+  const deps = createMockDeps();
+  const syncPhaseFromDb = vi.fn();
+
+  const mockDb = {
+    getShipById: vi.fn(),
+    transitionPhase: vi.fn().mockReturnValue(true),
+    getPhaseTransitions: vi.fn().mockReturnValue([]),
+  };
+
+  deps.getDatabase.mockReturnValue(mockDb as unknown as FleetDatabase);
+  deps.getShipManager.mockReturnValue({ syncPhaseFromDb } as unknown as ShipManager);
+
+  return { ...deps, _mockDb: mockDb, _syncPhaseFromDb: syncPhaseFromDb };
 }
 
 // === HTTP test helpers ===
@@ -36,12 +57,20 @@ function startServer(deps: ReturnType<typeof createMockDeps>): Promise<{ server:
   });
 }
 
+interface ApiResponseData {
+  ok: boolean;
+  result?: string;
+  error?: string;
+  phase?: string;
+  transitions?: Array<Record<string, unknown>>;
+}
+
 async function apiRequest(
   port: number,
   method: string,
   path: string,
   body?: unknown,
-): Promise<{ status: number; data: { ok: boolean; result?: string; error?: string } }> {
+): Promise<{ status: number; data: ApiResponseData }> {
   const url = `http://localhost:${port}${path}`;
   const options: RequestInit = {
     method,
@@ -49,7 +78,7 @@ async function apiRequest(
     body: body ? JSON.stringify(body) : undefined,
   };
   const res = await fetch(url, options);
-  const data = await res.json() as { ok: boolean; result?: string; error?: string };
+  const data = await res.json() as ApiResponseData;
   return { status: res.status, data };
 }
 
@@ -239,6 +268,271 @@ describe("API Server", () => {
       expect(res.status).toBe(500);
       expect(res.data.ok).toBe(false);
       expect(res.data.error).toContain("Internal failure");
+    });
+  });
+
+  describe("Ship/Escort API", () => {
+    describe("GET /api/ship/:id/phase", () => {
+      it("returns current phase", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "implementing" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "GET", "/api/ship/ship-1/phase");
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          expect(res.data.phase).toBe("implementing");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns 404 for unknown ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue(undefined);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "GET", "/api/ship/unknown/phase");
+          expect(res.status).toBe(404);
+          expect(res.data.ok).toBe(false);
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns 503 when database not initialized", async () => {
+        // Default deps have getDatabase returning null
+        const res = await apiRequest(port, "GET", "/api/ship/ship-1/phase");
+        expect(res.status).toBe(503);
+        expect(res.data.ok).toBe(false);
+        expect(res.data.error).toContain("Database not initialized");
+      });
+    });
+
+    describe("POST /api/ship/:id/phase-transition", () => {
+      it("transitions phase successfully", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "planning" });
+        depsWithDb._mockDb.transitionPhase.mockReturnValue(true);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
+            phase: "planning-gate",
+            metadata: { planCommentUrl: "https://example.com" },
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          expect(res.data.phase).toBe("planning-gate");
+          expect(depsWithDb._mockDb.transitionPhase).toHaveBeenCalledWith(
+            "ship-1", "planning", "planning-gate", "ship",
+            { planCommentUrl: "https://example.com" },
+          );
+          expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("rejects without phase", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {});
+          expect(res.status).toBe(400);
+          expect(res.data.error).toContain("phase is required");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("rejects invalid phase", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
+            phase: "bogus-phase",
+          });
+          expect(res.status).toBe(400);
+          expect(res.data.error).toContain("Invalid phase");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns 404 for unknown ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue(undefined);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/unknown/phase-transition", {
+            phase: "implementing",
+          });
+          expect(res.status).toBe(404);
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns error on transition failure", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "planning" });
+        depsWithDb._mockDb.transitionPhase.mockImplementation(() => {
+          throw new Error("Cannot go backward: planning → done");
+        });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
+            phase: "done",
+          });
+          expect(res.status).toBe(400);
+          expect(res.data.error).toContain("Cannot go backward");
+        } finally {
+          s2.server.close();
+        }
+      });
+    });
+
+    describe("POST /api/ship/:id/gate-verdict", () => {
+      it("approves gate and transitions to next phase", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "planning-gate" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
+            verdict: "approve",
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          expect(res.data.phase).toBe("implementing");
+          expect(depsWithDb._mockDb.transitionPhase).toHaveBeenCalledWith(
+            "ship-1", "planning-gate", "implementing", "escort",
+            { gate_result: "approved" },
+          );
+          expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("rejects gate and transitions to previous phase", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "implementing-gate" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
+            verdict: "reject",
+            feedback: "Tests are missing",
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.phase).toBe("implementing");
+          expect(depsWithDb._mockDb.transitionPhase).toHaveBeenCalledWith(
+            "ship-1", "implementing-gate", "implementing", "escort",
+            { gate_result: "rejected", feedback: "Tests are missing" },
+          );
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("rejects when ship not in gate phase", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "implementing" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
+            verdict: "approve",
+          });
+          expect(res.status).toBe(400);
+          expect(res.data.error).toContain("not in a gate phase");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("rejects invalid verdict", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
+            verdict: "maybe",
+          });
+          expect(res.status).toBe(400);
+          expect(res.data.error).toContain("verdict");
+        } finally {
+          s2.server.close();
+        }
+      });
+    });
+
+    describe("POST /api/ship/:id/nothing-to-do", () => {
+      it("transitions ship to done", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "planning" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/nothing-to-do", {
+            reason: "Issue already resolved",
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.phase).toBe("done");
+          expect(depsWithDb._mockDb.transitionPhase).toHaveBeenCalledWith(
+            "ship-1", "planning", "done", "ship",
+            { reason: "Issue already resolved", nothingToDo: true },
+          );
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns 404 for unknown ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue(undefined);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/unknown/nothing-to-do", {
+            reason: "test",
+          });
+          expect(res.status).toBe(404);
+        } finally {
+          s2.server.close();
+        }
+      });
+    });
+
+    describe("GET /api/ship/:id/phase-transition-log", () => {
+      it("returns transition log", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "implementing" });
+        depsWithDb._mockDb.getPhaseTransitions.mockReturnValue([
+          { id: 1, shipId: "ship-1", fromPhase: "planning-gate", toPhase: "implementing", triggeredBy: "escort", metadata: { gate_result: "approved" }, createdAt: "2025-01-01" },
+        ]);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "GET", "/api/ship/ship-1/phase-transition-log?limit=1");
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          const data = res.data;
+          expect(data.transitions).toHaveLength(1);
+          expect(data.transitions![0]!.fromPhase).toBe("planning-gate");
+          expect(depsWithDb._mockDb.getPhaseTransitions).toHaveBeenCalledWith("ship-1", 1);
+        } finally {
+          s2.server.close();
+        }
+      });
+    });
+
+    describe("unknown ship action", () => {
+      it("returns 404 for unknown action", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/unknown-action", {});
+          expect(res.status).toBe(404);
+          expect(res.data.error).toContain("Unknown ship action");
+        } finally {
+          s2.server.close();
+        }
+      });
     });
   });
 

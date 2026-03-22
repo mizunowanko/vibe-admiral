@@ -338,11 +338,18 @@ export class FleetDatabase {
         throw new Error(`Phase mismatch: expected ${expectedPhase}, got ${current.phase}`);
       }
 
-      // Validate forward-only
+      // Validate forward-only (with gate-reject exception)
       const currentIdx = PHASE_ORDER.indexOf(expectedPhase as Phase);
       const newIdx = PHASE_ORDER.indexOf(newPhase);
       if (newIdx <= currentIdx) {
-        throw new Error(`Cannot go backward: ${expectedPhase} → ${newPhase}`);
+        // Allow gate rejection: gate-phase → preceding work phase
+        const isGateReject =
+          (expectedPhase === "planning-gate" && newPhase === "planning") ||
+          (expectedPhase === "implementing-gate" && newPhase === "implementing") ||
+          (expectedPhase === "acceptance-test-gate" && newPhase === "acceptance-test");
+        if (!isGateReject) {
+          throw new Error(`Cannot go backward: ${expectedPhase} → ${newPhase}`);
+        }
       }
 
       // Idempotency: check if same transition was recorded in last 5 seconds
@@ -413,6 +420,35 @@ export class FleetDatabase {
         phase = excluded.phase,
         updated_at = excluded.updated_at
     `).run(shipId, toPhase);
+  }
+
+  /** Get recent phase transitions for a ship, ordered by most recent first. */
+  getPhaseTransitions(shipId: string, limit: number = 10): Array<Record<string, unknown>> {
+    const rows = this.db.prepare(`
+      SELECT id, ship_id, from_phase, to_phase, triggered_by, metadata, created_at
+      FROM phase_transitions
+      WHERE ship_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(shipId, limit) as Array<{
+      id: number;
+      ship_id: string;
+      from_phase: string | null;
+      to_phase: string;
+      triggered_by: string;
+      metadata: string | null;
+      created_at: string;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      shipId: row.ship_id,
+      fromPhase: row.from_phase,
+      toPhase: row.to_phase,
+      triggeredBy: row.triggered_by,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+      createdAt: row.created_at,
+    }));
   }
 
   /** Delete all records for ships in terminal states. */

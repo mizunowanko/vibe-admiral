@@ -79,12 +79,6 @@ export class EscortManager {
       VIBE_ADMIRAL_MAIN_REPO: ship.repo,
     };
 
-    // Get DB path from Ship's environment (ShipManager stores it)
-    const dbPath = this.shipManager.getDbPath();
-    if (dbPath) {
-      escortEnv.VIBE_ADMIRAL_DB_PATH = dbPath;
-    }
-
     this.processManager.launchEscort(
       escortId,
       ship.worktreePath,

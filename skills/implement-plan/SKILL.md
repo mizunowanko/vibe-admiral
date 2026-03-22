@@ -84,19 +84,11 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
    )")
    echo "$PLAN_COMMENT_URL"
    ```
-4. `planning-gate` への直接 DB 更新でフェーズを遷移する:
+4. `planning-gate` への Engine REST API でフェーズを遷移する:
    ```bash
-   sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-   BEGIN;
-     UPDATE phases SET phase = 'planning-gate', updated_at = datetime('now')
-       WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-     UPDATE ships SET phase = 'planning-gate'
-       WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'planning';
-     INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-       VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'planning', 'planning-gate', 'ship',
-         '{\"planCommentUrl\":\"<comment-url>\",\"qaRequired\":<true or false>}');
-   COMMIT;
-   "
+   curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+     -H 'Content-Type: application/json' \
+     -d "{\"phase\": \"planning-gate\", \"metadata\": {\"planCommentUrl\": \"<comment-url>\", \"qaRequired\": <true or false>}}"
    ```
 
 **`VIBE_ADMIRAL` 未設定時**:
@@ -105,33 +97,20 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
 
 ## ステータス遷移
 
-**`VIBE_ADMIRAL` 設定時**: `planning-gate` に直接 DB で遷移し、Escort を起動して plan-review を実施する。
+**`VIBE_ADMIRAL` 設定時**: Engine REST API で `planning-gate` に遷移する。Engine が Escort を起動して plan-review を実施する。
 
-### Escort 起動（plan-review）
+### Gate ポーリング（plan-review）
 
-`/gate-plan-review` スキルを参照して Escort を Task tool で起動する:
-
-```
-Task(description="Escort: plan-review #<issue>", subagent_type="general-purpose", prompt=`
-<gate-plan-review スキルの Escort テンプレートに従う>
-`)
-```
-
-Escort が完了すると、DB の `phases` テーブルが直接更新される。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
+Phase 遷移後、Engine が Escort プロセスを起動する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=300; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null); case "$PHASE" in implementing) echo "Gate approved"; break ;; planning) echo "Gate rejected"; break ;; planning-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+TIMEOUT=300; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in implementing) echo "Gate approved"; break ;; planning) echo "Gate rejected"; break ;; planning-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-- `implementing` に遷移済み → Escort が承認し phase を更新済み。`/implement-code` に進む
-- `planning` に戻された → Escort が reject した。`phase_transitions` からフィードバックを取得して計画を修正、再度 gate に遷移 → Escort 起動ループ:
+- `implementing` に遷移済み → Escort が承認。`/implement-code` に進む
+- `planning` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して計画を修正、再度 gate に遷移 → Engine が Escort を再起動:
   ```bash
-  FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-    SELECT json_extract(metadata, '$.feedback')
-    FROM phase_transitions
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
-    ORDER BY created_at DESC LIMIT 1
-  ")
+  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
   ```
 
 ## 完了後

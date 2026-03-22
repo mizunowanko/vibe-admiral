@@ -62,38 +62,24 @@ gh pr checks "$PR_NUM" --watch
 
 ## Step 4: マージ
 
-**`VIBE_ADMIRAL` 設定時**: `acceptance-test-gate` に直接 DB 更新で遷移し、`playwright` Gate を開始する:
+**`VIBE_ADMIRAL` 設定時**: Engine REST API で `acceptance-test-gate` に遷移し、`playwright` Gate を開始する:
 
 ```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'acceptance-test-gate', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'acceptance-test-gate'
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'acceptance-test';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'acceptance-test', 'acceptance-test-gate', 'ship', '{}');
-COMMIT;
-"
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "acceptance-test-gate", "metadata": {}}'
 ```
 
-Ship 自身が Escort (sub-agent) を起動して playwright テストを実施する。
-
-Engine が Escort を起動済み。Escort が完了すると DB の `phases` テーブルが直接更新される。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
+Engine が Escort プロセスを起動して playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
 
 ```bash
-DB_PATH="$VIBE_ADMIRAL_DB_PATH"; SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"; TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do PHASE=$(sqlite3 "$DB_PATH" "SELECT phase FROM phases WHERE ship_id='$SHIP_ID'" 2>/dev/null); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+TIMEOUT=600; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 3 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 3)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-- `merging` に遷移済み → Escort が承認し phase を更新済み。マージを実行
-- `acceptance-test` に戻された → Escort が reject した。`phase_transitions` からフィードバックを取得して修正:
+- `merging` に遷移済み → Escort が承認。マージを実行
+- `acceptance-test` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して修正:
   ```bash
-  FEEDBACK=$(sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-    SELECT json_extract(metadata, '$.feedback')
-    FROM phase_transitions
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID'
-    ORDER BY created_at DESC LIMIT 1
-  ")
+  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
   ```
 
 Gate 承認後（`merging` phase）、マージを実行:
@@ -154,19 +140,12 @@ RETROEOF
 
 ## Step 6: 完了表明と掃除
 
-**`VIBE_ADMIRAL` 設定時**: `done` に直接 DB 更新:
+**`VIBE_ADMIRAL` 設定時**: Engine REST API で `done` に遷移:
 
 ```bash
-sqlite3 "$VIBE_ADMIRAL_DB_PATH" "
-BEGIN;
-  UPDATE phases SET phase = 'done', updated_at = datetime('now')
-    WHERE ship_id = '$VIBE_ADMIRAL_SHIP_ID';
-  UPDATE ships SET phase = 'done', completed_at = datetime('now')
-    WHERE id = '$VIBE_ADMIRAL_SHIP_ID' AND phase = 'merging';
-  INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-    VALUES ('$VIBE_ADMIRAL_SHIP_ID', 'merging', 'done', 'ship', '{}');
-COMMIT;
-"
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "done", "metadata": {}}'
 ```
 
 1. workflow-state.json の削除:
