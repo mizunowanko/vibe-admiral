@@ -12,8 +12,8 @@ export interface LookoutAlert {
   fleetId: string;
 }
 
-const GATE_WAIT_STALL_MS = 3 * 60 * 1000;
-const NO_OUTPUT_STALL_MS = 3 * 60 * 1000;
+const GATE_WAIT_STALL_MS = 10 * 60 * 1000;
+const NO_OUTPUT_STALL_MS = 10 * 60 * 1000;
 const EXCESSIVE_RETRY_THRESHOLD = 2;
 const REALERT_INTERVAL_MS = 10 * 60 * 1000;
 const SCAN_INTERVAL_MS = 30_000;
