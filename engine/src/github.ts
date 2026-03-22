@@ -291,16 +291,30 @@ export async function getPRStatus(
     number: number;
     state: string;
     mergeable: string;
-    statusCheckRollup: Array<{ status: string }>;
+    statusCheckRollup: Array<{
+      status: string;
+      conclusion: string;
+    }> | null;
   };
-  const allPassed = pr.statusCheckRollup?.every(
-    (c) => c.status === "COMPLETED",
-  );
+
+  const checks = pr.statusCheckRollup;
+  let checksStatus: PRStatus["checksStatus"];
+
+  if (!checks || checks.length === 0) {
+    checksStatus = "no-checks";
+  } else if (checks.some((c) => c.conclusion === "FAILURE" || c.conclusion === "TIMED_OUT" || c.conclusion === "CANCELLED")) {
+    checksStatus = "failed";
+  } else if (checks.every((c) => c.status === "COMPLETED")) {
+    checksStatus = "passed";
+  } else {
+    checksStatus = "pending";
+  }
+
   return {
     number: pr.number,
     state: pr.state,
     mergeable: pr.mergeable === "MERGEABLE",
-    checksStatus: allPassed ? "passed" : "pending",
+    checksStatus,
   };
 }
 
@@ -463,6 +477,46 @@ export async function getOpenBodyDependencies(
   body: string,
 ): Promise<number[]> {
   const depNums = parseDependencies(body);
+  if (depNums.length === 0) return [];
+
+  const results = await Promise.all(
+    depNums.map(async (num) => {
+      try {
+        const issue = await getIssue(repo, num);
+        return issue.state === "open" ? num : null;
+      } catch {
+        // If we can't fetch the issue, assume it's not blocking
+        return null;
+      }
+    }),
+  );
+  return results.filter((n): n is number => n !== null);
+}
+
+/**
+ * Extract issue numbers from `depends-on/<N>` labels.
+ * Example: ["depends-on/42", "type/feature", "depends-on/99"] → [42, 99]
+ */
+export function parseDependsOnLabels(labels: string[]): number[] {
+  const nums: number[] = [];
+  for (const label of labels) {
+    const match = label.match(/^depends-on\/(\d+)$/);
+    if (match) {
+      nums.push(Number(match[1]));
+    }
+  }
+  return nums;
+}
+
+/**
+ * Check which `depends-on/<N>` label dependencies are still open.
+ * Returns open dependency issue numbers.
+ */
+export async function getOpenDependsOnDeps(
+  repo: string,
+  labels: string[],
+): Promise<number[]> {
+  const depNums = parseDependsOnLabels(labels);
   if (depNums.length === 0) return [];
 
   const results = await Promise.all(

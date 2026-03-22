@@ -1,5 +1,4 @@
-import type { StreamMessage, StreamMessageSubtype, BridgeRequest, ShipRequest, AdmiralRequest, ShipStatus, GateTransition } from "./types.js";
-import { GATE_TRANSITIONS } from "./gate-config.js";
+import type { StreamMessage, StreamMessageSubtype, FlagshipRequest, AdmiralRequest } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -93,6 +92,20 @@ export function parseStreamMessage(
         return null;
       }
       if (subtype === "task_notification") {
+        // Check for sub-agent chat logs (Escort/Dispatch thought log)
+        const chat = raw.chat as Array<{ role?: string; content?: string }> | undefined;
+        if (Array.isArray(chat) && chat.length > 0) {
+          // Extract the last assistant message from the sub-agent conversation
+          const lastAssistant = [...chat].reverse().find((m) => m.role === "assistant" && m.content);
+          if (lastAssistant?.content) {
+            return {
+              type: "system",
+              subtype: "dispatch-log" as StreamMessageSubtype,
+              content: lastAssistant.content,
+            };
+          }
+        }
+        // Fallback: surface description as a compact task-notification pill
         const desc = (raw.description as string | undefined) ?? (raw.content as string | undefined);
         if (!desc) return null;
         return {
@@ -162,18 +175,6 @@ export function parseStreamMessage(
 const REQUEST_BLOCK_RE = /```admiral-request\n([\s\S]*?)```/g;
 const REPO_PATTERN_REQ = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
-/** Valid statuses that Ship can request via status-transition. */
-const TRANSITION_TARGETS: ReadonlySet<ShipStatus> = new Set([
-  "investigating",
-  "planning",
-  "implementing",
-  "testing",
-  "reviewing",
-  "acceptance-test",
-  "merging",
-  "done",
-]);
-
 function validateRequest(obj: unknown): AdmiralRequest | null {
   if (typeof obj !== "object" || obj === null) return null;
   const r = obj as Record<string, unknown>;
@@ -187,6 +188,10 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
     case "ship-stop":
       if (typeof r.shipId !== "string" || !r.shipId) return null;
       return { request: "ship-stop", shipId: r.shipId };
+
+    case "ship-resume":
+      if (typeof r.shipId !== "string" || !r.shipId) return null;
+      return { request: "ship-resume", shipId: r.shipId };
 
     case "sortie": {
       if (!Array.isArray(r.items) || r.items.length === 0) return null;
@@ -220,49 +225,6 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
       return result;
     }
 
-    case "gate-result": {
-      if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
-      if (r.verdict !== "approve" && r.verdict !== "reject") return null;
-      const gateResult: { request: "gate-result"; shipId: string; transition: GateTransition; verdict: "approve" | "reject"; feedback?: string; issueNumber?: number } = {
-        request: "gate-result",
-        shipId: r.shipId,
-        transition: r.transition as GateTransition,
-        verdict: r.verdict,
-      };
-      if (typeof r.feedback === "string") gateResult.feedback = r.feedback;
-      if (typeof r.issueNumber === "number") gateResult.issueNumber = r.issueNumber;
-      return gateResult;
-    }
-
-    case "gate-ack": {
-      if (typeof r.shipId !== "string" || !r.shipId) return null;
-      if (typeof r.transition !== "string" || !GATE_TRANSITIONS.includes(r.transition as GateTransition)) return null;
-      const gateAck: { request: "gate-ack"; shipId: string; transition: GateTransition; issueNumber?: number } = {
-        request: "gate-ack",
-        shipId: r.shipId,
-        transition: r.transition as GateTransition,
-      };
-      if (typeof r.issueNumber === "number") gateAck.issueNumber = r.issueNumber;
-      return gateAck;
-    }
-
-    case "status-transition": {
-      const status = r.status as string | undefined;
-      if (typeof status !== "string" || !TRANSITION_TARGETS.has(status as ShipStatus)) return null;
-      const transition: { request: "status-transition"; status: ShipStatus; planCommentUrl?: string } = {
-        request: "status-transition",
-        status: status as ShipStatus,
-      };
-      if (typeof r.planCommentUrl === "string") transition.planCommentUrl = r.planCommentUrl;
-      return transition;
-    }
-
-    case "nothing-to-do": {
-      if (typeof r.reason !== "string" || !r.reason) return null;
-      return { request: "nothing-to-do", reason: r.reason };
-    }
-
     default:
       return null;
   }
@@ -270,7 +232,7 @@ function validateRequest(obj: unknown): AdmiralRequest | null {
 
 /**
  * Extract AdmiralRequest objects from ```admiral-request ... ``` fenced blocks.
- * Returns both BridgeRequest and ShipRequest types — callers must filter by source.
+ * All requests are Flagship requests (Ship requests were removed in #442).
  */
 export function extractRequests(text: string): AdmiralRequest[] {
   const requests: AdmiralRequest[] = [];
@@ -288,16 +250,10 @@ export function extractRequests(text: string): AdmiralRequest[] {
   return requests;
 }
 
-const SHIP_REQUEST_TYPES = new Set(["status-transition", "nothing-to-do"]);
-
-/** Type guard: check if a request is a Bridge-only request. */
-export function isBridgeRequest(req: AdmiralRequest): req is BridgeRequest {
-  return !SHIP_REQUEST_TYPES.has(req.request);
-}
-
-/** Type guard: check if a request is a Ship request. */
-export function isShipRequest(req: AdmiralRequest): req is ShipRequest {
-  return SHIP_REQUEST_TYPES.has(req.request);
+/** Type guard: check if a request is a Flagship request.
+ * After #442, all admiral-requests are Flagship requests. */
+export function isBridgeRequest(_req: AdmiralRequest): _req is FlagshipRequest {
+  return true;
 }
 
 /**

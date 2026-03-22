@@ -5,32 +5,32 @@ See `engine/src/process-manager.ts` for the implementation.
 
 ## stdio Configuration
 
-- **Ship / Session Resume**: `stdio: ['ignore', 'pipe', 'pipe']`
+- **Ship / Session Resume / Escort**: `stdio: ['ignore', 'pipe', 'pipe']`
   - stdin MUST be `'ignore'`. Claude CLI is built on Bun, which replaces pipe FDs with Unix sockets when stdin is a pipe, breaking stdout capture.
-  - Ships receive their full prompt via `-p` and don't need stdin.
+  - Ships and Escorts receive their full prompt via `-p` and don't need stdin.
 
-- **Bridge**: `stdio: ['pipe', 'pipe', 'pipe']`
+- **Commander (Dock / Flagship)**: `stdio: ['pipe', 'pipe', 'pipe']`
   - stdin is a pipe for sending interactive messages via `--input-format stream-json`.
   - MUST write to stdin immediately after spawn. Do NOT wait for an init message.
   - Bun blocks stdout when stdin pipe is idle, so waiting for init creates a deadlock.
 
 ## Tool Restrictions
 
-- **Ship disallowedTools**: `EnterPlanMode,ExitPlanMode,AskUserQuestion`
+- **Ship / Escort disallowedTools**: `EnterPlanMode,ExitPlanMode,AskUserQuestion`
   - `EnterPlanMode` / `ExitPlanMode`: In `-p` (prompt) mode, plan mode causes the CLI to exit after `ExitPlanMode` without performing the implementation. There is no human to approve the plan in non-interactive mode.
-  - `AskUserQuestion`: Ship runs non-interactively with stdin ignored. User interaction uses the file message board (`.claude/acceptance-test-request.json`).
+  - `AskUserQuestion`: Ships and Escorts run non-interactively with stdin ignored.
 
-- **Bridge allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
-  - Bridge is restricted to read-only and analysis tools (no Write/Edit).
+- **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
+  - Commanders are restricted to read-only and analysis tools (no Write/Edit).
   - `AskUserQuestion` is allowed; the Engine intercepts it, forwards to the frontend, and returns the answer via stdin `tool_result`.
 
 ## VIBE_ADMIRAL Environment Variable
 
-Set `VIBE_ADMIRAL=true` for all Ship and session resume processes. This signals to skills (e.g., `/implement`) that they are running inside the Admiral:
+Set `VIBE_ADMIRAL=true` for all Ship, Escort, and session resume processes. This signals to skills (e.g., `/implement`, `/gate-plan-review`) that they are running inside the Admiral:
 - Skip worktree creation/deletion (Admiral handles it)
 - Skip label changes (Engine handles it)
 - Skip plan mode (`EnterPlanMode`) and output plan as text instead
-- Use file message board for acceptance tests instead of `AskUserQuestion`
+- Use direct DB phase updates for gate flow instead of `AskUserQuestion`
 
 ## Exit Code 0 Does Not Guarantee Success
 
@@ -53,9 +53,9 @@ When the CLI compacts its context, two system messages are emitted:
 
 The Engine detects these to update Ship `isCompacting` state and notify the frontend.
 
-## Stdin Message Format (Bridge Only)
+## Stdin Message Format (Commander Only)
 
-Messages to Bridge stdin use `--input-format stream-json`:
+Messages to Commander (Dock/Flagship) stdin use `--input-format stream-json`:
 
 ```
 {"type":"user","message":{"role":"user","content":"message text"}}\n

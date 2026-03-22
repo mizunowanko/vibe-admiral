@@ -9,11 +9,12 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 import { ProcessManager } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
-import { BridgeManager } from "./bridge.js";
-import { AcceptanceWatcher } from "./acceptance-watcher.js";
+import { FlagshipManager } from "./flagship.js";
+import { DockManager } from "./dock.js";
+import type { CommanderManager } from "./commander.js";
 import { StatusManager } from "./status-manager.js";
 import { StateSync } from "./state-sync.js";
-import { BridgeRequestHandler } from "./bridge-request-handler.js";
+import { FlagshipRequestHandler } from "./bridge-request-handler.js";
 import * as github from "./github.js";
 import {
   parseStreamMessage,
@@ -21,73 +22,63 @@ import {
   extractRequests,
   stripRequestBlocks,
   isBridgeRequest,
-  isShipRequest,
 } from "./stream-parser.js";
-import { ShipRequestHandler } from "./ship-request-handler.js";
-import type { StatusTransitionResult } from "./ship-request-handler.js";
-import { buildBridgeSystemPrompt } from "./bridge-system-prompt.js";
+import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
+import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
-import { resolveGate } from "./gate-config.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, BridgeRequest, StreamMessage, ShipStatus, ShipProcess, ShipRequest, GateTransition, GateType, GateFileRequest } from "./types.js";
+import { EscortManager } from "./escort-manager.js";
+import { initFleetDatabase } from "./db.js";
+import type { FleetDatabase } from "./db.js";
+import { getAdmiralHome } from "./admiral-home.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, FlagshipRequest, StreamMessage, CommanderRole } from "./types.js";
 
-const FLEETS_DIR =
-  join(process.env.HOME ?? "~", ".vibe-admiral");
+const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
 
 export class EngineServer {
   private wss: WebSocketServer;
   private processManager: ProcessManager;
   private shipManager: ShipManager;
-  private bridgeManager: BridgeManager;
-  private acceptanceWatcher: AcceptanceWatcher;
+  private flagshipManager: FlagshipManager;
+  private dockManager: DockManager;
   private statusManager: StatusManager;
   private stateSync: StateSync;
-  private requestHandler: BridgeRequestHandler;
-  private shipRequestHandler: ShipRequestHandler;
+  private requestHandler: FlagshipRequestHandler;
+  private escortManager: EscortManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
-  private launchingBridges = new Set<string>();
-  private bridgeFirstData = new Set<string>();
-  private gateTimeoutTimer: ReturnType<typeof setInterval> | null = null;
-  /** Per-ship mutex to serialize executeShipRequests() calls. */
-  private shipRequestLocks = new Map<string, Promise<void>>();
+  private launchingCommanders = new Set<string>();
+  private commanderFirstData = new Set<string>();
+  private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
+  private processLivenessTimer: ReturnType<typeof setInterval> | null = null;
+  private fleetDb: FleetDatabase | null = null;
 
-  /** Gate checks pending longer than this are auto-rejected (ms). */
-  private static readonly GATE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  /** Unanswered commander questions auto-answered after this duration (ms). */
+  private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
-    this.acceptanceWatcher = new AcceptanceWatcher();
     this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
-      this.acceptanceWatcher,
       this.statusManager,
     );
-    this.bridgeManager = new BridgeManager(this.processManager);
+    this.flagshipManager = new FlagshipManager(this.processManager);
+    this.dockManager = new DockManager(this.processManager);
     this.stateSync = new StateSync(this.shipManager, this.statusManager);
-    this.requestHandler = new BridgeRequestHandler(this.shipManager, this.stateSync);
-    this.shipRequestHandler = new ShipRequestHandler(this.shipManager, this.statusManager);
+    this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
+    this.escortManager = new EscortManager(this.processManager, this.shipManager);
     this.lookout = new Lookout(this.shipManager, this.processManager);
-
-    // Wire up cross-handler references for gate flow
-    this.requestHandler.setShipRequestHandler(this.shipRequestHandler);
-    this.requestHandler.setGateApprovedHandler((shipId, transition) => {
-      this.onGateApproved(shipId, transition);
-    });
-    this.requestHandler.setGateRejectedHandler((shipId, transition, feedback) => {
-      this.onGateRejected(shipId, transition, feedback);
-    });
 
     this.wss = new WebSocketServer({ port });
     this.setupWSS();
     this.setupProcessEvents();
-    this.setupAcceptanceEvents();
     this.setupShipStatusHandler();
     this.runStartupReconciliation();
-    this.startGateTimeoutScanner();
+    this.startQuestionTimeoutScanner();
     this.setupLookout();
+    this.startProcessLivenessCheck();
     // Note: ShipStatusWatcher (file-based IPC) has been replaced by
     // admiral-request protocol for Ship → Engine status transitions.
 
@@ -118,40 +109,82 @@ export class EngineServer {
     });
   }
 
+  /** Resolve a commander manager by process ID prefix. */
+  private resolveCommander(id: string): { role: CommanderRole; manager: CommanderManager; fleetId: string } | null {
+    if (id.startsWith("flagship-")) {
+      return { role: "flagship", manager: this.flagshipManager, fleetId: id.replace("flagship-", "") };
+    }
+    if (id.startsWith("dock-")) {
+      return { role: "dock", manager: this.dockManager, fleetId: id.replace("dock-", "") };
+    }
+    return null;
+  }
+
+  /** Check if a process ID belongs to a commander (Dock or Flagship). */
+  private isCommanderProcess(id: string): boolean {
+    return id.startsWith("flagship-") || id.startsWith("dock-");
+  }
+
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
-      // Route to bridge or ship
-      if (id.startsWith("bridge-")) {
-        const fleetId = id.replace("bridge-", "");
+      // Route Escort stream data to frontend (separate from Ship stream)
+      if (this.escortManager.isEscortProcess(id)) {
+        const shipId = this.escortManager.findShipIdByEscortId(id);
+        if (shipId) {
+          const ship = this.shipManager.getShip(shipId);
+          const parsed = parseStreamMessage(msg);
+          if (parsed) {
+            this.broadcast({
+              type: "escort:stream",
+              data: {
+                id: shipId,
+                escortId: id,
+                fleetId: ship?.fleetId,
+                issueNumber: ship?.issueNumber,
+                message: parsed,
+              },
+            });
+          }
+        }
+        return;
+      }
 
-        // Extract sessionId from Bridge init messages (before parsing drops them)
+      // Route to commander (Dock/Flagship) or Ship
+      const commander = this.resolveCommander(id);
+      if (commander) {
+        const { role, manager, fleetId } = commander;
+        const streamType = `${role}:stream` as const;
+        const questionType = `${role}:question` as const;
+
+        // Extract sessionId from commander init messages
         const sessionId = extractSessionId(msg);
         if (sessionId) {
-          this.bridgeManager.setSessionId(fleetId, sessionId);
+          manager.setSessionId(fleetId, sessionId);
           console.log(
-            `[ws-server] Bridge ${id} sessionId captured: ${sessionId.slice(0, 12)}...`,
+            `[ws-server] ${role} ${id} sessionId captured: ${sessionId.slice(0, 12)}...`,
           );
         }
 
-        // Emit "connected" status on first data from bridge CLI
-        if (!this.bridgeFirstData.has(id)) {
-          this.bridgeFirstData.add(id);
+        // Emit "connected" status on first data from commander CLI
+        if (!this.commanderFirstData.has(id)) {
+          this.commanderFirstData.add(id);
           const pid = this.processManager.getPid(id);
+          const roleLabel = role === "flagship" ? "Flagship" : "Dock";
           const connMsg = {
             type: "system" as const,
-            subtype: "bridge-status" as const,
-            content: `Bridge CLI connected${pid ? ` (pid: ${pid})` : ""}`,
+            subtype: "commander-status" as const,
+            content: `${roleLabel} CLI connected${pid ? ` (pid: ${pid})` : ""}`,
           };
-          this.bridgeManager.addToHistory(fleetId, connMsg);
+          manager.addToHistory(fleetId, connMsg);
           this.broadcast({
-            type: "bridge:stream",
+            type: streamType,
             data: { fleetId, message: connMsg },
           });
         }
 
         const parsed = parseStreamMessage(msg);
         if (parsed) {
-          // AskUserQuestion tool_use — forward as bridge:question
+          // AskUserQuestion tool_use — forward as commander:question
           if (
             parsed.type === "tool_use" &&
             parsed.tool === "AskUserQuestion"
@@ -159,61 +192,59 @@ export class EngineServer {
             const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
             const question = toolInput?.question as string | undefined;
             const toolUseId = parsed.toolUseId as string | undefined;
+            const roleLabel = role === "flagship" ? "Flagship" : "Dock";
             const questionMessage: StreamMessage = {
               type: "question",
-              content: question ?? "Bridge is asking a question",
+              content: question ?? `${roleLabel} is asking a question`,
               ...(toolUseId ? { toolUseId } : {}),
             };
-            this.bridgeManager.addToHistory(fleetId, questionMessage);
+            manager.addToHistory(fleetId, questionMessage);
+            if (toolUseId) {
+              manager.setPendingQuestion(fleetId, toolUseId);
+            }
             this.broadcast({
-              type: "bridge:question",
+              type: questionType,
               data: { fleetId, message: questionMessage },
             });
           // Check for admiral-request blocks in assistant text
           } else if (parsed.type === "assistant" && parsed.content) {
             const allRequests = extractRequests(parsed.content);
-            // Filter to Bridge-only requests (Ship requests from Bridge are ignored)
-            const requests = allRequests.filter(isBridgeRequest);
+            // Only Flagship can issue ship-control requests
+            const requests = role === "flagship" ? allRequests.filter(isBridgeRequest) : [];
             const cleanContent = stripRequestBlocks(parsed.content);
 
             // Broadcast clean text (without request blocks) to frontend
             if (cleanContent) {
               const cleanMessage = { ...parsed, content: cleanContent };
-              this.bridgeManager.addToHistory(fleetId, cleanMessage);
+              manager.addToHistory(fleetId, cleanMessage);
               this.broadcast({
-                type: "bridge:stream",
+                type: streamType,
                 data: { fleetId, message: cleanMessage },
               });
             }
 
-            // Execute requests sequentially and batch results
+            // Execute Flagship requests sequentially
             if (requests.length > 0) {
-              const bridgeId = `bridge-${fleetId}`;
-              this.executeRequestsSequentially(fleetId, bridgeId, requests);
+              this.executeFlagshipRequestsSequentially(fleetId, id, requests);
             }
           } else if (parsed.type !== "result") {
-            // Non-assistant or no content — pass through normally
-            // Skip "result" messages: they duplicate the preceding "assistant" text
-            this.bridgeManager.addToHistory(fleetId, parsed);
+            manager.addToHistory(fleetId, parsed);
             this.broadcast({
-              type: "bridge:stream",
+              type: streamType,
               data: { fleetId, message: parsed },
             });
           }
         }
       } else {
         // Update lastOutputAt for Lookout no-output detection
-        {
-          const ship = this.shipManager.getShip(id);
-          if (ship) ship.lastOutputAt = Date.now();
-        }
+        this.shipManager.setLastOutputAt(id, Date.now());
 
         // Extract sessionId from init messages (before parsing drops them)
         const sessionId = extractSessionId(msg);
         if (sessionId) {
           const ship = this.shipManager.getShip(id);
           if (ship && !ship.sessionId) {
-            ship.sessionId = sessionId;
+            this.shipManager.setSessionId(id, sessionId);
             console.log(
               `[ws-server] Ship ${id.slice(0, 8)}... sessionId captured: ${sessionId.slice(0, 12)}...`,
             );
@@ -241,31 +272,17 @@ export class EngineServer {
               });
             }
 
-            // Detect PR URL BEFORE processing admiral-requests so that
-            // ship.prUrl is populated when gate check messages are built.
-            // Fixes #293: code-review gate showing "PR: not yet created"
-            // when PR URL and status-transition appear in the same message.
+            // Detect PR URL in assistant messages
             if (cleanContent) {
               const cleanMsg = { ...parsed, content: cleanContent };
               this.detectPRCreation(id, cleanMsg);
-              this.detectPushForReReview(id, cleanMsg);
             }
 
-            // Execute Ship requests (only status-transition allowed)
-            // Serialized per-ship to prevent race conditions with duplicate
-            // admiral-request blocks from cumulative stream-json messages.
-            const shipRequests = requests.filter(isShipRequest);
-            if (shipRequests.length > 0) {
-              const prev = this.shipRequestLocks.get(id) ?? Promise.resolve();
-              const next = prev.then(() => this.executeShipRequests(id, shipRequests)).catch(console.error);
-              this.shipRequestLocks.set(id, next);
-            }
-
-            // Reject any Bridge-only requests from Ship
-            const bridgeOnly = requests.filter(isBridgeRequest);
-            if (bridgeOnly.length > 0) {
+            // Reject any Flagship-only requests from Ship
+            // Ships should not issue admiral-requests (removed in #442)
+            if (requests.length > 0) {
               console.warn(
-                `[ws-server] Ship ${id} attempted Bridge-only requests: ${bridgeOnly.map((r) => r.request).join(", ")}`,
+                `[ws-server] Ship ${id} attempted admiral-requests (not allowed): ${requests.map((r) => r.request).join(", ")}`,
               );
             }
           } else {
@@ -275,64 +292,97 @@ export class EngineServer {
               data: { id, message: parsed },
             });
 
-            // Detect PR URL in result messages and notify Bridge
+            // Detect PR URL in result messages
             this.detectPRCreation(id, parsed);
-            // Detect git push after request-changes for re-review
-            this.detectPushForReReview(id, parsed);
           }
         }
       }
     });
 
     this.processManager.on("exit", (id: string, code: number | null) => {
-      if (id.startsWith("bridge-")) {
-        this.bridgeFirstData.delete(id);
-        const fleetId = id.replace("bridge-", "");
-        console.log(`Bridge ${id} exited with code ${code}`);
+      // Handle Escort process exit
+      if (this.escortManager.isEscortProcess(id)) {
+        const shipId = this.escortManager.findShipIdByEscortId(id);
+        this.escortManager.onEscortExit(id, code);
+        if (shipId) {
+          const ship = this.shipManager.getShip(shipId);
+          this.broadcast({
+            type: "escort:completed",
+            data: {
+              id: shipId,
+              escortId: id,
+              exitCode: code,
+              fleetId: ship?.fleetId,
+              issueNumber: ship?.issueNumber,
+            },
+          });
+
+          // Inject notification into Flagship chat
+          if (ship) {
+            const escortMsg = {
+              type: "system" as const,
+              subtype: "ship-status" as const,
+              content: `Ship #${ship.issueNumber} (${ship.issueTitle}): Escort review completed (exit ${code})`,
+              meta: {
+                category: "ship-status" as const,
+                issueNumber: ship.issueNumber,
+                issueTitle: ship.issueTitle,
+              },
+            };
+            this.flagshipManager.addToHistory(ship.fleetId, escortMsg);
+            this.broadcast({
+              type: "flagship:stream",
+              data: { fleetId: ship.fleetId, message: escortMsg },
+            });
+          }
+        }
+        return;
+      }
+
+      const exitCommander = this.resolveCommander(id);
+      if (exitCommander) {
+        this.commanderFirstData.delete(id);
+        const { role, fleetId } = exitCommander;
+        const roleLabel = role === "flagship" ? "Flagship" : "Dock";
+        console.log(`${roleLabel} ${id} exited with code ${code}`);
         this.broadcast({
-          type: "bridge:stream",
+          type: `${role}:stream`,
           data: {
             fleetId,
             message: {
               type: code === 0 ? "system" : "error",
               content:
                 code === 0
-                  ? "Bridge session ended."
-                  : `Bridge process exited with code ${code}.`,
+                  ? `${roleLabel} session ended.`
+                  : `${roleLabel} process exited with code ${code}.`,
             },
           },
         });
       } else {
         console.log(`Ship ${id} exited with code ${code}`);
-        this.shipRequestLocks.delete(id);
         const ship = this.shipManager.getShip(id);
         if (!ship) {
           console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
           return;
         }
-        // Ship explicitly declares "done" via admiral-request status-transition.
-        // If the process exits while in "done" status, treat as success.
-        // If in "merging" status (squash merge may kill the process), also treat as success.
-        const successPhases = new Set(["done", "merging"]);
-        if (successPhases.has(ship.status)) {
+        // Ship declares "done" via direct DB phase update.
+        // If the process exits while in "done" phase, treat as success.
+        // If in "merging" phase (squash merge may kill the process), also treat as success.
+        const successPhases = new Set(["done", "merging", "stopped"]);
+        if (successPhases.has(ship.phase)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else {
           // Process exited without declaring done — treat as failure.
-          // If rate-limited, the ship will be in "error" state and the user
-          // can manually retry via the UI Retry button.
           this.stateSync.onProcessExit(id, false).catch(console.error);
         }
       }
     });
 
     this.processManager.on("rate-limit", (id: string) => {
-      if (id.startsWith("bridge-")) {
-        console.warn(`[ws-server] Bridge ${id} hit rate limit`);
+      if (this.isCommanderProcess(id)) {
+        console.warn(`[ws-server] Commander ${id} hit rate limit`);
         return;
       }
-      const ship = this.shipManager.getShip(id);
-      if (!ship) return;
-      ship.errorType = "rate_limit";
       console.warn(
         `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — will stop and await manual retry`,
       );
@@ -340,20 +390,22 @@ export class EngineServer {
 
     this.processManager.on("error", (id: string, error: Error) => {
       console.error(`Process ${id} error:`, error.message);
-      if (id.startsWith("bridge-")) {
-        const fleetId = id.replace("bridge-", "");
-        const hadData = this.bridgeFirstData.has(id);
-        this.bridgeFirstData.delete(id);
-        // Only show "Failed to start" if bridge never sent data (spawn failure)
+      const errCommander = this.resolveCommander(id);
+      if (errCommander) {
+        const { role, manager, fleetId } = errCommander;
+        const hadData = this.commanderFirstData.has(id);
+        this.commanderFirstData.delete(id);
+        const roleLabel = role === "flagship" ? "Flagship" : "Dock";
+        // Only show "Failed to start" if commander never sent data (spawn failure)
         if (!hadData) {
           const errMsg = {
             type: "system" as const,
-            subtype: "bridge-status" as const,
-            content: `Failed to start Bridge CLI: ${error.message}`,
+            subtype: "commander-status" as const,
+            content: `Failed to start ${roleLabel} CLI: ${error.message}`,
           };
-          this.bridgeManager.addToHistory(fleetId, errMsg);
+          manager.addToHistory(fleetId, errMsg);
           this.broadcast({
-            type: "bridge:stream",
+            type: `${role}:stream`,
             data: { fleetId, message: errMsg },
           });
         }
@@ -365,105 +417,41 @@ export class EngineServer {
     });
   }
 
-  private setupAcceptanceEvents(): void {
-    this.acceptanceWatcher.on(
-      "request",
-      (shipId: string, request: { url: string; checks: string[] }) => {
-        const ship = this.shipManager.getShip(shipId);
-        if (ship) {
-          this.shipManager.setAcceptanceTest(shipId, request);
-          this.shipManager.updateStatus(shipId, "acceptance-test");
-
-          // Check if the acceptance-test→merging gate is auto-approve.
-          // If so, skip broadcasting the acceptance test UI to frontend —
-          // the gate system will handle the transition automatically.
-          this.loadFleets().then((fleets) => {
-            const fleet = fleets.find((f) => f.id === ship.fleetId);
-            const gateType = resolveGate("acceptance-test", "merging", fleet?.gates);
-            const isAutoApprove = gateType === "auto-approve";
-
-            if (isAutoApprove) {
-              console.log(
-                `[ws-server] Ship ${shipId.slice(0, 8)}... acceptance-test gate is auto-approve — skipping UI broadcast, auto-accepting`,
-              );
-              // Write acceptance-test-response.json so Ship CLI doesn't hang
-              this.shipManager.respondToAcceptanceTest(shipId, true);
-              return;
-            }
-
-            this.broadcast({
-              type: "ship:acceptance-test",
-              data: { id: shipId, url: request.url, checks: request.checks },
-            });
-
-            // Also inject into Bridge chat
-            const acceptanceMessage = {
-              type: "system" as const,
-              subtype: "acceptance-test" as const,
-              content: `Ship #${ship.issueNumber} (${ship.issueTitle}) requests acceptance test\nURL: ${request.url}\nChecks: ${request.checks.join(", ")}`,
-              meta: {
-                category: "acceptance-test" as const,
-                issueNumber: ship.issueNumber,
-                issueTitle: ship.issueTitle,
-                url: request.url,
-                checks: request.checks,
-              },
-            };
-            this.bridgeManager.addToHistory(ship.fleetId, acceptanceMessage);
-            this.broadcast({
-              type: "bridge:stream",
-              data: { fleetId: ship.fleetId, message: acceptanceMessage },
-            });
-          }).catch((err) => {
-            console.warn(`[ws-server] Failed to check gate settings for acceptance test:`, err);
-            // Fallback: broadcast anyway so UI is not broken
-            this.broadcast({
-              type: "ship:acceptance-test",
-              data: { id: shipId, url: request.url, checks: request.checks },
-            });
-          });
-        }
-      },
-    );
-  }
-
   private setupShipStatusHandler(): void {
-    this.shipManager.setStatusChangeHandler((id, status, detail) => {
+    this.shipManager.setPhaseChangeHandler((id, phase, detail) => {
       const ship = this.shipManager.getShip(id);
 
       this.broadcast({
         type: "ship:status",
         data: {
           id,
-          status,
+          phase: phase,
           detail,
           fleetId: ship?.fleetId,
           repo: ship?.repo,
           issueNumber: ship?.issueNumber,
           issueTitle: ship?.issueTitle,
-          ...(ship?.nothingToDo && {
-            nothingToDo: true,
-            nothingToDoReason: ship.nothingToDoReason,
-          }),
         },
       });
 
-      // Also inject into Bridge chat for the ship's fleet
+      // Inject Ship status into Flagship chat (Ship management is Flagship's domain)
       if (ship) {
-        const nothingToDoSuffix = ship.nothingToDo && status === "done" ? " (nothing to do)" : "";
+        const resumeInfo = detail === "Process dead"
+          ? `\nShip ID: ${ship.id}\nResumable: ${ship.sessionId ? "yes (session available)" : "no (no session — re-sortie only)"}\nWorktree: ${ship.worktreePath}`
+          : "";
         const statusMessage = {
           type: "system" as const,
           subtype: "ship-status" as const,
-          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${status}${nothingToDoSuffix}${detail ? ` — ${detail}` : ""}`,
+          content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${phase}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
           meta: {
             category: "ship-status" as const,
             issueNumber: ship.issueNumber,
             issueTitle: ship.issueTitle,
           },
         };
-        this.bridgeManager.addToHistory(ship.fleetId, statusMessage);
+        this.flagshipManager.addToHistory(ship.fleetId, statusMessage);
         this.broadcast({
-          type: "bridge:stream",
+          type: "flagship:stream",
           data: { fleetId: ship.fleetId, message: statusMessage },
         });
       }
@@ -475,9 +463,9 @@ export class EngineServer {
       const ship = this.shipManager.getShip(alert.shipId);
       if (!ship) return;
 
-      const bridgeId = `bridge-${alert.fleetId}`;
+      const flagshipId = `flagship-${alert.fleetId}`;
 
-      // Build system message for Bridge chat
+      // Build system message for Flagship chat (Lookout alerts are Ship management)
       const alertMessage: StreamMessage = {
         type: "system",
         subtype: "lookout-alert",
@@ -488,20 +476,21 @@ export class EngineServer {
           issueTitle: alert.issueTitle,
           alertType: alert.alertType,
           shipId: alert.shipId,
+          branchName: ship.branchName,
         },
       };
 
-      // Add to Bridge history and broadcast to frontend
-      this.bridgeManager.addToHistory(alert.fleetId, alertMessage);
+      // Add to Flagship history and broadcast to frontend
+      this.flagshipManager.addToHistory(alert.fleetId, alertMessage);
       this.broadcast({
-        type: "bridge:stream",
+        type: "flagship:stream",
         data: { fleetId: alert.fleetId, message: alertMessage },
       });
 
-      // Send to Bridge stdin if Bridge is running
-      if (this.processManager.isRunning(bridgeId)) {
+      // Send to Flagship stdin if Flagship is running
+      if (this.processManager.isRunning(flagshipId)) {
         this.processManager.sendMessage(
-          bridgeId,
+          flagshipId,
           `[Lookout Alert] ${alert.message}`,
         );
       }
@@ -554,106 +543,31 @@ export class EngineServer {
           break;
         }
 
-        // Bridge operations
-        case "bridge:send": {
-          const fleetId = data.fleetId as string;
-          const message = data.message as string;
-          const rawImages = data.images as Array<{ base64: string; mediaType: string }> | undefined;
-          const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-          const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB base64 (~3.75 MB raw)
-          const MAX_IMAGES = 10;
-          const images = rawImages
-            ?.filter((img) => ALLOWED_MEDIA.has(img.mediaType) && img.base64.length <= MAX_IMAGE_SIZE)
-            .slice(0, MAX_IMAGES);
-          if (
-            !this.bridgeManager.hasSession(fleetId) &&
-            !this.launchingBridges.has(fleetId)
-          ) {
-            this.launchingBridges.add(fleetId);
-            try {
-              const fleets = await this.loadFleets();
-              const fleet = fleets.find((f) => f.id === fleetId);
-              if (!fleet) {
-                throw new Error(`Fleet not found: ${fleetId}`);
-              }
-              const remoteNames = fleet.repos
-                .map((r) => r.remote)
-                .filter((r): r is string => r !== undefined);
-              let prompt = buildBridgeSystemPrompt(
-                fleet.name,
-                remoteNames,
-                fleet.maxConcurrentSorties ?? 6,
-              );
-
-              // Load and append shared + bridge rules
-              const sharedRules = await this.loadRules(fleet.sharedRulePaths ?? []);
-              const bridgeRules = await this.loadRules(fleet.bridgeRulePaths ?? []);
-              const rulesSuffix = [sharedRules, bridgeRules].filter(Boolean).join("\n\n");
-              if (rulesSuffix) {
-                prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
-              }
-
-              await this.bridgeManager.launch(
-                fleetId,
-                process.cwd(),
-                [],
-                prompt,
-              );
-
-              // Notify frontend that bridge is starting (after successful launch)
-              const startMsg = {
-                type: "system" as const,
-                subtype: "bridge-status" as const,
-                content: "Starting Bridge session...",
-              };
-              this.bridgeManager.addToHistory(fleetId, startMsg);
-              this.broadcast({
-                type: "bridge:stream",
-                data: { fleetId, message: startMsg },
-              });
-            } finally {
-              this.launchingBridges.delete(fleetId);
-            }
-          }
-          this.bridgeManager.send(fleetId, message, images);
+        // Flagship operations
+        case "flagship:send": {
+          await this.handleCommanderSend(ws, data, "flagship");
           break;
         }
-        case "bridge:answer": {
-          const ansFleetId = data.fleetId as string;
-          const answer = data.answer as string;
-          const toolUseId = data.toolUseId as string | undefined;
-          const bridgeId = `bridge-${ansFleetId}`;
-
-          // Record answer in history as a user message
-          const answerMessage: StreamMessage = {
-            type: "user",
-            content: answer,
-          };
-          this.bridgeManager.addToHistory(ansFleetId, answerMessage);
-          this.broadcast({
-            type: "bridge:stream",
-            data: { fleetId: ansFleetId, message: answerMessage },
-          });
-
-          // Send answer to Bridge stdin as tool_result if toolUseId is available
-          if (toolUseId) {
-            this.processManager.sendToolResult(bridgeId, toolUseId, answer);
-          } else {
-            this.processManager.sendMessage(bridgeId, answer);
-          }
+        case "flagship:answer": {
+          this.handleCommanderAnswer(data, "flagship");
           break;
         }
-        case "bridge:history": {
-          const history = this.bridgeManager.getHistory(
-            data.fleetId as string,
-          );
-          this.sendTo(ws, {
-            type: "bridge:stream",
-            data: {
-              fleetId: data.fleetId as string,
-              message: { type: "history", content: JSON.stringify(history) },
-            },
-          });
+        case "flagship:history": {
+          this.handleCommanderHistory(ws, data, "flagship");
+          break;
+        }
+
+        // Dock operations
+        case "dock:send": {
+          await this.handleCommanderSend(ws, data, "dock");
+          break;
+        }
+        case "dock:answer": {
+          this.handleCommanderAnswer(data, "dock");
+          break;
+        }
+        case "dock:history": {
+          this.handleCommanderHistory(ws, data, "dock");
           break;
         }
 
@@ -699,7 +613,7 @@ export class EngineServer {
               repo: ship.repo,
               issueNumber: ship.issueNumber,
               issueTitle: ship.issueTitle,
-              status: ship.status,
+              phase: ship.phase,
               branchName: ship.branchName,
             },
           });
@@ -717,51 +631,11 @@ export class EngineServer {
           }
           break;
         }
-        case "ship:accept": {
-          const acceptId = data.id as string;
-          this.shipManager.respondToAcceptanceTest(acceptId, true);
-          // Transactional: sync GitHub label before updating internal state
-          const acceptShip = this.shipManager.getShip(acceptId);
-          if (acceptShip) {
-            this.shipManager.clearAcceptanceTest(acceptId);
-            try {
-              await this.statusManager.syncPhaseLabel(acceptShip.repo, acceptShip.issueNumber, "merging");
-              this.shipManager.updateStatus(acceptId, "merging");
-            } catch (err) {
-              console.warn(`[ws-server] Failed to sync label for ship:accept #${acceptShip.issueNumber}:`, err);
-              // Still update internal state — the Ship already received the accept response
-              this.shipManager.updateStatus(acceptId, "merging");
-            }
-          }
-          break;
-        }
-        case "ship:reject": {
-          const rejectId = data.id as string;
-          this.shipManager.respondToAcceptanceTest(
-            rejectId,
-            false,
-            data.feedback as string,
-          );
-          // Transactional: sync GitHub label before updating internal state
-          const rejectShip = this.shipManager.getShip(rejectId);
-          if (rejectShip) {
-            this.shipManager.clearAcceptanceTest(rejectId);
-            try {
-              await this.statusManager.syncPhaseLabel(rejectShip.repo, rejectShip.issueNumber, "implementing");
-              this.shipManager.updateStatus(rejectId, "implementing");
-            } catch (err) {
-              console.warn(`[ws-server] Failed to sync label for ship:reject #${rejectShip.issueNumber}:`, err);
-              // Still update internal state — the Ship already received the reject response
-              this.shipManager.updateStatus(rejectId, "implementing");
-            }
-          }
-          break;
-        }
         case "ship:retry": {
           const retryId = data.id as string;
           const retryShip = this.shipManager.getShip(retryId);
-          if (!retryShip || retryShip.status !== "error") {
-            throw new Error(`Ship "${retryId}" is not in error state`);
+          if (!retryShip || retryShip.phase === "done" || this.processManager.isRunning(retryId)) {
+            throw new Error(`Ship "${retryId}" is not eligible for retry`);
           }
 
           // Load ship rules for re-sortie fallback
@@ -957,7 +831,8 @@ export class EngineServer {
     if (updates.repos !== undefined) fleet.repos = await this.enrichRepos(updates.repos as FleetRepo[]);
     if (updates.skillSources !== undefined) fleet.skillSources = updates.skillSources as FleetSkillSources;
     if (updates.sharedRulePaths !== undefined) fleet.sharedRulePaths = updates.sharedRulePaths as string[];
-    if (updates.bridgeRulePaths !== undefined) fleet.bridgeRulePaths = updates.bridgeRulePaths as string[];
+    if (updates.flagshipRulePaths !== undefined) fleet.flagshipRulePaths = updates.flagshipRulePaths as string[];
+    if (updates.dockRulePaths !== undefined) fleet.dockRulePaths = updates.dockRulePaths as string[];
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
     if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
     if (updates.maxConcurrentSorties !== undefined) fleet.maxConcurrentSorties = updates.maxConcurrentSorties as number;
@@ -968,7 +843,8 @@ export class EngineServer {
     let fleets = await this.loadFleets();
     fleets = fleets.filter((f) => f.id !== id);
     await this.saveFleets(fleets);
-    this.bridgeManager.stop(id);
+    this.flagshipManager.stop(id);
+    this.dockManager.stop(id);
   }
 
   // Messaging helpers
@@ -987,10 +863,143 @@ export class EngineServer {
     }
   }
 
-  private async executeRequestsSequentially(
+  private async handleCommanderSend(
+    ws: WebSocket,
+    data: Record<string, unknown>,
+    role: CommanderRole,
+  ): Promise<void> {
+    const manager = role === "flagship" ? this.flagshipManager : this.dockManager;
+    const fleetId = data.fleetId as string;
+    const message = data.message as string;
+
+    // Guard: reject if a question is pending
+    const pending = manager.getPendingQuestion(fleetId);
+    if (pending) {
+      this.sendTo(ws, {
+        type: "error",
+        data: {
+          source: `${role}:send`,
+          message: "Cannot send a command while a question is pending. Please answer the question first.",
+        },
+      });
+      return;
+    }
+
+    const rawImages = data.images as Array<{ base64: string; mediaType: string }> | undefined;
+    const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+    const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+    const MAX_IMAGES = 10;
+    const images = rawImages
+      ?.filter((img) => ALLOWED_MEDIA.has(img.mediaType) && img.base64.length <= MAX_IMAGE_SIZE)
+      .slice(0, MAX_IMAGES);
+
+    const launchKey = `${role}-${fleetId}`;
+    if (
+      !manager.hasSession(fleetId) &&
+      !this.launchingCommanders.has(launchKey)
+    ) {
+      this.launchingCommanders.add(launchKey);
+      try {
+        const fleets = await this.loadFleets();
+        const fleet = fleets.find((f) => f.id === fleetId);
+        if (!fleet) {
+          throw new Error(`Fleet not found: ${fleetId}`);
+        }
+        const remoteNames = fleet.repos
+          .map((r) => r.remote)
+          .filter((r): r is string => r !== undefined);
+
+        let prompt: string;
+        let roleRules: string;
+        if (role === "flagship") {
+          prompt = buildFlagshipSystemPrompt(
+            fleet.name,
+            remoteNames,
+            fleet.maxConcurrentSorties ?? 6,
+          );
+          roleRules = await this.loadRules(fleet.flagshipRulePaths ?? fleet.bridgeRulePaths ?? []);
+        } else {
+          prompt = buildDockSystemPrompt(fleet.name, remoteNames);
+          roleRules = await this.loadRules(fleet.dockRulePaths ?? []);
+        }
+
+        const sharedRules = await this.loadRules(fleet.sharedRulePaths ?? []);
+        const rulesSuffix = [sharedRules, roleRules].filter(Boolean).join("\n\n");
+        if (rulesSuffix) {
+          prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
+        }
+
+        await manager.launch(
+          fleetId,
+          process.cwd(),
+          [],
+          prompt,
+        );
+
+        const roleLabel = role === "flagship" ? "Flagship" : "Dock";
+        const startMsg = {
+          type: "system" as const,
+          subtype: "commander-status" as const,
+          content: `Starting ${roleLabel} session...`,
+        };
+        manager.addToHistory(fleetId, startMsg);
+        this.broadcast({
+          type: `${role}:stream`,
+          data: { fleetId, message: startMsg },
+        });
+      } finally {
+        this.launchingCommanders.delete(launchKey);
+      }
+    }
+    manager.send(fleetId, message, images);
+  }
+
+  private handleCommanderAnswer(
+    data: Record<string, unknown>,
+    role: CommanderRole,
+  ): void {
+    const manager = role === "flagship" ? this.flagshipManager : this.dockManager;
+    const fleetId = data.fleetId as string;
+    const answer = data.answer as string;
+    const toolUseId = data.toolUseId as string | undefined;
+    const processId = `${role}-${fleetId}`;
+
+    manager.clearPendingQuestion(fleetId);
+
+    const answerMessage: StreamMessage = {
+      type: "user",
+      content: answer,
+    };
+    manager.addToHistory(fleetId, answerMessage);
+
+    if (toolUseId) {
+      this.processManager.sendToolResult(processId, toolUseId, answer);
+    } else {
+      this.processManager.sendMessage(processId, answer);
+    }
+  }
+
+  private handleCommanderHistory(
+    ws: WebSocket,
+    data: Record<string, unknown>,
+    role: CommanderRole,
+  ): void {
+    const manager = role === "flagship" ? this.flagshipManager : this.dockManager;
+    const fleetId = data.fleetId as string;
+    const history = manager.getHistory(fleetId);
+    this.sendTo(ws, {
+      type: `${role}:stream`,
+      data: {
+        fleetId,
+        message: { type: "history", content: JSON.stringify(history) },
+      },
+    });
+  }
+
+  private async executeFlagshipRequestsSequentially(
     fleetId: string,
-    bridgeId: string,
-    requests: BridgeRequest[],
+    flagshipId: string,
+    requests: FlagshipRequest[],
   ): Promise<void> {
     const fleets = await this.loadFleets();
     const fleet = fleets.find((f) => f.id === fleetId);
@@ -1024,9 +1033,9 @@ export class EngineServer {
           subtype: "request-result" as const,
           content: result,
         };
-        this.bridgeManager.addToHistory(fleetId, resultMessage);
+        this.flagshipManager.addToHistory(fleetId, resultMessage);
         this.broadcast({
-          type: "bridge:stream",
+          type: "flagship:stream",
           data: { fleetId, message: resultMessage },
         });
       } catch (err) {
@@ -1038,252 +1047,21 @@ export class EngineServer {
           subtype: "request-result" as const,
           content: errorResult,
         };
-        this.bridgeManager.addToHistory(fleetId, errorMessage);
+        this.flagshipManager.addToHistory(fleetId, errorMessage);
         this.broadcast({
-          type: "bridge:stream",
+          type: "flagship:stream",
           data: { fleetId, message: errorMessage },
         });
       }
     }
 
-    // Send batched results to Bridge stdin
-    this.processManager.sendMessage(bridgeId, results.join("\n\n"));
-  }
-
-  private async executeShipRequests(
-    shipId: string,
-    requests: ShipRequest[],
-  ): Promise<void> {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    // Load fleet gate settings for this ship
-    const fleets = await this.loadFleets();
-    const fleet = fleets.find((f) => f.id === ship.fleetId);
-
-    for (const request of requests) {
-      const response: StatusTransitionResult = await this.shipRequestHandler.handle(shipId, request, fleet?.gates);
-
-      if (response.gate) {
-        // Gate check required — initiate gate flow instead of writing response
-        const planCommentUrl = request.request === "status-transition" ? request.planCommentUrl : undefined;
-        await this.initiateGateCheck(shipId, response.gate.type, response.gate.from, response.gate.to, planCommentUrl, response.gate.previousFeedback);
-        // Write a "pending" response so Ship knows to wait
-        await ShipRequestHandler.writeResponse(ship.worktreePath, {
-          ok: false,
-          error: `Gate check initiated for ${response.gate.from} → ${response.gate.to}. Wait for gate-response.json.`,
-        });
-        console.log(
-          `[ws-server] Ship ${shipId.slice(0, 8)}... gate check initiated: ${response.gate.from} → ${response.gate.to} (${response.gate.type})`,
-        );
-      } else {
-        // Write response file so Ship CLI can poll for the result
-        await ShipRequestHandler.writeResponse(ship.worktreePath, response);
-
-        if (response.ok) {
-          console.log(
-            `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} succeeded`,
-          );
-        } else {
-          console.warn(
-            `[ws-server] Ship ${shipId.slice(0, 8)}... request ${request.request} failed: ${response.error}`,
-          );
-        }
-      }
-    }
-  }
-
-  private async initiateGateCheck(
-    shipId: string,
-    gateType: GateType,
-    from: ShipStatus,
-    to: ShipStatus,
-    planCommentUrl?: string,
-    previousFeedback?: string,
-  ): Promise<void> {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    const transition = `${from}→${to}` as GateTransition;
-
-    // Auto-approve gates skip Bridge dispatch and resolve immediately
-    if (gateType === "auto-approve") {
-      this.shipManager.setGateCheck(shipId, transition, gateType);
-      this.shipManager.respondToGate(shipId, true).then(() => {
-        this.shipRequestHandler.executeGatedTransition(shipId, to).then((result) => {
-          if (result.ok) {
-            this.onGateApproved(shipId, transition);
-          }
-        }).catch(console.error);
-      }).catch(console.error);
-      console.log(
-        `[ws-server] Ship ${shipId.slice(0, 8)}... auto-approved gate: ${transition}`,
-      );
-      return;
-    }
-
-    // Dedup guard: skip if a pending gate already exists for this transition
-    if (ship.gateCheck?.transition === transition && ship.gateCheck.status === "pending") {
-      console.log(`[ws-server] Ship ${shipId.slice(0, 8)}... gate check already pending: ${transition} — skipping duplicate`);
-      return;
-    }
-
-    // For code-review gates, ensure PR URL is available.
-    // If detectPRCreation() hasn't captured it yet, fall back to `gh pr list`.
-    if (gateType === "code-review" && !ship.prUrl && ship.branchName) {
-      try {
-        const { stdout } = await execFileAsync("gh", [
-          "pr", "list",
-          "--head", ship.branchName,
-          "--repo", ship.repo,
-          "--json", "number,url",
-          "--jq", ".[0]",
-        ]);
-        const trimmed = stdout.trim();
-        if (trimmed) {
-          const pr = JSON.parse(trimmed) as { number: number; url: string };
-          ship.prUrl = pr.url;
-          ship.prReviewStatus = "pending";
-          console.log(
-            `[ws-server] Ship ${shipId.slice(0, 8)}... PR URL resolved via fallback: ${pr.url}`,
-          );
-        }
-      } catch {
-        // gh pr list failed — proceed with "not yet created"
-      }
-    }
-
-
-    // Set gate check state on the ship
-    this.shipManager.setGateCheck(shipId, transition, gateType);
-
-    // Write gate-request.json for Ship to detect
-    const gateRequest: GateFileRequest = {
-      transition,
-      gateType,
-      message: `Gate check required: ${transition} (${gateType})`,
-    };
-    const claudeDir = join(ship.worktreePath, ".claude");
-    mkdir(claudeDir, { recursive: true })
-      .then(() => writeFile(join(claudeDir, "gate-request.json"), JSON.stringify(gateRequest, null, 2)))
-      .catch((err) => console.error(`[ws-server] Failed to write gate-request.json:`, err));
-
-    // Notify frontend
-    this.broadcast({
-      type: "ship:gate-pending",
-      data: {
-        id: shipId,
-        transition,
-        gateType,
-        fleetId: ship.fleetId,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-      },
-    });
-
-    // Build gate check message for Bridge
-    const gateMessage = this.buildGateCheckMessage(ship, transition, gateType, planCommentUrl, previousFeedback);
-
-    // Inject into Bridge chat
-    const bridgeMsg = {
-      type: "system" as const,
-      subtype: "gate-check-request" as const,
-      content: gateMessage,
-      meta: {
-        category: "gate-check-request" as const,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-        transition,
-        gateType,
-      },
-    };
-    this.bridgeManager.addToHistory(ship.fleetId, bridgeMsg);
-    this.broadcast({
-      type: "bridge:stream",
-      data: { fleetId: ship.fleetId, message: bridgeMsg },
-    });
-
-    // Send to Bridge stdin
-    const bridgeId = `bridge-${ship.fleetId}`;
-    this.processManager.sendMessage(bridgeId, gateMessage);
-  }
-
-  private buildGateCheckMessage(
-    ship: ShipProcess,
-    transition: GateTransition,
-    gateType: GateType,
-    planCommentUrl?: string,
-    previousFeedback?: string,
-  ): string {
-    const header = `[Gate Check Request] Ship #${ship.issueNumber} (${ship.issueTitle}): ${transition}`;
-    const meta = `Ship ID: ${ship.id}\nRepo: ${ship.repo}\nGate type: ${gateType}\nWorktree: ${ship.worktreePath}\nShip log: ${ship.worktreePath}/.claude/ship-log.jsonl`;
-    const retryNote = previousFeedback
-      ? `\n\n⚠️ RETRY: This is a re-review after a previous rejection. The Ship claims to have addressed the following feedback:\n> ${previousFeedback}\nVerify that the previous issues have been fixed. Check GitHub (issue comments or PR reviews) for the full history of prior reviews.`
-      : "";
-
-    switch (gateType) {
-      case "plan-review": {
-        const planRef = planCommentUrl
-          ? `\nPlan comment: ${planCommentUrl}`
-          : "";
-        return `${header}\n${meta}${planRef}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the plan. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      }
-      case "code-review":
-        return `${header}\n${meta}\nPR: ${ship.prUrl ?? "not yet created"}${retryNote}\n\nLaunch a Dispatch (sub-agent) to review the PR. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "playwright":
-        return `${header}\n${meta}${retryNote}\n\nLaunch a Dispatch (sub-agent) to run Playwright QA checks. Do NOT judge the gate yourself. The Dispatch must record on GitHub and output the gate-result admiral-request block.`;
-      case "auto-approve":
-        // This case should not be reached — auto-approve gates are handled
-        // before buildGateCheckMessage is called. Included for type exhaustiveness.
-        return `${header}\n${meta}\n\nAuto-approved.`;
-    }
-  }
-
-  private onGateApproved(shipId: string, transition: GateTransition): void {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    // Resolve gate type for the notification
-    const gateType = ship.gateCheck?.gateType ?? "code-review";
-
-    // Notify frontend that gate was approved
-    this.broadcast({
-      type: "ship:gate-resolved",
-      data: {
-        id: shipId,
-        transition,
-        gateType,
-        approved: true,
-      },
-    });
-
-    // Gate files (gate-request.json, gate-response.json) are cleaned up by Ship
-    // after it reads the response. Engine must not delete them here — Ship polls
-    // with `sleep 2` and may miss the file if it's removed too quickly.
-  }
-
-  private onGateRejected(shipId: string, transition: GateTransition, feedback?: string): void {
-    const ship = this.shipManager.getShip(shipId);
-    if (!ship) return;
-
-    // Resolve gate type for the notification
-    const gateType = ship.gateCheck?.gateType ?? "code-review";
-
-    // Notify frontend that gate was rejected
-    this.broadcast({
-      type: "ship:gate-resolved",
-      data: {
-        id: shipId,
-        transition,
-        gateType,
-        approved: false,
-        feedback,
-      },
-    });
+    // Send batched results to Flagship stdin
+    this.processManager.sendMessage(flagshipId, results.join("\n\n"));
   }
 
   private runStartupReconciliation(): void {
-    this.loadFleets()
+    this.initDatabase()
+      .then(() => this.loadFleets())
       .then((fleets) => {
         const allRepos = fleets.flatMap((f) => f.repos);
         return this.stateSync.reconcileOnStartup(allRepos);
@@ -1291,6 +1069,16 @@ export class EngineServer {
       .catch((err) => {
         console.warn("[engine] Startup reconciliation failed:", err);
       });
+  }
+
+  private async initDatabase(): Promise<void> {
+    try {
+      this.fleetDb = await initFleetDatabase(getAdmiralHome());
+      this.shipManager.setDatabase(this.fleetDb);
+      console.log("[engine] Fleet database initialized");
+    } catch (err) {
+      console.warn("[engine] Failed to initialize fleet database:", err);
+    }
   }
 
   private detectPRCreation(
@@ -1310,19 +1098,16 @@ export class EngineServer {
     if (!ship || ship.prUrl) return; // Already detected
 
     const prUrl = prUrlMatch[0];
-    const repo = prUrlMatch[1]!;
-    const prNumber = parseInt(prUrlMatch[2]!, 10);
 
-    // Store PR URL on ship
-    ship.prUrl = prUrl;
-    ship.prReviewStatus = "pending";
+    // Store PR URL on ship (DB + runtime)
+    this.shipManager.setPrUrl(id, prUrl);
 
     // Broadcast PR creation to frontend
     this.broadcast({
       type: "ship:status",
       data: {
         id,
-        status: ship.status,
+        phase: ship.phase,
         detail: `PR created: ${prUrl}`,
         fleetId: ship.fleetId,
         repo: ship.repo,
@@ -1330,32 +1115,6 @@ export class EngineServer {
         issueTitle: ship.issueTitle,
       },
     });
-
-    // Notify Bridge for code review
-    const reviewMessage = {
-      type: "system" as const,
-      subtype: "pr-review-request" as const,
-      content: `Ship #${ship.issueNumber} (${ship.issueTitle}) created PR #${prNumber}: ${prUrl}\nRepo: ${repo}\nShip ID: ${ship.id}\n\nPlease review the PR using \`gh pr diff ${prNumber} --repo ${repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
-      meta: {
-        category: "pr-review-request" as const,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-        prNumber,
-        prUrl,
-      },
-    };
-    this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
-    this.broadcast({
-      type: "bridge:stream",
-      data: { fleetId: ship.fleetId, message: reviewMessage },
-    });
-
-    // Send the review request to Bridge's stdin so it processes it
-    const bridgeId = `bridge-${ship.fleetId}`;
-    this.processManager.sendMessage(
-      bridgeId,
-      `[PR Review Request] Ship #${ship.issueNumber} created PR #${prNumber}: ${prUrl} (repo: ${repo}, shipId: ${ship.id}). Please review the diff and submit your verdict.`,
-    );
   }
 
   private detectCompactStatus(
@@ -1372,65 +1131,25 @@ export class EngineServer {
     const ship = this.shipManager.getShip(id);
     if (!ship) return;
 
-    ship.isCompacting = isCompacting;
+    this.shipManager.setIsCompacting(id, isCompacting);
     this.broadcast({
       type: "ship:compacting",
       data: { id, isCompacting },
     });
 
-    // Also inject into Bridge chat
+    // Also inject into Flagship chat (Ship management is Flagship's domain)
     if (isCompacting) {
       const compactMsg = {
         type: "system" as const,
         subtype: "ship-status" as const,
         content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
       };
-      this.bridgeManager.addToHistory(ship.fleetId, compactMsg);
+      this.flagshipManager.addToHistory(ship.fleetId, compactMsg);
       this.broadcast({
-        type: "bridge:stream",
+        type: "flagship:stream",
         data: { fleetId: ship.fleetId, message: compactMsg },
       });
     }
-  }
-
-  private detectPushForReReview(
-    id: string,
-    msg: StreamMessage,
-  ): void {
-    // Only care about tool_use Bash commands
-    if (msg.type !== "tool_use" || msg.tool !== "Bash") return;
-    const inputStr = msg.toolInput ? JSON.stringify(msg.toolInput) : "";
-    if (!inputStr.includes("git push")) return;
-
-    const ship = this.shipManager.getShip(id);
-    if (!ship || !ship.prUrl || ship.prReviewStatus !== "changes-requested") return;
-
-    // Extract PR number from stored URL
-    const prMatch = ship.prUrl.match(/\/pull\/(\d+)/);
-    if (!prMatch) return;
-    const prNumber = parseInt(prMatch[1]!, 10);
-
-    // Reset review status to pending
-    ship.prReviewStatus = "pending";
-
-    // Notify Bridge for re-review
-    const reviewMessage = {
-      type: "system" as const,
-      subtype: "pr-review-request" as const,
-      content: `Ship #${ship.issueNumber} (${ship.issueTitle}) pushed fixes to PR #${prNumber}: ${ship.prUrl}\nRepo: ${ship.repo}\nShip ID: ${ship.id}\n\nThe Ship has addressed the requested changes. Please re-review using \`gh pr diff ${prNumber} --repo ${ship.repo}\` and submit your verdict via \`pr-review-result\` admiral-request.`,
-    };
-    this.bridgeManager.addToHistory(ship.fleetId, reviewMessage);
-    this.broadcast({
-      type: "bridge:stream",
-      data: { fleetId: ship.fleetId, message: reviewMessage },
-    });
-
-    // Send re-review request to Bridge stdin
-    const bridgeId = `bridge-${ship.fleetId}`;
-    this.processManager.sendMessage(
-      bridgeId,
-      `[PR Re-Review Request] Ship #${ship.issueNumber} pushed fixes to PR #${prNumber}: ${ship.prUrl} (repo: ${ship.repo}, shipId: ${ship.id}). Previous review requested changes. Please re-review the diff and submit your verdict.`,
-    );
   }
 
   private logShipMessage(
@@ -1493,55 +1212,101 @@ export class EngineServer {
     return parts.join("\n\n");
   }
 
-  private startGateTimeoutScanner(): void {
-    // Scan every 30 seconds for stale gate checks
-    this.gateTimeoutTimer = setInterval(() => {
-      this.scanGateTimeouts();
+  private startQuestionTimeoutScanner(): void {
+    this.questionTimeoutTimer = setInterval(() => {
+      this.scanQuestionTimeouts();
     }, 30_000);
-    // Allow Node to exit even if the timer is still running
-    this.gateTimeoutTimer.unref();
+    this.questionTimeoutTimer.unref();
   }
 
-  private scanGateTimeouts(): void {
+  private scanQuestionTimeouts(): void {
     const now = Date.now();
+    const managers: Array<{ role: CommanderRole; manager: CommanderManager }> = [
+      { role: "flagship", manager: this.flagshipManager },
+      { role: "dock", manager: this.dockManager },
+    ];
 
-    for (const ship of this.shipManager.getAllShips()) {
-      if (
-        ship.gateCheck &&
-        ship.gateCheck.status === "pending"
-      ) {
-        // Use acknowledgedAt (when Bridge ACK'd) as the timeout base if available,
-        // otherwise fall back to requestedAt (when Engine sent the request)
-        const timeoutBase = ship.gateCheck.acknowledgedAt ?? ship.gateCheck.requestedAt;
-        if (now - new Date(timeoutBase).getTime() <= EngineServer.GATE_TIMEOUT_MS) continue;
-        const transition = ship.gateCheck.transition;
+    for (const { role, manager } of managers) {
+      const pending = manager.getSessionsWithPendingQuestion();
 
+      for (const { fleetId, toolUseId, askedAt } of pending) {
+        if (now - askedAt <= EngineServer.QUESTION_TIMEOUT_MS) continue;
+
+        const roleLabel = role === "flagship" ? "Flagship" : "Dock";
         console.warn(
-          `[ws-server] Gate check for Ship ${ship.id.slice(0, 8)}... timed out (${transition}). Auto-rejecting.`,
+          `[ws-server] ${roleLabel} question for fleet ${fleetId} timed out after ${EngineServer.QUESTION_TIMEOUT_MS / 1000}s. Auto-answering.`,
         );
-        this.shipManager.respondToGate(
-          ship.id,
-          false,
-          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
-        ).catch(console.error);
-        this.onGateRejected(
-          ship.id,
-          transition,
-          `Gate check timed out after ${EngineServer.GATE_TIMEOUT_MS / 1000}s`,
-        );
+
+        // Clear pending state
+        manager.clearPendingQuestion(fleetId);
+
+        // Auto-answer with default message
+        const autoAnswer = "No response from user (timed out)";
+        const processId = `${role}-${fleetId}`;
+
+        // Record in history
+        const answerMsg: StreamMessage = {
+          type: "user",
+          content: autoAnswer,
+        };
+        manager.addToHistory(fleetId, answerMsg);
+
+        // Notify frontend
+        const timeoutMsg: StreamMessage = {
+          type: "system",
+          subtype: "commander-status",
+          content: `${roleLabel} question timed out — auto-answered with default response.`,
+        };
+        manager.addToHistory(fleetId, timeoutMsg);
+        this.broadcast({
+          type: `${role}:stream`,
+          data: { fleetId, message: answerMsg },
+        });
+        this.broadcast({
+          type: `${role}:stream`,
+          data: { fleetId, message: timeoutMsg },
+        });
+
+        // Clear pendingQuestion on frontend
+        this.broadcast({
+          type: `${role}:question-timeout`,
+          data: { fleetId },
+        });
+
+        // Send tool_result to commander stdin
+        this.processManager.sendToolResult(processId, toolUseId, autoAnswer);
       }
     }
   }
 
+  private startProcessLivenessCheck(): void {
+    this.processLivenessTimer = setInterval(() => {
+      for (const ship of this.shipManager.getAllShips()) {
+        if (ship.phase !== "done" && ship.phase !== "stopped" && !this.processManager.isRunning(ship.id)) {
+          if (!ship.processDead) {
+            this.shipManager.notifyProcessDead(ship.id);
+          }
+        }
+      }
+    }, 30_000);
+    this.processLivenessTimer.unref();
+  }
+
   shutdown(): void {
-    if (this.gateTimeoutTimer) {
-      clearInterval(this.gateTimeoutTimer);
-      this.gateTimeoutTimer = null;
+    if (this.questionTimeoutTimer) {
+      clearInterval(this.questionTimeoutTimer);
+      this.questionTimeoutTimer = null;
     }
+    if (this.processLivenessTimer) {
+      clearInterval(this.processLivenessTimer);
+      this.processLivenessTimer = null;
+    }
+    this.escortManager.killAll();
     this.shipManager.stopAll();
-    this.bridgeManager.stopAll();
+    this.flagshipManager.stopAll();
+    this.dockManager.stopAll();
     this.processManager.killAll();
-    this.acceptanceWatcher.unwatchAll();
+    this.fleetDb?.close();
     this.wss.close();
   }
 }

@@ -1,18 +1,23 @@
-// === Ship Status ===
-export type ShipStatus =
-  | "sortie" // 出撃準備中
-  | "investigating" // 調査中
-  | "planning" // 計画中
-  | "implementing" // 実装中
-  | "testing" // テスト中
-  | "reviewing" // レビュー中
-  | "acceptance-test" // 受け入れテスト中
-  | "merging" // マージ中
-  | "done" // 完了
-  | "error"; // エラー
+// === Phase (Ship lifecycle) ===
+// Gate is a phase: planning → planning-gate → implementing → implementing-gate
+// → acceptance-test → acceptance-test-gate → merging → done
+// "error" is a derived state: phase ≠ done && process dead.
+export type Phase =
+  | "planning"
+  | "planning-gate"
+  | "implementing"
+  | "implementing-gate"
+  | "acceptance-test"
+  | "acceptance-test-gate"
+  | "merging"
+  | "done"
+  | "stopped";
 
-/** Classification of Ship error cause. */
-export type ShipErrorType = "rate_limit" | "unknown";
+/** @deprecated Use Phase instead. Kept for migration compatibility. */
+export type ShipStatus = Phase;
+
+/** Gate phases where Bridge review is required. */
+export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
 
 // === Fleet ===
 export interface FleetRepo {
@@ -31,6 +36,9 @@ export interface Fleet {
   repos: FleetRepo[];
   skillSources?: FleetSkillSources;
   sharedRulePaths?: string[];
+  flagshipRulePaths?: string[];
+  dockRulePaths?: string[];
+  /** @deprecated Use flagshipRulePaths instead. */
   bridgeRulePaths?: string[];
   shipRulePaths?: string[];
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
@@ -38,21 +46,18 @@ export interface Fleet {
   createdAt: string;
 }
 
+// === Commander (Dock/Flagship shared role type) ===
+export type CommanderRole = "dock" | "flagship";
+
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
 // === Gate ===
-export type GateTransition =
-  | "planning→implementing"
-  | "testing→reviewing"
-  | "reviewing→acceptance-test"
-  | "acceptance-test→merging";
-
-export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
+export type GateType = "plan-review" | "code-review" | "playwright";
 export type GateStatus = "pending" | "approved" | "rejected";
 
 export interface GateCheckState {
-  transition: GateTransition;
+  gatePhase: GatePhase;
   gateType: GateType;
   status: GateStatus;
   feedback?: string;
@@ -65,26 +70,18 @@ export interface Ship {
   repo: string;
   issueNumber: number;
   issueTitle: string;
-  status: ShipStatus;
+  phase: Phase;
+  /** Whether the Ship process has died (derived: phase ≠ done && process not running). */
+  processDead?: boolean;
   isCompacting: boolean;
   branchName: string;
   worktreePath: string;
   sessionId: string | null;
   prUrl: string | null;
   prReviewStatus: PRReviewStatus | null;
-  acceptanceTest: AcceptanceTestRequest | null;
-  acceptanceTestApproved: boolean;
   gateCheck: GateCheckState | null;
-  errorType: ShipErrorType | null;
   retryCount: number;
-  nothingToDo?: boolean;
-  nothingToDoReason?: string;
   createdAt: string;
-}
-
-export interface AcceptanceTestRequest {
-  url: string;
-  checks: string[];
 }
 
 // === Issue ===
@@ -100,18 +97,17 @@ export interface Issue {
 export type StreamMessageSubtype =
   | "ship-status"
   | "compact-status"
-  | "bridge-status"
-  | "acceptance-test"
+  | "commander-status"
   | "request-result"
   | "pr-review-request"
   | "gate-check-request"
   | "lookout-alert"
-  | "task-notification";
+  | "task-notification"
+  | "dispatch-log";
 
 // === Lookout ===
 export type LookoutAlertType =
   | "gate-wait-stall"
-  | "acceptance-test-stall"
   | "no-output-stall"
   | "excessive-retries";
 
@@ -119,7 +115,7 @@ export interface SystemMessageMeta {
   category: StreamMessageSubtype;
   issueNumber?: number;
   issueTitle?: string;
-  transition?: string;
+  gatePhase?: string;
   gateType?: GateType;
   prNumber?: number;
   prUrl?: string;
@@ -127,6 +123,7 @@ export interface SystemMessageMeta {
   checks?: string[];
   alertType?: LookoutAlertType;
   shipId?: string;
+  branchName?: string;
 }
 
 export interface StreamMessage {
@@ -170,22 +167,24 @@ export type ClientMessage =
         repos?: FleetRepo[];
         skillSources?: FleetSkillSources;
         sharedRulePaths?: string[];
-        bridgeRulePaths?: string[];
+        flagshipRulePaths?: string[];
+        dockRulePaths?: string[];
         shipRulePaths?: string[];
         maxConcurrentSorties?: number;
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
-  | { type: "bridge:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
-  | { type: "bridge:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
-  | { type: "bridge:history"; data: { fleetId: string } }
+  | { type: "flagship:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
+  | { type: "flagship:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
+  | { type: "flagship:history"; data: { fleetId: string } }
+  | { type: "dock:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
+  | { type: "dock:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
+  | { type: "dock:history"; data: { fleetId: string } }
   | {
       type: "ship:sortie";
       data: { fleetId: string; issueNumber: number; repo: string };
     }
   | { type: "ship:chat"; data: { id: string; message: string } }
-  | { type: "ship:accept"; data: { id: string } }
-  | { type: "ship:reject"; data: { id: string; feedback: string } }
   | { type: "ship:retry"; data: { id: string } }
   | { type: "ship:stop"; data: { id: string } }
   | { type: "ship:logs"; data: { id: string; limit?: number } }
@@ -197,25 +196,37 @@ export type ClientMessage =
 // === WebSocket Messages: Engine → Frontend ===
 export type ServerMessage =
   | {
-      type: "bridge:stream";
+      type: "flagship:stream";
       data: { fleetId: string; message: StreamMessage };
     }
   | {
-      type: "bridge:question";
+      type: "flagship:question";
       data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "flagship:question-timeout";
+      data: { fleetId: string };
+    }
+  | {
+      type: "dock:stream";
+      data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "dock:question";
+      data: { fleetId: string; message: StreamMessage };
+    }
+  | {
+      type: "dock:question-timeout";
+      data: { fleetId: string };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
       type: "ship:status";
-      data: { id: string; status: ShipStatus; detail?: string; nothingToDo?: boolean; nothingToDoReason?: string };
+      data: { id: string; phase: Phase; detail?: string };
     }
   | {
       type: "ship:compacting";
       data: { id: string; isCompacting: boolean };
-    }
-  | {
-      type: "ship:acceptance-test";
-      data: { id: string; url: string; checks: string[] };
     }
   | {
       type: "ship:created";
@@ -225,7 +236,7 @@ export type ServerMessage =
         repo: string;
         issueNumber: number;
         issueTitle: string;
-        status: ShipStatus;
+        phase: Phase;
         branchName: string;
       };
     }
@@ -237,7 +248,7 @@ export type ServerMessage =
       type: "ship:gate-pending";
       data: {
         id: string;
-        transition: GateTransition;
+        gatePhase: GatePhase;
         gateType: GateType;
         fleetId: string;
         issueNumber: number;
@@ -248,7 +259,7 @@ export type ServerMessage =
       type: "ship:gate-resolved";
       data: {
         id: string;
-        transition: GateTransition;
+        gatePhase: GatePhase;
         gateType: GateType;
         approved: boolean;
         feedback?: string;

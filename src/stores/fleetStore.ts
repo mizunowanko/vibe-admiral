@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Fleet, FleetRepo, FleetSkillSources } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
@@ -15,7 +16,8 @@ interface FleetState {
     repos?: FleetRepo[];
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
-    bridgeRulePaths?: string[];
+    flagshipRulePaths?: string[];
+    dockRulePaths?: string[];
     shipRulePaths?: string[];
     maxConcurrentSorties?: number;
   }) => void;
@@ -23,44 +25,55 @@ interface FleetState {
   fetchFleets: () => void;
 }
 
-export const useFleetStore = create<FleetState>((set, get) => ({
-  fleets: [],
-  selectedFleetId: null,
-  selectedFleet: null,
+export const useFleetStore = create<FleetState>()(
+  persist(
+    (set, get) => ({
+      fleets: [],
+      selectedFleetId: null,
+      selectedFleet: null,
 
-  setFleets: (fleets) => {
-    const { selectedFleetId } = get();
-    set({
-      fleets,
-      selectedFleet: fleets.find((f) => f.id === selectedFleetId) ?? null,
-    });
-  },
+      setFleets: (fleets) => {
+        const { selectedFleetId } = get();
+        const selectedFleet = fleets.find((f) => f.id === selectedFleetId) ?? null;
+        set({
+          fleets,
+          selectedFleet,
+          // Fallback: clear persisted ID when the fleet no longer exists
+          ...(selectedFleetId && !selectedFleet && { selectedFleetId: null }),
+        });
+      },
 
-  selectFleet: (id) => {
-    const fleet = get().fleets.find((f) => f.id === id) ?? null;
-    set({ selectedFleetId: id, selectedFleet: fleet });
-    if (id) {
-      wsClient.send({ type: "fleet:select", data: { id } });
-    }
-  },
+      selectFleet: (id) => {
+        const fleet = get().fleets.find((f) => f.id === id) ?? null;
+        set({ selectedFleetId: id, selectedFleet: fleet });
+        if (id) {
+          wsClient.send({ type: "fleet:select", data: { id } });
+        }
+      },
 
-  createFleet: (name, repos) => {
-    wsClient.send({ type: "fleet:create", data: { name, repos } });
-  },
+      createFleet: (name, repos) => {
+        wsClient.send({ type: "fleet:create", data: { name, repos } });
+      },
 
-  updateFleet: (id, updates) => {
-    wsClient.send({ type: "fleet:update", data: { id, ...updates } });
-  },
+      updateFleet: (id, updates) => {
+        wsClient.send({ type: "fleet:update", data: { id, ...updates } });
+      },
 
-  deleteFleet: (id) => {
-    const { selectedFleetId } = get();
-    if (selectedFleetId === id) {
-      set({ selectedFleetId: null, selectedFleet: null });
-    }
-    wsClient.send({ type: "fleet:delete", data: { id } });
-  },
+      deleteFleet: (id) => {
+        const { selectedFleetId } = get();
+        if (selectedFleetId === id) {
+          set({ selectedFleetId: null, selectedFleet: null });
+        }
+        wsClient.send({ type: "fleet:delete", data: { id } });
+      },
 
-  fetchFleets: () => {
-    wsClient.send({ type: "fleet:list" });
-  },
-}));
+      fetchFleets: () => {
+        wsClient.send({ type: "fleet:list" });
+      },
+    }),
+    {
+      name: "admiral-fleet",
+      partialize: (state) => ({ selectedFleetId: state.selectedFleetId }),
+    },
+  ),
+);

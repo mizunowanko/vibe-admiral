@@ -3,17 +3,16 @@ import { wsClient } from "@/lib/ws-client";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
-import type { ServerMessage, Fleet, Ship, ShipStatus, StreamMessage, GateTransition, GateType } from "@/types";
+import type { ServerMessage, Fleet, Ship, Phase, StreamMessage, GatePhase, GateType } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
   const selectFleet = useFleetStore((s) => s.selectFleet);
   const setMainView = useUIStore((s) => s.setMainView);
   const addShip = useShipStore((s) => s.addShip);
-  const setShipStatus = useShipStore((s) => s.setShipStatus);
+  const setShipPhase = useShipStore((s) => s.setShipPhase);
   const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
-  const setAcceptanceTest = useShipStore((s) => s.setAcceptanceTest);
   const setShipDone = useShipStore((s) => s.setShipDone);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
@@ -46,7 +45,7 @@ export function useEngine() {
           const created = msg.data as unknown as { id: string; fleets: Fleet[] };
           setFleets(created.fleets);
           selectFleet(created.id);
-          setMainView("bridge");
+          setMainView("command");
           break;
         }
 
@@ -57,7 +56,7 @@ export function useEngine() {
             repo: string;
             issueNumber: number;
             issueTitle: string;
-            status: ShipStatus;
+            phase: Phase;
             branchName?: string;
           };
           addShip(created);
@@ -67,22 +66,18 @@ export function useEngine() {
         case "ship:status": {
           const statusData = msg.data as {
             id: string;
-            status: ShipStatus;
+            phase: Phase;
             detail?: string;
             fleetId?: string;
             repo?: string;
             issueNumber?: number;
             issueTitle?: string;
-            nothingToDo?: boolean;
-            nothingToDoReason?: string;
           };
-          setShipStatus(statusData.id, statusData.status, {
+          setShipPhase(statusData.id, statusData.phase, {
             fleetId: statusData.fleetId,
             repo: statusData.repo,
             issueNumber: statusData.issueNumber,
             issueTitle: statusData.issueTitle,
-            nothingToDo: statusData.nothingToDo,
-            nothingToDoReason: statusData.nothingToDoReason,
           });
           break;
         }
@@ -105,19 +100,6 @@ export function useEngine() {
           break;
         }
 
-        case "ship:acceptance-test": {
-          const atData = msg.data as {
-            id: string;
-            url: string;
-            checks: string[];
-          };
-          setAcceptanceTest(atData.id, {
-            url: atData.url,
-            checks: atData.checks,
-          });
-          break;
-        }
-
         case "ship:done": {
           const doneData = msg.data as {
             id: string;
@@ -131,11 +113,11 @@ export function useEngine() {
         case "ship:gate-pending": {
           const gateData = msg.data as {
             id: string;
-            transition: GateTransition;
+            gatePhase: GatePhase;
             gateType: GateType;
           };
           setGateCheck(gateData.id, {
-            transition: gateData.transition,
+            gatePhase: gateData.gatePhase,
             gateType: gateData.gateType,
             status: "pending",
           });
@@ -145,7 +127,7 @@ export function useEngine() {
         case "ship:gate-resolved": {
           const resolvedData = msg.data as {
             id: string;
-            transition: GateTransition;
+            gatePhase: GatePhase;
             gateType: GateType;
             approved: boolean;
             feedback?: string;
@@ -154,7 +136,7 @@ export function useEngine() {
             clearGateCheck(resolvedData.id);
           } else {
             setGateCheck(resolvedData.id, {
-              transition: resolvedData.transition,
+              gatePhase: resolvedData.gatePhase,
               gateType: resolvedData.gateType,
               status: "rejected",
               feedback: resolvedData.feedback,
@@ -163,8 +145,9 @@ export function useEngine() {
           break;
         }
 
-        case "bridge:stream":
-          // Bridge messages are handled by useBridge hook
+        case "flagship:stream":
+        case "dock:stream":
+          // Commander messages are handled by useCommander hook
           break;
 
         case "issue:data":
@@ -196,10 +179,9 @@ export function useEngine() {
     selectFleet,
     setMainView,
     addShip,
-    setShipStatus,
+    setShipPhase,
     setShipCompacting,
     addShipLog,
-    setAcceptanceTest,
     setShipDone,
     setGateCheck,
     clearGateCheck,

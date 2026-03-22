@@ -88,8 +88,11 @@ export function FleetSettings() {
   const [sharedRulePaths, setSharedRulePaths] = useState<string[]>(
     selectedFleet?.sharedRulePaths ?? [],
   );
-  const [bridgeRulePaths, setBridgeRulePaths] = useState<string[]>(
-    selectedFleet?.bridgeRulePaths ?? [],
+  const [flagshipRulePaths, setFlagshipRulePaths] = useState<string[]>(
+    selectedFleet?.flagshipRulePaths ?? selectedFleet?.bridgeRulePaths ?? [],
+  );
+  const [dockRulePaths, setDockRulePaths] = useState<string[]>(
+    selectedFleet?.dockRulePaths ?? [],
   );
   const [shipRulePaths, setShipRulePaths] = useState<string[]>(
     selectedFleet?.shipRulePaths ?? [],
@@ -104,7 +107,8 @@ export function FleetSettings() {
     setSkillSources(selectedFleet?.skillSources ?? {});
     setMaxConcurrentSorties(selectedFleet?.maxConcurrentSorties ?? 6);
     setSharedRulePaths(selectedFleet?.sharedRulePaths ?? []);
-    setBridgeRulePaths(selectedFleet?.bridgeRulePaths ?? []);
+    setFlagshipRulePaths(selectedFleet?.flagshipRulePaths ?? selectedFleet?.bridgeRulePaths ?? []);
+    setDockRulePaths(selectedFleet?.dockRulePaths ?? []);
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
   }, [selectedFleet]);
 
@@ -127,7 +131,8 @@ export function FleetSettings() {
       skillSources,
       maxConcurrentSorties,
       sharedRulePaths,
-      bridgeRulePaths,
+      flagshipRulePaths,
+      dockRulePaths,
       shipRulePaths,
     });
   };
@@ -310,14 +315,19 @@ export function FleetSettings() {
             <div className="space-y-4">
               <h3 className="text-sm font-medium">Behavioral Rules</h3>
               <PathListEditor
-                label="Shared Rules (Bridge + Ship)"
+                label="Shared Rules (Flagship + Dock + Ship)"
                 paths={sharedRulePaths}
                 onChange={setSharedRulePaths}
               />
               <PathListEditor
-                label="Bridge-only Rules"
-                paths={bridgeRulePaths}
-                onChange={setBridgeRulePaths}
+                label="Flagship-only Rules"
+                paths={flagshipRulePaths}
+                onChange={setFlagshipRulePaths}
+              />
+              <PathListEditor
+                label="Dock-only Rules"
+                paths={dockRulePaths}
+                onChange={setDockRulePaths}
               />
               <PathListEditor
                 label="Ship-only Rules"

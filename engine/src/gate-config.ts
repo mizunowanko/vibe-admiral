@@ -1,46 +1,38 @@
 import type {
-  GateTransition,
+  GatePhase,
   GateType,
   GateConfig,
   FleetGateSettings,
-  ShipStatus,
+  Phase,
 } from "./types.js";
-import { DEFAULT_GATE_TYPES } from "./types.js";
+import { DEFAULT_GATE_TYPES, GATE_NEXT_PHASE } from "./types.js";
 
 /**
- * All defined gate transitions. Order matters for display.
+ * All defined gate phases. Order matters for display.
  */
-export const GATE_TRANSITIONS: readonly GateTransition[] = [
-  "planning→implementing",
-  "testing→reviewing",
-  "reviewing→acceptance-test",
-  "acceptance-test→merging",
+export const GATE_PHASES: readonly GatePhase[] = [
+  "planning-gate",
+  "implementing-gate",
+  "acceptance-test-gate",
 ] as const;
 
 /**
- * Parse a gate transition key into its from/to statuses.
+ * Resolve the gate type for a gate phase.
+ * Returns null if the gate is disabled for this phase.
  */
-export function parseTransition(
-  transition: GateTransition,
-): { from: ShipStatus; to: ShipStatus } {
-  const [from, to] = transition.split("→") as [string, string];
-  return { from: from as ShipStatus, to: to as ShipStatus };
+export function resolveGateType(
+  gatePhase: GatePhase,
+  settings?: FleetGateSettings,
+): GateType | null {
+  const config: GateConfig = settings?.[gatePhase] ?? true;
+  if (config === false) return null;
+  if (config === true) return DEFAULT_GATE_TYPES[gatePhase];
+  return config;
 }
 
 /**
- * Check if a status transition has a gate, and return the gate type if so.
- * Returns null if no gate is configured for this transition.
+ * Get the next phase after a gate is approved.
  */
-export function resolveGate(
-  from: ShipStatus,
-  to: ShipStatus,
-  settings?: FleetGateSettings,
-): GateType | null {
-  const key = `${from}→${to}` as GateTransition;
-  if (!GATE_TRANSITIONS.includes(key)) return null;
-
-  const config: GateConfig = settings?.[key] ?? true;
-  if (config === false) return null;
-  if (config === true) return DEFAULT_GATE_TYPES[key];
-  return config;
+export function getNextPhaseAfterGate(gatePhase: GatePhase): Phase {
+  return GATE_NEXT_PHASE[gatePhase];
 }

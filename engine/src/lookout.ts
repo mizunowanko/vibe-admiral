@@ -11,34 +11,17 @@ export interface LookoutAlert {
   fleetId: string;
 }
 
-/** Thresholds (ms) for Lookout anomaly detection. */
-const GATE_WAIT_STALL_MS = 3 * 60 * 1000; // 3 minutes (early warning before 5-min auto-reject)
-const ACCEPTANCE_TEST_STALL_MS = 5 * 60 * 1000; // 5 minutes
-const NO_OUTPUT_STALL_MS = 3 * 60 * 1000; // 3 minutes
+const GATE_WAIT_STALL_MS = 3 * 60 * 1000;
+const NO_OUTPUT_STALL_MS = 3 * 60 * 1000;
 const EXCESSIVE_RETRY_THRESHOLD = 2;
+const REALERT_INTERVAL_MS = 10 * 60 * 1000;
+const SCAN_INTERVAL_MS = 30_000;
 
-/** Minimum interval before re-alerting the same anomaly for the same ship (ms). */
-const REALERT_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
-
-/** Scan interval (ms). */
-const SCAN_INTERVAL_MS = 30_000; // 30 seconds
-
-/**
- * Lookout: periodic Ship health scanner.
- *
- * Detects anomalies in active Ships (gate stalls, no-output stalls,
- * acceptance-test stalls, excessive retries) and notifies Bridge via callback.
- */
 export class Lookout {
   private shipManager: ShipManager;
   private processManager: ProcessManager;
   private timer: ReturnType<typeof setInterval> | null = null;
   private onAlert: ((alert: LookoutAlert) => void) | null = null;
-
-  /**
-   * Tracks sent alerts to prevent duplicate notifications.
-   * Key: `${shipId}:${alertType}`, Value: timestamp of last alert.
-   */
   private alertsSent = new Map<string, number>();
 
   constructor(shipManager: ShipManager, processManager: ProcessManager) {
@@ -67,9 +50,7 @@ export class Lookout {
 
   private scan(): void {
     const ships = this.shipManager.getAllShips();
-    const activeShips = ships.filter(
-      (s) => s.status !== "done" && s.status !== "error",
-    );
+    const activeShips = ships.filter((s) => s.phase !== "done" && s.phase !== "stopped");
 
     if (activeShips.length === 0) return;
 
@@ -77,12 +58,10 @@ export class Lookout {
 
     for (const ship of activeShips) {
       this.checkGateWaitStall(ship, now);
-      this.checkAcceptanceTestStall(ship, now);
       this.checkNoOutputStall(ship, now);
       this.checkExcessiveRetries(ship, now);
     }
 
-    // Clean up stale alert entries for ships that are no longer active
     const activeIds = new Set(activeShips.map((s) => s.id));
     for (const key of this.alertsSent.keys()) {
       const shipId = key.split(":")[0] ?? "";
@@ -100,31 +79,13 @@ export class Lookout {
 
     const waitMin = Math.round(waitMs / 60_000);
     this.emitAlert(ship, "gate-wait-stall", now,
-      `Ship #${ship.issueNumber} (${ship.issueTitle}) has been waiting for gate response (${ship.gateCheck.transition}) for ${waitMin} minutes`,
-    );
-  }
-
-  private checkAcceptanceTestStall(ship: ShipProcess, now: number): void {
-    if (ship.status !== "acceptance-test" || !ship.acceptanceTest) return;
-    if (ship.acceptanceTestApproved) return;
-
-    // Use lastOutputAt as proxy for when acceptance test started waiting
-    const waitSince = ship.lastOutputAt ?? new Date(ship.createdAt).getTime();
-    const waitMs = now - waitSince;
-    if (waitMs < ACCEPTANCE_TEST_STALL_MS) return;
-
-    const waitMin = Math.round(waitMs / 60_000);
-    this.emitAlert(ship, "acceptance-test-stall", now,
-      `Ship #${ship.issueNumber} (${ship.issueTitle}) has been waiting for acceptance test response for ${waitMin} minutes`,
+      `Ship #${ship.issueNumber} (${ship.issueTitle}) has been waiting for gate response (${ship.gateCheck.gatePhase}) for ${waitMin} minutes`,
     );
   }
 
   private checkNoOutputStall(ship: ShipProcess, now: number): void {
-    // Skip compacting ships — they produce no output during compaction
     if (ship.isCompacting) return;
-    // Only check ships with running processes
     if (!this.processManager.isRunning(ship.id)) return;
-    // Need lastOutputAt to detect stall
     if (!ship.lastOutputAt) return;
 
     const silenceMs = now - ship.lastOutputAt;
@@ -132,7 +93,7 @@ export class Lookout {
 
     const silenceMin = Math.round(silenceMs / 60_000);
     this.emitAlert(ship, "no-output-stall", now,
-      `Ship #${ship.issueNumber} (${ship.issueTitle}) has produced no output for ${silenceMin} minutes (phase: ${ship.status})`,
+      `Ship #${ship.issueNumber} (${ship.issueTitle}) has produced no output for ${silenceMin} minutes (phase: ${ship.phase})`,
     );
   }
 
@@ -140,7 +101,7 @@ export class Lookout {
     if (ship.retryCount < EXCESSIVE_RETRY_THRESHOLD) return;
 
     this.emitAlert(ship, "excessive-retries", now,
-      `Ship #${ship.issueNumber} (${ship.issueTitle}) has retried ${ship.retryCount} times (phase: ${ship.status})`,
+      `Ship #${ship.issueNumber} (${ship.issueTitle}) has retried ${ship.retryCount} times (phase: ${ship.phase})`,
     );
   }
 

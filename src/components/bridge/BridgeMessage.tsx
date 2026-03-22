@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { StreamMessage } from "@/types";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/components/chat/ChatMessage";
@@ -8,7 +9,7 @@ interface BridgeMessageProps {
   repeatCount?: number;
 }
 
-export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
+export const BridgeMessage = memo(function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
   const isSystem = message.type === "system";
 
   // System messages with structured metadata — render as compact 1-line card
@@ -17,15 +18,15 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     message.meta &&
     (message.subtype === "gate-check-request" ||
       message.subtype === "pr-review-request" ||
-      message.subtype === "acceptance-test")
+      message.subtype === "lookout-alert")
   ) {
     return (
       <SystemMessageCard subtype={message.subtype} meta={message.meta} />
     );
   }
 
-  // Bridge status (CLI lifecycle) — Bridge-only
-  if (isSystem && message.subtype === "bridge-status") {
+  // Commander status (CLI lifecycle) — Flagship/Dock
+  if (isSystem && message.subtype === "commander-status") {
     const content = message.content ?? "";
     const isErrorStatus = content.includes("Failed");
     const isConnected = content.includes("connected");
@@ -63,22 +64,6 @@ export function BridgeMessage({ message, repeatCount }: BridgeMessageProps) {
     );
   }
 
-  // Acceptance test banner (without structured meta) — Bridge-only
-  if (isSystem && message.subtype === "acceptance-test" && !message.meta) {
-    return (
-      <div className="flex w-full justify-start">
-        <div className="max-w-[90%] rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
-          <span className="text-xs font-semibold text-amber-400 block mb-1">
-            Acceptance Test Required
-          </span>
-          <p className="whitespace-pre-wrap break-words text-amber-200/80 text-xs">
-            {message.content}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   // Delegate to shared ChatMessage for all other types
   return <ChatMessage message={message} repeatCount={repeatCount} />;
-}
+});

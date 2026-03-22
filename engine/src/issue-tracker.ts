@@ -19,11 +19,20 @@ const TYPE_PRIORITY_ORDER: string[] = [
 ];
 
 /**
+ * Count the number of `depends-on/<N>` labels on an issue.
+ */
+function countDependsOn(labels: string[]): number {
+  return labels.filter((l) => l.startsWith("depends-on/")).length;
+}
+
+/**
  * Sort issues by sortie priority:
  * 1. priority/critical issues first (regardless of type)
  * 2. Remaining sorted by type label priority (skill > bug > infra > test > refactor > feature)
- * 3. Issues without a recognized type label come last
- * 4. Stable sort within same tier (preserves original order, typically issue number ascending)
+ * 3. Within the same tier, issues with fewer depends-on/ labels come first
+ *    (they are likely blockers for other issues and should be resolved sooner)
+ * 4. Issues without a recognized type label come last
+ * 5. Stable sort within same tier (preserves original order, typically issue number ascending)
  */
 export function sortIssuesByPriority<T extends Issue>(issues: T[]): T[] {
   return [...issues].sort((a, b) => {
@@ -42,7 +51,10 @@ export function sortIssuesByPriority<T extends Issue>(issues: T[]): T[] {
     const aRank = aTypeIdx === -1 ? TYPE_PRIORITY_ORDER.length : aTypeIdx;
     const bRank = bTypeIdx === -1 ? TYPE_PRIORITY_ORDER.length : bTypeIdx;
 
-    return aRank - bRank;
+    if (aRank !== bRank) return aRank - bRank;
+
+    // Within same type tier, fewer depends-on labels = higher priority
+    return countDependsOn(a.labels) - countDependsOn(b.labels);
   });
 }
 
@@ -53,7 +65,7 @@ export async function getUnblockedTodoIssues(
 
   const results = await Promise.all(
     issues.map(async (issue) => {
-      const blocked = await isBlocked(repo, issue.number, issue.body);
+      const blocked = await isBlocked(repo, issue.number, issue.body, issue.labels);
       return blocked ? null : { ...issue, repo };
     }),
   );
@@ -67,12 +79,19 @@ export async function isBlocked(
   repo: string,
   number: number,
   body?: string,
+  labels?: string[],
 ): Promise<boolean> {
   const subIssues = await github.listSubIssues(repo, number);
   const blockedBySub = subIssues.some((s) => s.state === "open");
   if (blockedBySub) return true;
 
-  // Use provided body to avoid redundant getIssue() API call
+  // Check depends-on/ labels (primary mechanism)
+  if (labels && labels.length > 0) {
+    const openLabelDeps = await github.getOpenDependsOnDeps(repo, labels);
+    if (openLabelDeps.length > 0) return true;
+  }
+
+  // Use provided body to avoid redundant getIssue() API call (legacy fallback)
   const issueBody = body ?? (await github.getIssue(repo, number)).body;
   const openBodyDeps = await github.getOpenBodyDependencies(repo, issueBody);
   return openBodyDeps.length > 0;
@@ -83,7 +102,7 @@ export function getActiveShips(
 ): Map<number, ShipProcess> {
   const active = new Map<number, ShipProcess>();
   for (const [, ship] of ships) {
-    if (ship.status !== "done" && ship.status !== "error") {
+    if (ship.phase !== "done" && !ship.processDead) {
       active.set(ship.issueNumber, ship);
     }
   }

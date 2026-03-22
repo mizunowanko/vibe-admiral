@@ -1,45 +1,84 @@
+import { memo, useState, useMemo, useRef } from "react";
 import { useShipStore } from "@/stores/shipStore";
-import { ShipLogPanel } from "@/components/ship/ShipLogPanel";
+import { ShipDetailModal } from "@/components/ship/ShipDetailModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn, isSafeUrl } from "@/lib/utils";
-import { STATUS_CONFIG } from "@/lib/ship-status";
-import { Square, ExternalLink } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { Square } from "lucide-react";
+import type { Ship } from "@/types";
 
 interface BridgeShipBarProps {
   fleetId: string;
 }
 
-export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
-  const ships = useShipStore((s) => s.ships);
+/**
+ * Build a stable fingerprint for a fleet's ship list.
+ * Only re-renders when ships relevant to this fleet actually change.
+ */
+function buildFleetShipFingerprint(ships: Ship[]): string {
+  return ships
+    .map((s) => `${s.id}:${s.phase}:${s.issueNumber}:${s.issueTitle}:${s.isCompacting}:${s.gateCheck?.status ?? ""}:${s.processDead ?? false}:${s.repo}`)
+    .join("|");
+}
+
+export const BridgeShipBar = memo(function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
   const selectedShipId = useShipStore((s) => s.selectedShipId);
   const selectShip = useShipStore((s) => s.selectShip);
   const stopShip = useShipStore((s) => s.stopShip);
-  const acceptTest = useShipStore((s) => s.acceptTest);
+  const [showCompleted, setShowCompleted] = useState(false);
 
-  const fleetShips = Array.from(ships.values()).filter(
-    (s) => s.fleetId === fleetId,
+  // Use a fingerprint-based selector to avoid re-renders when unrelated ships change.
+  // The selector extracts fleet-specific ships and returns a stable reference
+  // as long as the ships' display-relevant fields haven't changed.
+  const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
+  const allFleetShips = useShipStore((s) => {
+    const filtered = Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId);
+    const fingerprint = buildFleetShipFingerprint(filtered);
+    if (fingerprint === prevRef.current.fingerprint) {
+      return prevRef.current.ships;
+    }
+    prevRef.current = { fingerprint, ships: filtered };
+    return filtered;
+  });
+
+  const fleetShips = useMemo(
+    () =>
+      showCompleted
+        ? allFleetShips
+        : allFleetShips.filter((s) => s.phase !== "done" && s.phase !== "stopped" && !s.processDead),
+    [allFleetShips, showCompleted],
   );
-
-  if (fleetShips.length === 0) return null;
-
-  // Only show log panel for ships belonging to this fleet
-  const showLogPanel =
-    selectedShipId && fleetShips.some((s) => s.id === selectedShipId);
 
   return (
     <div className="w-72 shrink-0 border-l border-border bg-background/50 flex flex-col">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Ships ({fleetShips.length})
         </span>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={(e) => setShowCompleted(e.target.checked)}
+            className="h-3 w-3 rounded border-border accent-primary"
+          />
+          <span className="text-[10px] text-muted-foreground">Show completed</span>
+        </label>
       </div>
       <ScrollArea className="flex-1">
         <div className="grid grid-cols-1 gap-2 p-3">
+          {fleetShips.length === 0 && (
+            <p className="text-center text-xs text-muted-foreground py-4">
+              No active ships
+            </p>
+          )}
           {fleetShips.map((ship) => {
-            const config = STATUS_CONFIG[ship.status];
-            const isActive = ship.status !== "done" && ship.status !== "error";
+            const config = ship.processDead
+              ? PROCESS_DEAD_CONFIG
+              : STATUS_CONFIG[ship.phase];
+            const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
             const isSelected = ship.id === selectedShipId;
 
             return (
@@ -48,8 +87,6 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                 onClick={() => selectShip(isSelected ? null : ship.id)}
                 className={cn(
                   "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
-                  ship.status === "acceptance-test" &&
-                    "border-amber-500/50 ring-1 ring-amber-500/20",
                   ship.gateCheck?.status === "pending" &&
                     "border-sky-500/50 ring-1 ring-sky-500/20",
                   isSelected &&
@@ -100,52 +137,13 @@ export function BridgeShipBar({ fleetId }: BridgeShipBarProps) {
                 <p className="truncate text-muted-foreground mt-0.5">
                   {ship.repo}
                 </p>
-
-                {/* Acceptance test action */}
-                {ship.status === "acceptance-test" && ship.acceptanceTest && (
-                  <div className="mt-1.5 pt-1.5 border-t border-border flex items-center gap-2">
-                    {isSafeUrl(ship.acceptanceTest.url) ? (
-                      <a
-                        href={ship.acceptanceTest.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-primary hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <ExternalLink className="h-2.5 w-2.5" />
-                        Test
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {ship.acceptanceTest.url}
-                      </span>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-5 text-[10px] px-1.5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        acceptTest(ship.id);
-                      }}
-                    >
-                      Accept
-                    </Button>
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
       </ScrollArea>
 
-      {/* Ship Log Panel */}
-      {showLogPanel && (
-        <ShipLogPanel
-          shipId={selectedShipId!}
-          onClose={() => selectShip(null)}
-        />
-      )}
+      <ShipDetailModal />
     </div>
   );
-}
+});

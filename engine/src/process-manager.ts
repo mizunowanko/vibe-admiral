@@ -43,6 +43,7 @@ export class ProcessManager extends EventEmitter {
     issueNumber: number,
     extraPrompt?: string,
     skill?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // See .claude/rules/cli-subprocess.md for full rationale.
     //
@@ -53,7 +54,7 @@ export class ProcessManager extends EventEmitter {
     //   EnterPlanMode/ExitPlanMode — in -p mode, plan mode causes CLI
     //     to exit after ExitPlanMode without performing implementation.
     //   AskUserQuestion — Ship runs non-interactively (stdin ignored);
-    //     user interaction uses file message board instead.
+    //     user interaction uses DB message board instead.
     const skillCmd = skill ?? "/implement";
     const args = [
       "-p",
@@ -80,6 +81,8 @@ export class ProcessManager extends EventEmitter {
         env: {
           ...process.env,
           VIBE_ADMIRAL: "true",
+          VIBE_ADMIRAL_SHIP_ID: id,
+          ...extraEnv,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -90,7 +93,57 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  launchBridge(
+  /**
+   * Launch an Escort process for gate review (plan-review, code-review, etc.).
+   * Escorts are non-interactive (-p mode) like Ships, but run a gate skill
+   * instead of /implement. Launched by EscortManager when Engine detects
+   * a gate phase.
+   */
+  launchEscort(
+    id: string,
+    worktreePath: string,
+    skill: string,
+    issueNumber: number,
+    extraEnv?: Record<string, string>,
+  ): ChildProcess {
+    // Same stdio constraints as sortie() — see .claude/rules/cli-subprocess.md.
+    const args = [
+      "-p",
+      `/${skill} ${issueNumber}`,
+      "--output-format",
+      "stream-json",
+      "--dangerously-skip-permissions",
+      "--disallowedTools",
+      "EnterPlanMode,ExitPlanMode,AskUserQuestion",
+      "--max-turns",
+      "100",
+      "--verbose",
+    ];
+
+    const proc = spawn(
+      "claude",
+      args,
+      {
+        cwd: worktreePath,
+        env: {
+          ...process.env,
+          VIBE_ADMIRAL: "true",
+          ...extraEnv,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    const logFilePath = join(worktreePath, ".claude", "escort-log.jsonl");
+    this.setupProcess(id, proc, logFilePath);
+    return proc;
+  }
+
+  /**
+   * Launch an interactive commander session (Dock or Flagship).
+   * Both roles use the same CLI config — they differ only in system prompt and skills.
+   */
+  launchCommander(
     id: string,
     fleetPath: string,
     additionalDirs: string[],
@@ -102,7 +155,7 @@ export class ProcessManager extends EventEmitter {
     // MUST write to stdin immediately after spawn — Bun blocks stdout
     // when stdin pipe is idle, creating a deadlock if you wait for init.
     //
-    // allowedTools: Bridge is read-only (no Write/Edit). AskUserQuestion
+    // allowedTools: Commanders are read-only (no Write/Edit). AskUserQuestion
     // is allowed — Engine intercepts it and forwards to frontend.
     const args = [
       "-p",
@@ -127,6 +180,16 @@ export class ProcessManager extends EventEmitter {
 
     this.setupProcess(id, proc);
     return proc;
+  }
+
+  /** @deprecated Use launchCommander instead. */
+  launchBridge(
+    id: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+  ): ChildProcess {
+    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt);
   }
 
   sendMessage(
@@ -185,18 +248,17 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  resumeBridge(
+  /**
+   * Resume an interactive commander session (Dock or Flagship).
+   * --resume without -p: keeps the session interactive (stdin-driven).
+   */
+  resumeCommander(
     id: string,
     sessionId: string,
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
   ): ChildProcess {
-    // Resume a Bridge session with interactive stdin.
-    // Combines --resume with Bridge's interactive stdio config.
-    // --resume without -p: keeps the session interactive (stdin-driven).
-    // -p "" would put CLI into non-interactive prompt mode, causing it to
-    // process the empty prompt and exit instead of waiting for stdin.
     const args = [
       "--resume",
       sessionId,
@@ -222,11 +284,23 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
+  /** @deprecated Use resumeCommander instead. */
+  resumeBridge(
+    id: string,
+    sessionId: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+  ): ChildProcess {
+    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt);
+  }
+
   resumeSession(
     id: string,
     sessionId: string,
     message: string,
     cwd: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // Same stdio/disallowedTools constraints as sortie().
     // See .claude/rules/cli-subprocess.md for full rationale.
@@ -249,6 +323,8 @@ export class ProcessManager extends EventEmitter {
         env: {
           ...process.env,
           VIBE_ADMIRAL: "true",
+          VIBE_ADMIRAL_SHIP_ID: id,
+          ...extraEnv,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

@@ -2,11 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { StateSync, ACTIVE_STATUS_LABELS } from "../state-sync.js";
 
 // Mock external modules
-vi.mock("../github.js", () => ({
-  getIssue: vi.fn(),
-  updateLabels: vi.fn(),
-  listIssues: vi.fn(),
-}));
+vi.mock("../github.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../github.js")>();
+  return {
+    ...actual,
+    getIssue: vi.fn(),
+    updateLabels: vi.fn(),
+    listIssues: vi.fn(),
+  };
+});
 
 vi.mock("../worktree.js", () => ({
   getRepoRoot: vi.fn(),
@@ -30,12 +34,14 @@ const mockListFeatureWorktrees = vi.mocked(worktree.listFeatureWorktrees);
 type MockShipManager = {
   getShipByIssue: ReturnType<typeof vi.fn>;
   getShip: ReturnType<typeof vi.fn>;
-  updateStatus: ReturnType<typeof vi.fn>;
+  updatePhase: ReturnType<typeof vi.fn>;
+  notifyProcessDead: ReturnType<typeof vi.fn>;
   getActiveShipIssueNumbers: ReturnType<typeof vi.fn>;
   purgeOrphanShips: ReturnType<typeof vi.fn>;
   restoreFromDisk: ReturnType<typeof vi.fn>;
   hasRunningProcess: ReturnType<typeof vi.fn>;
   getAllShips: ReturnType<typeof vi.fn>;
+  setIsCompacting: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -64,17 +70,15 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: REPO,
     issueNumber: 42,
     issueTitle: "Test",
-    status: "implementing",
+    phase: "implementing",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/repo/.worktrees/feature/42-test",
     sessionId: null,
     prUrl: null,
     prReviewStatus: null,
-    acceptanceTest: null,
-    acceptanceTestApproved: false,
     gateCheck: null,
-    errorType: null,
+    qaRequired: true,
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
@@ -83,13 +87,15 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
 }
 
 describe("ACTIVE_STATUS_LABELS", () => {
-  it("contains expected labels", () => {
-    expect(ACTIVE_STATUS_LABELS.has("status/investigating")).toBe(true);
-    expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(true);
-    expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(true);
+  it("contains only status/sortied", () => {
+    expect(ACTIVE_STATUS_LABELS.has("status/sortied")).toBe(true);
+    expect(ACTIVE_STATUS_LABELS.size).toBe(1);
   });
 
-  it("excludes status/todo and status/blocked", () => {
+  it("excludes legacy per-phase labels", () => {
+    expect(ACTIVE_STATUS_LABELS.has("status/planning")).toBe(false);
+    expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(false);
+    expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(false);
     expect(ACTIVE_STATUS_LABELS.has("status/todo")).toBe(false);
     expect(ACTIVE_STATUS_LABELS.has("status/blocked")).toBe(false);
   });
@@ -106,12 +112,14 @@ describe("StateSync", () => {
     mockShipManager = {
       getShipByIssue: vi.fn(),
       getShip: vi.fn(),
-      updateStatus: vi.fn(),
+      updatePhase: vi.fn(),
+      notifyProcessDead: vi.fn(),
       getActiveShipIssueNumbers: vi.fn().mockReturnValue([]),
       purgeOrphanShips: vi.fn(),
       restoreFromDisk: vi.fn().mockResolvedValue(0),
       hasRunningProcess: vi.fn().mockReturnValue(false),
       getAllShips: vi.fn().mockReturnValue([]),
+      setIsCompacting: vi.fn(),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
@@ -142,9 +150,9 @@ describe("StateSync", () => {
       expect(result.reason).toContain("already closed");
     });
 
-    it("rejects if issue already has active status (doing)", async () => {
+    it("rejects if issue already has active status (sortied)", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(undefined);
-      mockStatusManager.getStatus.mockResolvedValue("doing");
+      mockStatusManager.getStatus.mockResolvedValue("sortied");
       const result = await stateSync.sortieGuard(REPO, 42);
       expect(result.ok).toBe(false);
       expect(result.reason).toContain("already has an active status label");
@@ -206,7 +214,7 @@ describe("StateSync", () => {
   });
 
   describe("onProcessExit", () => {
-    it("handles successful exit: updates status, removes worktree, marks done", async () => {
+    it("handles successful exit: updates phase to done, removes worktree, marks done", async () => {
       const ship = makeShip();
       mockShipManager.getShip.mockReturnValue(ship);
       mockGetRepoRoot.mockResolvedValue("/repo");
@@ -215,7 +223,7 @@ describe("StateSync", () => {
 
       await stateSync.onProcessExit("ship-1", true);
 
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith(
         "ship-1",
         "done",
       );
@@ -227,7 +235,7 @@ describe("StateSync", () => {
       const ship = makeShip();
       mockShipManager.getShip.mockReturnValue(ship);
       mockGetIssue.mockResolvedValue(
-        makeIssue({ state: "closed", labels: ["status/merging"] }),
+        makeIssue({ state: "closed", labels: ["status/sortied"] }),
       );
       mockGetRepoRoot.mockResolvedValue("/repo");
       mockWorktreeRemove.mockResolvedValue(undefined);
@@ -235,13 +243,9 @@ describe("StateSync", () => {
 
       await stateSync.onProcessExit("ship-1", false);
 
-      // Should be updated to error first, then rescued to done
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
-        "ship-1",
-        "error",
-        "Process exited",
-      );
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
+      // Process dead notified first, then rescued to done
+      expect(mockShipManager.notifyProcessDead).toHaveBeenCalledWith("ship-1");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith(
         "ship-1",
         "done",
       );
@@ -255,11 +259,8 @@ describe("StateSync", () => {
 
       await stateSync.onProcessExit("ship-1", false);
 
-      expect(mockShipManager.updateStatus).toHaveBeenCalledWith(
-        "ship-1",
-        "error",
-        "Process exited",
-      );
+      // Process dead notified (no "error" phase — derived state)
+      expect(mockShipManager.notifyProcessDead).toHaveBeenCalledWith("ship-1");
       expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 42, 3);
     });
 
@@ -271,13 +272,94 @@ describe("StateSync", () => {
       mockStatusManager.markDone.mockResolvedValue(undefined);
 
       await stateSync.onProcessExit("ship-1", true);
-      expect(ship.isCompacting).toBe(false);
+      expect(mockShipManager.setIsCompacting).toHaveBeenCalledWith("ship-1", false);
     });
 
     it("is a no-op when ship not found", async () => {
       mockShipManager.getShip.mockReturnValue(undefined);
       await stateSync.onProcessExit("unknown", true);
-      expect(mockShipManager.updateStatus).not.toHaveBeenCalled();
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("auditDependencies", () => {
+    it("removes resolved depends-on label from dependent issues", async () => {
+      mockListIssues.mockResolvedValue([
+        makeIssue({
+          number: 50,
+          labels: ["depends-on/42", "status/blocked", "type/feature"],
+        }),
+      ]);
+      mockUpdateLabels.mockResolvedValue(undefined);
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      // Should remove the depends-on/42 label
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
+        remove: "depends-on/42",
+      });
+    });
+
+    it("transitions status/blocked → status/todo when all deps resolved", async () => {
+      mockListIssues.mockResolvedValue([
+        makeIssue({
+          number: 50,
+          labels: ["depends-on/42", "status/blocked", "type/feature"],
+        }),
+      ]);
+      mockUpdateLabels.mockResolvedValue(undefined);
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      // Should transition blocked → todo
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
+        remove: "status/blocked",
+        add: "status/todo",
+      });
+    });
+
+    it("does not unblock if other depends-on labels still reference open issues", async () => {
+      mockListIssues.mockResolvedValue([
+        makeIssue({
+          number: 50,
+          labels: [
+            "depends-on/42",
+            "depends-on/99",
+            "status/blocked",
+            "type/feature",
+          ],
+        }),
+      ]);
+      mockUpdateLabels.mockResolvedValue(undefined);
+      // depends-on/99 still points to an open issue
+      mockGetIssue.mockResolvedValue(makeIssue({ number: 99, state: "open" }));
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      // Should remove depends-on/42 label
+      expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
+        remove: "depends-on/42",
+      });
+      // Should NOT transition to status/todo because depends-on/99 is still open
+      expect(mockUpdateLabels).not.toHaveBeenCalledWith(REPO, 50, {
+        remove: "status/blocked",
+        add: "status/todo",
+      });
+    });
+
+    it("does nothing when no issues have the label", async () => {
+      mockListIssues.mockResolvedValue([]);
+
+      await stateSync.auditDependencies(REPO, 42);
+
+      expect(mockUpdateLabels).not.toHaveBeenCalled();
+    });
+
+    it("handles listIssues error gracefully (label may not exist)", async () => {
+      mockListIssues.mockRejectedValue(new Error("label not found"));
+
+      // Should not throw
+      await stateSync.auditDependencies(REPO, 42);
     });
   });
 
@@ -289,8 +371,8 @@ describe("StateSync", () => {
 
     it("rolls back orphan status labels", async () => {
       mockListIssues.mockImplementation(async (_repo, label) => {
-        if (label === "status/implementing") {
-          return [makeIssue({ number: 99, labels: ["status/implementing"] })];
+        if (label === "status/sortied") {
+          return [makeIssue({ number: 99, labels: ["status/sortied"] })];
         }
         return [];
       });
@@ -305,13 +387,31 @@ describe("StateSync", () => {
       expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 99, 3);
     });
 
+    it("rolls back legacy per-phase labels from pre-refactoring", async () => {
+      mockListIssues.mockImplementation(async (_repo, label) => {
+        if (label === "status/implementing") {
+          return [makeIssue({ number: 88, labels: ["status/implementing"] })];
+        }
+        return [];
+      });
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockListFeatureWorktrees.mockResolvedValue([]);
+      mockStatusManager.rollback.mockResolvedValue(undefined);
+
+      await stateSync.reconcileOnStartup([
+        { remote: REPO, localPath: "/repo" },
+      ]);
+
+      expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 88, 3);
+    });
+
     it("does not roll back labels for active ships", async () => {
       mockShipManager.getActiveShipIssueNumbers.mockReturnValue([
         { repo: REPO, issueNumber: 42 },
       ]);
       mockListIssues.mockImplementation(async (_repo, label) => {
-        if (label === "status/implementing") {
-          return [makeIssue({ number: 42, labels: ["status/implementing"] })];
+        if (label === "status/sortied") {
+          return [makeIssue({ number: 42, labels: ["status/sortied"] })];
         }
         return [];
       });

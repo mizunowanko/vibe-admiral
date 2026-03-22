@@ -1,9 +1,9 @@
 import type { Ship } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn, isSafeUrl } from "@/lib/utils";
-import { STATUS_CONFIG } from "@/lib/ship-status";
-import { Square, ExternalLink, RotateCcw } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { Square, RotateCcw } from "lucide-react";
 
 interface ShipCardProps {
   ship: Ship;
@@ -13,17 +13,16 @@ interface ShipCardProps {
 }
 
 export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
-  const config = ship.nothingToDo
-    ? { label: "Nothing to do", color: "bg-slate-500/20 text-slate-400", textColor: "text-slate-400" }
-    : STATUS_CONFIG[ship.status];
-  const isActive = ship.status !== "done" && ship.status !== "error";
+  const config = ship.processDead
+    ? PROCESS_DEAD_CONFIG
+    : STATUS_CONFIG[ship.phase];
+  const isActive = ship.phase !== "done" && ship.phase !== "stopped" && !ship.processDead;
 
   return (
     <div
       onClick={onSelect}
       className={cn(
         "cursor-pointer rounded-lg border border-border bg-card p-4 transition-all hover:border-primary/50 hover:shadow-md",
-        ship.status === "acceptance-test" && ship.gateCheck?.gateType !== "auto-approve" && "border-amber-500/50 ring-1 ring-amber-500/20",
         ship.gateCheck?.status === "pending" && "border-sky-500/50 ring-1 ring-sky-500/20",
       )}
     >
@@ -65,7 +64,7 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
             <Square className="h-3 w-3" />
           </Button>
         )}
-        {ship.status === "error" && onRetry && (
+        {ship.processDead && onRetry && (
           <Button
             variant="ghost"
             size="sm"
@@ -89,34 +88,12 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
         {ship.repo}
       </p>
 
-      {/* Acceptance Test URL — hidden when gate is auto-approve */}
-      {ship.acceptanceTest && ship.status === "acceptance-test" && ship.gateCheck?.gateType !== "auto-approve" && (
-        <div className="mt-2 pt-2 border-t border-border">
-          {isSafeUrl(ship.acceptanceTest.url) ? (
-            <a
-              href={ship.acceptanceTest.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="text-xs text-primary hover:underline inline-flex items-center gap-1"
-            >
-              <ExternalLink className="h-3 w-3" />
-              {ship.acceptanceTest.url}
-            </a>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              {ship.acceptanceTest.url}
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Gate Check Status */}
       {ship.gateCheck && (
         <div className="mt-2 pt-2 border-t border-border">
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-muted-foreground">
-              {ship.gateCheck.transition}
+              {ship.gateCheck.gatePhase}
             </span>
             {ship.gateCheck.status === "pending" && (
               <span className="text-[10px] text-sky-400">
@@ -135,17 +112,8 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
         </div>
       )}
 
-      {/* Nothing to do reason */}
-      {ship.nothingToDo && ship.nothingToDoReason && (
-        <div className="mt-2 pt-2 border-t border-border">
-          <p className="text-[10px] text-muted-foreground truncate">
-            {ship.nothingToDoReason}
-          </p>
-        </div>
-      )}
-
       {/* PR URL + Review Status */}
-      {ship.prUrl && (ship.status === "reviewing" || ship.status === "done") && (
+      {ship.prUrl && (
         <div className="mt-2 pt-2 border-t border-border flex items-center gap-2">
           <a
             href={ship.prUrl}
@@ -154,7 +122,6 @@ export function ShipCard({ ship, onSelect, onStop, onRetry }: ShipCardProps) {
             onClick={(e) => e.stopPropagation()}
             className="text-xs text-primary hover:underline inline-flex items-center gap-1"
           >
-            <ExternalLink className="h-3 w-3" />
             PR
           </a>
           {ship.prReviewStatus === "pending" && (
