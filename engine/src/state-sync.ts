@@ -35,7 +35,7 @@ export class StateSync {
       };
     }
 
-    // 2. Check issue state: must be open and in "todo" status
+    // 2. Check issue state: must be open and in "ready" status
     try {
       const status = await this.statusManager.getStatus(repo, issueNumber);
       if (status === "done") {
@@ -182,7 +182,7 @@ export class StateSync {
           );
         }
       } else {
-        // Genuinely failed: rollback sortied→todo
+        // Genuinely failed: rollback sortied→ready
         await this.rollbackLabel(ship.repo, ship.issueNumber);
       }
     }
@@ -262,13 +262,13 @@ export class StateSync {
           }
         }
 
-        if (allResolved && issue.labels.includes("status/blocked")) {
+        if (allResolved && issue.labels.includes("status/mooring")) {
           console.log(
-            `[state-sync] All dependencies resolved for #${issue.number} — unblocking (status/blocked → status/todo)`,
+            `[state-sync] All dependencies resolved for #${issue.number} — unblocking (status/mooring → status/ready)`,
           );
           await github.updateLabels(repo, issue.number, {
-            remove: "status/blocked",
-            add: "status/todo",
+            remove: "status/mooring",
+            add: "status/ready",
           });
         }
       } catch (err) {
@@ -303,7 +303,7 @@ export class StateSync {
           for (const issue of labeledIssues) {
             if (!isActive(issue.number)) {
               console.warn(
-                `[state-sync] Orphan "${label}" label on #${issue.number} — rolling back to "status/todo"`,
+                `[state-sync] Orphan "${label}" label on #${issue.number} — rolling back to "status/ready"`,
               );
               await this.rollbackLabel(repo.remote!, issue.number);
             }
@@ -319,15 +319,15 @@ export class StateSync {
         }
       }
 
-      // Also clean up legacy per-phase labels from pre-refactoring
-      const legacyLabels = ["status/planning", "status/implementing", "status/acceptance-test", "status/merging"];
+      // Also clean up legacy labels from pre-refactoring
+      const legacyLabels = ["status/todo", "status/blocked", "status/planning", "status/implementing", "status/acceptance-test", "status/merging"];
       for (const label of legacyLabels) {
         try {
           const labeledIssues = await github.listIssues(repo.remote!, label);
           for (const issue of labeledIssues) {
             if (!isActive(issue.number)) {
               console.warn(
-                `[state-sync] Legacy label "${label}" on #${issue.number} — rolling back to "status/todo"`,
+                `[state-sync] Legacy label "${label}" on #${issue.number} — rolling back to "status/ready"`,
               );
               await this.rollbackLabel(repo.remote!, issue.number);
             }

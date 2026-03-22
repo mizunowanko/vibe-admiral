@@ -11,14 +11,14 @@ argument-hint: [issue-numbers]
 
 ## Autonomous Sortie Flow
 
-1. Run `gh issue list --label status/todo` to get ready issues
+1. Run `gh issue list --label status/ready` to get ready issues
 2. For each issue, check `depends-on/<N>` labels to identify dependencies. If an issue has `depends-on/` labels pointing to open issues, it is blocked
 3. Read body AND comments (`gh issue view <number> --json number,title,body,labels,state,comments`) for additional context: sub-issues, "## Dependencies" section (legacy), priority overrides, and human decisions
 4. **Issue Clarity Check** — Assess each sortie candidate (see below)
-5. Identify which issues are UNBLOCKED, labeled "status/todo", and sufficiently clear
+5. Identify which issues are UNBLOCKED, labeled "status/ready", and sufficiently clear
 6. Apply Sortie Priority Rules to determine the recommended order
 7. Explain analysis to the human (which issues are ready, which are blocked and why, which need clarification, and the proposed priority order)
-8. Launch UNBLOCKED + "status/todo" + **clear** issues via `sortie` admiral-request
+8. Launch UNBLOCKED + "status/ready" + **clear** issues via `sortie` admiral-request
 9. After sortie, monitor with `ship-status` when asked
 
 ## Issue Clarity Check
@@ -62,19 +62,19 @@ Evaluate the issue body (and comments) for:
 - "Add a dark mode toggle to Settings page. Store preference in localStorage. Default to system preference."
 - "Fix: clicking 'Save' on the Fleet config page causes a 500 error when `maxConcurrentSorties` is empty. Expected: validation prevents empty submission."
 
-> **NOTE**: The Engine automatically removes `depends-on/<N>` labels and transitions `status/blocked` → `status/todo` when a dependency issue is closed.
+> **NOTE**: The Engine automatically removes `depends-on/<N>` labels and transitions `status/mooring` → `status/ready` when a dependency issue is closed.
 
 ## Label System
 
 ### Status labels (`status/` prefix) — Engine-managed, mutually exclusive
 | Label | Meaning |
 |-------|---------|
-| `status/todo` | Ready for sortie |
+| `status/ready` | Ready for sortie |
 | `status/planning` | Planning phase |
 | `status/implementing` | Implementation in progress |
 | `status/acceptance-test` | Acceptance testing |
 | `status/merging` | Merge in progress |
-| `status/blocked` | Blocked by dependencies |
+| `status/mooring` | Blocked by dependencies |
 
 ### Type labels (`type/` prefix) — set by Bridge or human
 | Priority | Label | Commit prefix |
@@ -104,10 +104,10 @@ Issues with `priority/critical` override base priority and sort first. Only huma
 ### Dependency Constraint
 - Issues with `depends-on/<N>` pointing to open issues are blocked and MUST NOT be sortied
 - Within same tier, fewer `depends-on/` labels come first (they unblock others)
-- `status/blocked` issues are excluded from candidates
+- `status/mooring` issues are excluded from candidates
 
 ### Decision Flow
-1. Collect all `status/todo` issues
+1. Collect all `status/ready` issues
 2. Filter out issues with `depends-on/<N>` pointing to open issues
 3. Separate `priority/critical` issues (these come first)
 4. Sort remaining by base type priority

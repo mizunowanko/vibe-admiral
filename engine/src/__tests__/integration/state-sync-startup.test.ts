@@ -112,9 +112,9 @@ describe("StateSync startup reconciliation (integration)", () => {
   });
 
   describe("sortieGuard", () => {
-    it("allows sortie when no duplicate ship exists and issue is in todo status", async () => {
+    it("allows sortie when no duplicate ship exists and issue is in ready status", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(undefined);
-      mockStatusManager.getStatus.mockResolvedValue("todo");
+      mockStatusManager.getStatus.mockResolvedValue("ready");
 
       const result = await stateSync.sortieGuard("owner/repo", 42);
       expect(result.ok).toBe(true);
@@ -148,9 +148,9 @@ describe("StateSync startup reconciliation (integration)", () => {
       expect(result.reason).toContain("already closed");
     });
 
-    it("allows sortie when issue has todo status", async () => {
+    it("allows sortie when issue has ready status", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(undefined);
-      mockStatusManager.getStatus.mockResolvedValue("todo");
+      mockStatusManager.getStatus.mockResolvedValue("ready");
 
       const result = await stateSync.sortieGuard("owner/repo", 42);
       expect(result.ok).toBe(true);

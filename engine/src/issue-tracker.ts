@@ -61,7 +61,7 @@ export function sortIssuesByPriority<T extends Issue>(issues: T[]): T[] {
 export async function getUnblockedTodoIssues(
   repo: string,
 ): Promise<UnblockedIssue[]> {
-  const issues = await github.listIssues(repo, "status/todo");
+  const issues = await github.listIssues(repo, "status/ready");
 
   const results = await Promise.all(
     issues.map(async (issue) => {
