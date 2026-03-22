@@ -110,6 +110,16 @@ export function useEngine() {
           break;
         }
 
+        case "escort:stream": {
+          const escortData = msg.data as {
+            id: string;
+            escortId: string;
+            message: StreamMessage;
+          };
+          addShipLog(escortData.id, escortData.message);
+          break;
+        }
+
         case "ship:history": {
           const historyData = msg.data as {
             id: string;

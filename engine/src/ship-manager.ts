@@ -645,24 +645,45 @@ export class ShipManager {
     const ship = this.getShip(shipId);
     if (!ship) return [];
 
-    const logPath = join(ship.worktreePath, ".claude", "ship-log.jsonl");
+    const claudeDir = join(ship.worktreePath, ".claude");
+    const shipLogPath = join(claudeDir, "ship-log.jsonl");
+    const escortLogPath = join(claudeDir, "escort-log.jsonl");
     const maxLines = Math.min(limit ?? ShipManager.MAX_SHIP_LOGS, ShipManager.MAX_SHIP_LOGS);
 
-    try {
-      const content = await readFile(logPath, "utf-8");
-      const lines = content.trimEnd().split("\n").filter(Boolean);
-      const messages: StreamMessage[] = [];
-      for (const line of lines) {
-        try {
-          messages.push(JSON.parse(line) as StreamMessage);
-        } catch {
-          // Skip malformed lines
+    const parseJsonl = async (path: string): Promise<StreamMessage[]> => {
+      try {
+        const content = await readFile(path, "utf-8");
+        const lines = content.trimEnd().split("\n").filter(Boolean);
+        const msgs: StreamMessage[] = [];
+        for (const line of lines) {
+          try {
+            msgs.push(JSON.parse(line) as StreamMessage);
+          } catch {
+            // Skip malformed lines
+          }
         }
+        return msgs;
+      } catch {
+        return [];
       }
-      return messages.slice(-maxLines);
-    } catch {
-      return [];
+    };
+
+    const [shipMsgs, escortMsgs] = await Promise.all([
+      parseJsonl(shipLogPath),
+      parseJsonl(escortLogPath),
+    ]);
+
+    // Mark escort messages with escort-log metadata for visual distinction
+    for (const msg of escortMsgs) {
+      if (msg.type === "assistant") {
+        msg.meta = { ...msg.meta, category: "escort-log" };
+      }
     }
+
+    // Merge and sort by timestamp, then take the last N messages
+    const all = [...shipMsgs, ...escortMsgs];
+    all.sort((a, b) => ((a.timestamp as number) ?? 0) - ((b.timestamp as number) ?? 0));
+    return all.slice(-maxLines);
   }
 
   /**

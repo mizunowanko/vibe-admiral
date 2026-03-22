@@ -249,6 +249,39 @@ export const ChatMessage = memo(function ChatMessage({ message, repeatCount, con
     );
   }
 
+  // Escort log — Escort process messages displayed left-aligned with purple styling
+  if (message.meta?.category === "escort-log") {
+    return (
+      <div className="flex w-full justify-start">
+        <div
+          className={cn(
+            "max-w-[90%] rounded-lg px-3 py-2 text-sm border",
+            "border-violet-500/20 bg-violet-500/5",
+          )}
+        >
+          <span className="text-xs font-mono block mb-1 text-violet-400/70">
+            [Escort]
+          </span>
+          <div className="bridge-markdown break-words text-card-foreground">
+            <ReactMarkdown
+              remarkPlugins={remarkPlugins}
+              components={MARKDOWN_COMPONENTS}
+              disallowedElements={["img"]}
+              unwrapDisallowed
+            >
+              {message.content ?? ""}
+            </ReactMarkdown>
+          </div>
+          {message.timestamp && (
+            <span className="block text-[10px] mt-1 text-violet-400/50">
+              {formatTime(message.timestamp)}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Fall-through for unhandled system subtypes — return null so caller can handle
   if (isSystem) {
     return null;

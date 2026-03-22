@@ -103,7 +103,8 @@ export type StreamMessageSubtype =
   | "gate-check-request"
   | "lookout-alert"
   | "task-notification"
-  | "dispatch-log";
+  | "dispatch-log"
+  | "escort-log";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -213,6 +214,16 @@ export type ServerMessage =
       data: { fleetId: string };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
+  | {
+      type: "escort:stream";
+      data: {
+        id: string;
+        escortId: string;
+        fleetId?: string;
+        issueNumber?: number;
+        message: StreamMessage;
+      };
+    }
   | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
   | {
       type: "ship:status";
