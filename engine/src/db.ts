@@ -168,8 +168,14 @@ export class FleetDatabase {
 
     const repoId = this.ensureRepo(owner, name);
 
-    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict
-    this.db.prepare(`DELETE FROM ships WHERE repo_id = ? AND issue_number = ?`).run(repoId, ship.issueNumber);
+    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict.
+    // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
+    const existingShip = this.db.prepare(
+      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ?",
+    ).get(repoId, ship.issueNumber) as { id: string } | undefined;
+    if (existingShip) {
+      this.deleteShip(existingShip.id);
+    }
 
     this.db.prepare(`
       INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
@@ -288,6 +294,21 @@ export class FleetDatabase {
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
       WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'stopped')
+    `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
+
+    return row ? this.rowToShipProcess(row) : undefined;
+  }
+
+  /** Get a ship by repo and issue number (any phase, including done/stopped). */
+  getShipByIssueAnyPhase(repo: string, issueNumber: number): ShipProcess | undefined {
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) return undefined;
+
+    const row = this.db.prepare(`
+      SELECT s.*, r.owner, r.name
+      FROM ships s
+      JOIN repos r ON s.repo_id = r.id
+      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ?
     `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
 
     return row ? this.rowToShipProcess(row) : undefined;
