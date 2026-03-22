@@ -1,7 +1,6 @@
 import type { Ship } from "@/types";
 
-const ENGINE_PORT = import.meta.env.VITE_ENGINE_PORT ?? "9721";
-const BASE_URL = `http://localhost:${ENGINE_PORT}/api`;
+const BASE_URL = "/api";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
