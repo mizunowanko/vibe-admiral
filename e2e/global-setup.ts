@@ -2,8 +2,11 @@ import { type FullConfig } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import net from "node:net";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface E2EContext {
   engineProcess: ChildProcess;
@@ -50,8 +53,14 @@ function waitForPort(port: number, timeoutMs = 30_000): Promise<void> {
 }
 
 export default async function globalSetup(config: FullConfig) {
-  const enginePort = await getRandomPort();
-  const vitePort = await getRandomPort();
+  // Respect pre-set ports from env (the Playwright config reads these at
+  // load time, so they must stay consistent between config and setup).
+  const enginePort = process.env.E2E_ENGINE_PORT
+    ? parseInt(process.env.E2E_ENGINE_PORT, 10)
+    : await getRandomPort();
+  const vitePort = process.env.E2E_VITE_PORT
+    ? parseInt(process.env.E2E_VITE_PORT, 10)
+    : await getRandomPort();
   const admiralHome = await mkdtemp(join(tmpdir(), "vibe-admiral-test-"));
 
   // Store context for teardown and test access
@@ -63,6 +72,9 @@ export default async function globalSetup(config: FullConfig) {
   };
 
   // Start the real Engine
+  // Use __dirname to resolve the project root reliably, since
+  // config.rootDir may not match when running from a worktree.
+  const projectRoot = resolve(__dirname, "..");
   const engineProcess = spawn("npx", ["tsx", "engine/src/index.ts"], {
     env: {
       ...process.env,
@@ -70,7 +82,7 @@ export default async function globalSetup(config: FullConfig) {
       ADMIRAL_HOME: admiralHome,
     },
     stdio: ["ignore", "pipe", "pipe"],
-    cwd: config.rootDir,
+    cwd: projectRoot,
   });
 
   engineProcess.stderr?.on("data", (chunk: Buffer) => {
