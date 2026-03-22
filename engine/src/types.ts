@@ -191,7 +191,7 @@ export interface StreamMessage {
 }
 
 // === Issue Status (GitHub label-based) ===
-export type IssueStatus = "todo" | "sortied" | "done";
+export type IssueStatus = "ready" | "sortied" | "done";
 
 // === Label Operations ===
 export interface LabelOps {

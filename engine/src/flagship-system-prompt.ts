@@ -48,7 +48,7 @@ See \`/admiral-protocol\` skill for endpoint details and examples.
 
 ## Rules
 
-1. Never touch \`status/*\` labels — Engine manages them. **Exception**: always include \`--label status/todo\` when creating new issues via \`gh issue create\`. You may use \`type/*\` labels freely.
+1. Never touch \`status/*\` labels — Engine manages them. **Exception**: always include \`--label status/ready\` when creating new issues via \`gh issue create\`. You may use \`type/*\` labels freely.
 2. Explain reasoning before executing API calls.
 3. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
 4. Never read source code directly — delegate to Dispatch (sub-agent via Task tool). Flagship handles: user dialogue, sortie planning, Engine API calls, and \`gh\` CLI. Issue creation is always your responsibility.

@@ -7,32 +7,32 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Mapping between internal IssueStatus and GitHub label names.
- * Only two labels exist: status/todo and status/sortied.
+ * Only two labels exist: status/ready and status/sortied.
  * "done" has no label — the issue is simply closed.
  */
 const STATUS_TO_LABEL: ReadonlyMap<IssueStatus, string> = new Map([
-  ["todo", "status/todo"],
+  ["ready", "status/ready"],
   ["sortied", "status/sortied"],
   ["done", ""], // done = issue closed, no label
 ]);
 
 /**
- * Allowed transitions: todo → sortied → done, and sortied → todo (rollback).
+ * Allowed transitions: ready → sortied → done, and sortied → ready (rollback).
  */
 const VALID_TRANSITIONS: ReadonlyMap<IssueStatus, readonly IssueStatus[]> =
   new Map([
-    ["todo", ["sortied"]],
-    ["sortied", ["done", "todo"]],
+    ["ready", ["sortied"]],
+    ["sortied", ["done", "ready"]],
     ["done", []],
   ]);
 
 /**
  * Centralized status manager for GitHub Issue labels.
  *
- * All status changes (todo/sortied/done) MUST go through this manager.
+ * All status changes (ready/sortied/done) MUST go through this manager.
  * The GitHub Issue label is the single source of truth for issue status.
  *
- * Labels use the `status/` prefix: `status/todo` and `status/sortied`.
+ * Labels use the `status/` prefix: `status/ready` and `status/sortied`.
  * Per-phase labels have been removed — Ship phase is tracked in the local DB only.
  */
 export class StatusManager {
@@ -72,8 +72,8 @@ export class StatusManager {
     if (issue.state === "closed") return { status: "done", currentLabel };
     if (currentLabel === "status/sortied")
       return { status: "sortied", currentLabel };
-    // Any other status/* label or no label → treat as todo
-    return { status: "todo", currentLabel: currentLabel ?? undefined };
+    // Any other status/* label or no label → treat as ready
+    return { status: "ready", currentLabel: currentLabel ?? undefined };
   }
 
   /**
@@ -128,7 +128,7 @@ export class StatusManager {
   }
 
   /**
-   * Rollback an issue from "sortied" to "todo" with exponential backoff retry.
+   * Rollback an issue from "sortied" to "ready" with exponential backoff retry.
    */
   async rollback(
     repo: string,
@@ -137,7 +137,7 @@ export class StatusManager {
   ): Promise<void> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        await this.transition(repo, issueNumber, "todo");
+        await this.transition(repo, issueNumber, "ready");
         return;
       } catch (err) {
         if (attempt === maxRetries) {
@@ -198,18 +198,18 @@ export class StatusManager {
   ): Promise<void> {
     switch (to) {
       case "sortied": {
-        // todo → sortied: remove "status/todo", add "status/sortied"
+        // ready → sortied: remove "status/ready", add "status/sortied"
         await github.updateLabels(repo, issueNumber, {
           remove: currentLabel,
           add: STATUS_TO_LABEL.get("sortied"),
         });
         break;
       }
-      case "todo": {
-        // sortied → todo (rollback): remove current status/* label, add "status/todo"
+      case "ready": {
+        // sortied → ready (rollback): remove current status/* label, add "status/ready"
         await github.updateLabels(repo, issueNumber, {
           remove: currentLabel,
-          add: STATUS_TO_LABEL.get("todo"),
+          add: STATUS_TO_LABEL.get("ready"),
         });
         break;
       }

@@ -100,7 +100,7 @@ describe("parseDependsOnLabels", () => {
   });
 
   it("extracts issue numbers from depends-on/ labels", () => {
-    const labels = ["depends-on/42", "type/feature", "depends-on/99", "status/todo"];
+    const labels = ["depends-on/42", "type/feature", "depends-on/99", "status/ready"];
     expect(parseDependsOnLabels(labels)).toEqual([42, 99]);
   });
 
@@ -119,6 +119,6 @@ describe("parseDependsOnLabels", () => {
   });
 
   it("handles labels with no depends-on entries", () => {
-    expect(parseDependsOnLabels(["status/todo", "type/bug"])).toEqual([]);
+    expect(parseDependsOnLabels(["status/ready", "type/bug"])).toEqual([]);
   });
 });

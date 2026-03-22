@@ -111,12 +111,12 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 ### ステータスラベル（`status/` prefix）— 排他的
 | ラベル | 意味 |
 |--------|------|
-| `status/todo` | Sortie 可能 |
-| `status/planning` | 計画中（調査 + 計画） |
-| `status/implementing` | 実装中（コーディング + テスト） |
-| `status/acceptance-test` | 受け入れテスト中（PR レビュー + QA） |
-| `status/merging` | マージ中 |
-| `status/blocked` | 依存関係で着手不可 |
+| `status/ready` | 出撃準備完了（Sortie 可能） |
+| `status/sortied` | 出撃中（Ship 稼働中） |
+| `status/mooring` | 係留中（依存関係で出撃不可） |
+
+> `stopped` は DB phase であり、ラベルではない。Ship 停止中も `status/sortied` を保持する。
+> per-phase labels (`status/planning`, `status/implementing` 等) は廃止済み。Ship phase は DB で管理。
 
 ### カテゴリラベル（`type/` prefix）— 人間または Bridge が付与
 | 優先順位 | ラベル | コミット prefix |

@@ -96,8 +96,8 @@ describe("ACTIVE_STATUS_LABELS", () => {
     expect(ACTIVE_STATUS_LABELS.has("status/planning")).toBe(false);
     expect(ACTIVE_STATUS_LABELS.has("status/implementing")).toBe(false);
     expect(ACTIVE_STATUS_LABELS.has("status/merging")).toBe(false);
-    expect(ACTIVE_STATUS_LABELS.has("status/todo")).toBe(false);
-    expect(ACTIVE_STATUS_LABELS.has("status/blocked")).toBe(false);
+    expect(ACTIVE_STATUS_LABELS.has("status/ready")).toBe(false);
+    expect(ACTIVE_STATUS_LABELS.has("status/mooring")).toBe(false);
   });
 });
 
@@ -158,9 +158,9 @@ describe("StateSync", () => {
       expect(result.reason).toContain("already has an active status label");
     });
 
-    it("allows sortie for todo issues", async () => {
+    it("allows sortie for ready issues", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(undefined);
-      mockStatusManager.getStatus.mockResolvedValue("todo");
+      mockStatusManager.getStatus.mockResolvedValue("ready");
       const result = await stateSync.sortieGuard(REPO, 42);
       expect(result).toEqual({ ok: true });
     });
@@ -287,7 +287,7 @@ describe("StateSync", () => {
       mockListIssues.mockResolvedValue([
         makeIssue({
           number: 50,
-          labels: ["depends-on/42", "status/blocked", "type/feature"],
+          labels: ["depends-on/42", "status/mooring", "type/feature"],
         }),
       ]);
       mockUpdateLabels.mockResolvedValue(undefined);
@@ -300,21 +300,21 @@ describe("StateSync", () => {
       });
     });
 
-    it("transitions status/blocked → status/todo when all deps resolved", async () => {
+    it("transitions status/mooring → status/ready when all deps resolved", async () => {
       mockListIssues.mockResolvedValue([
         makeIssue({
           number: 50,
-          labels: ["depends-on/42", "status/blocked", "type/feature"],
+          labels: ["depends-on/42", "status/mooring", "type/feature"],
         }),
       ]);
       mockUpdateLabels.mockResolvedValue(undefined);
 
       await stateSync.auditDependencies(REPO, 42);
 
-      // Should transition blocked → todo
+      // Should transition mooring → ready
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
-        remove: "status/blocked",
-        add: "status/todo",
+        remove: "status/mooring",
+        add: "status/ready",
       });
     });
 
@@ -325,7 +325,7 @@ describe("StateSync", () => {
           labels: [
             "depends-on/42",
             "depends-on/99",
-            "status/blocked",
+            "status/mooring",
             "type/feature",
           ],
         }),
@@ -340,10 +340,10 @@ describe("StateSync", () => {
       expect(mockUpdateLabels).toHaveBeenCalledWith(REPO, 50, {
         remove: "depends-on/42",
       });
-      // Should NOT transition to status/todo because depends-on/99 is still open
+      // Should NOT transition to status/ready because depends-on/99 is still open
       expect(mockUpdateLabels).not.toHaveBeenCalledWith(REPO, 50, {
-        remove: "status/blocked",
-        add: "status/todo",
+        remove: "status/mooring",
+        add: "status/ready",
       });
     });
 
