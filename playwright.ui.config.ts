@@ -11,14 +11,7 @@ export default defineConfig({
   globalSetup: "./ui-test/global-setup.ts",
   globalTeardown: "./ui-test/global-teardown.ts",
   use: {
-    baseURL: "http://localhost:1420",
     trace: "on-first-retry",
-  },
-  webServer: {
-    command: "npm run dev:frontend",
-    url: "http://localhost:1420",
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
   },
   projects: [
     {

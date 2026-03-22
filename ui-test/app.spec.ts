@@ -2,13 +2,20 @@ import { test, expect, type Page } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 
+const MOCK_ENGINE_PORT = parseInt(
+  process.env.UI_TEST_ENGINE_PORT ?? "19721",
+  10,
+);
+const BASE_URL = `http://localhost:${process.env.UI_TEST_VITE_PORT ?? "1420"}`;
+
 /**
  * Reset mock engine state via a special WebSocket message.
  * This ensures test isolation by clearing accumulated fleets.
  */
 async function resetMockEngine(page: Page) {
-  await page.evaluate(() => {
-    const ws = new WebSocket("ws://localhost:9721");
+  const port = MOCK_ENGINE_PORT;
+  await page.evaluate((p) => {
+    const ws = new WebSocket(`ws://localhost:${p}`);
     return new Promise<void>((resolve) => {
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "__test:reset" }));
@@ -17,14 +24,14 @@ async function resetMockEngine(page: Page) {
       };
       ws.onerror = () => resolve();
     });
-  });
+  }, port);
 }
 
 test.describe("Connection", () => {
   test("shows engine connected indicator when mock engine is running", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto(BASE_URL);
     const dot = page.getByTestId("engine-status");
     await expect(dot).toBeVisible({ timeout: 10000 });
     await expect(dot).toHaveClass(/bg-green-500/, { timeout: 10000 });
@@ -37,7 +44,7 @@ test.describe("Fleet management", () => {
   });
 
   test("creates a fleet from the + button", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(BASE_URL);
     await waitForConnection(page);
 
     // Click + button in FLEETS section
@@ -74,7 +81,7 @@ test.describe("Fleet management", () => {
   });
 
   test("selects a fleet from the sidebar", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(BASE_URL);
     await waitForConnection(page);
 
     // Create a fleet
@@ -104,7 +111,7 @@ test.describe("Commander (Flagship)", () => {
   });
 
   test("sends a message and receives a response", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(BASE_URL);
     await waitForConnection(page);
 
     // Create and select a fleet
@@ -134,7 +141,7 @@ test.describe("Fleet settings", () => {
   });
 
   test("opens settings view from sidebar", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(BASE_URL);
     await waitForConnection(page);
 
     // Create and select fleet
