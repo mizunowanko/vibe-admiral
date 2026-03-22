@@ -570,7 +570,13 @@ export class EngineServer {
           break;
         }
         case "ship:logs": {
-          // Ship logs are streamed in real-time, no separate endpoint needed
+          const shipId = data.id as string;
+          const limit = data.limit as number | undefined;
+          const logs = await this.shipManager.loadShipLogs(shipId, limit);
+          this.sendTo(ws, {
+            type: "ship:history",
+            data: { id: shipId, messages: logs },
+          });
           break;
         }
 

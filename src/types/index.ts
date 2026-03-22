@@ -216,6 +216,7 @@ export type ServerMessage =
       data: { fleetId: string };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
+  | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
   | {
       type: "ship:status";
       data: { id: string; phase: Phase; detail?: string };

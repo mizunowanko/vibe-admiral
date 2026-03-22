@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { copyFile, mkdir, unlink } from "node:fs/promises";
+import { copyFile, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
-import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus } from "./types.js";
+import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, StreamMessage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -545,6 +545,36 @@ export class ShipManager {
     // Also kill any processes tracked in runtime that may not be in DB yet
     for (const [id] of this.runtime) {
       this.processManager.kill(id);
+    }
+  }
+
+  private static readonly MAX_SHIP_LOGS = 500;
+
+  /**
+   * Load Ship logs from the worktree's `.claude/ship-log.jsonl` file.
+   * Returns the last MAX_SHIP_LOGS messages, or an empty array if the file doesn't exist.
+   */
+  async loadShipLogs(shipId: string, limit?: number): Promise<StreamMessage[]> {
+    const ship = this.getShip(shipId);
+    if (!ship) return [];
+
+    const logPath = join(ship.worktreePath, ".claude", "ship-log.jsonl");
+    const maxLines = Math.min(limit ?? ShipManager.MAX_SHIP_LOGS, ShipManager.MAX_SHIP_LOGS);
+
+    try {
+      const content = await readFile(logPath, "utf-8");
+      const lines = content.trimEnd().split("\n").filter(Boolean);
+      const messages: StreamMessage[] = [];
+      for (const line of lines) {
+        try {
+          messages.push(JSON.parse(line) as StreamMessage);
+        } catch {
+          // Skip malformed lines
+        }
+      }
+      return messages.slice(-maxLines);
+    } catch {
+      return [];
     }
   }
 

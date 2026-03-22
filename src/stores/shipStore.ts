@@ -18,6 +18,7 @@ interface ShipState {
   setShipPhase: (id: string, phase: Phase, extra?: ShipPhaseData) => void;
   setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
+  setShipLogs: (id: string, messages: StreamMessage[]) => void;
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
@@ -109,6 +110,14 @@ export const useShipStore = create<ShipState>((set) => ({
       const shipLogs = new Map(state.shipLogs);
       const logs = shipLogs.get(id) ?? [];
       shipLogs.set(id, [...logs, message]);
+      return { shipLogs };
+    });
+  },
+
+  setShipLogs: (id, messages) => {
+    set((state) => {
+      const shipLogs = new Map(state.shipLogs);
+      shipLogs.set(id, messages);
       return { shipLogs };
     });
   },
