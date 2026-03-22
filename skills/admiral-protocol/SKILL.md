@@ -148,7 +148,7 @@ Gate checks are handled via Engine REST API:
 
 ### Gate Polling Pattern (REST API)
 ```bash
-TIMEOUT=600; ELAPSED=0
+TIMEOUT=900; ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
   RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase)
   PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4)
