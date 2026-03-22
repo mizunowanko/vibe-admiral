@@ -244,7 +244,21 @@ export function useEngine() {
     // Fetch data on every connect/reconnect
     const unsubConnect = wsClient.onConnect(() => {
       fetchFleets();
-      void fetchShips();
+      void fetchShips().then(() => {
+        // Register sessions for ships loaded via REST API.
+        // The ship:data WS handler would do this, but Engine never sends
+        // that message — ships are fetched via REST on connect/reconnect.
+        const ships = useShipStore.getState().ships;
+        const currentLogs = useShipStore.getState().shipLogs;
+        for (const ship of ships.values()) {
+          registerSession(
+            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+          );
+          if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
+            wsClient.send({ type: "ship:logs", data: { id: ship.id } });
+          }
+        }
+      });
     });
 
     return () => {
