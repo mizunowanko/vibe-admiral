@@ -18,6 +18,13 @@ test-results/
 # Admiral local data
 .vibe-admiral/
 
+# Claude work files (transient per-session; must not propagate via main)
+.claude/ship-log.jsonl
+.claude/escort-log.jsonl
+.claude/workflow-state.json
+.claude/gate-request.json
+.claude/gate-response.json
+
 # Environment
 .env
 .env.*
