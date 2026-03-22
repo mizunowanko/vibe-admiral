@@ -13,6 +13,7 @@ export function useEngine() {
   const setShipPhase = useShipStore((s) => s.setShipPhase);
   const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
+  const setShipLogs = useShipStore((s) => s.setShipLogs);
   const setShipDone = useShipStore((s) => s.setShipDone);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
@@ -37,9 +38,18 @@ export function useEngine() {
           setFleets(msg.data as unknown as Fleet[]);
           break;
 
-        case "ship:data":
-          syncShips(msg.data as unknown as Ship[]);
+        case "ship:data": {
+          const shipList = msg.data as unknown as Ship[];
+          syncShips(shipList);
+          // Request logs for ships that don't have logs in the store yet
+          const currentLogs = useShipStore.getState().shipLogs;
+          for (const ship of shipList) {
+            if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
+              wsClient.send({ type: "ship:logs", data: { id: ship.id } });
+            }
+          }
           break;
+        }
 
         case "fleet:created": {
           const created = msg.data as unknown as { id: string; fleets: Fleet[] };
@@ -97,6 +107,17 @@ export function useEngine() {
             message: StreamMessage;
           };
           addShipLog(streamData.id, streamData.message);
+          break;
+        }
+
+        case "ship:history": {
+          const historyData = msg.data as {
+            id: string;
+            messages: StreamMessage[];
+          };
+          if (historyData.messages.length > 0) {
+            setShipLogs(historyData.id, historyData.messages);
+          }
           break;
         }
 
@@ -182,6 +203,7 @@ export function useEngine() {
     setShipPhase,
     setShipCompacting,
     addShipLog,
+    setShipLogs,
     setShipDone,
     setGateCheck,
     clearGateCheck,
