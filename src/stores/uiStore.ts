@@ -29,7 +29,7 @@ export const useUIStore = create<UIState>((set) => ({
   inputDrafts: {},
 
   setMainView: (view) => set({ mainView: view }),
-  setActiveCommanderTab: (tab) => set({ activeCommanderTab: tab }),
+  setActiveCommanderTab: (tab) => set({ activeCommanderTab: tab, viewingShipId: null }),
   setViewingShipId: (id) => set({ viewingShipId: id }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setEngineConnected: (connected) => set({ engineConnected: connected }),
