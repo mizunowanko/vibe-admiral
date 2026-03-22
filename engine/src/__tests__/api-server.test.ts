@@ -525,6 +525,121 @@ describe("API Server", () => {
       });
     });
 
+    describe("POST /api/ship/:id/abandon", () => {
+      it("abandons a stopped ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "stopped" });
+        const abandonShip = vi.fn().mockReturnValue(true);
+        depsWithDb.getShipManager.mockReturnValue({
+          ...depsWithDb.getShipManager(),
+          abandonShip,
+        } as unknown as ShipManager);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/abandon", {});
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          expect(res.data.phase).toBe("done");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("rejects abandon for non-stopped ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "implementing" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/abandon", {});
+          expect(res.status).toBe(400);
+          expect(res.data.error).toContain("stopped");
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns 404 for unknown ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue(undefined);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/unknown/abandon", {});
+          expect(res.status).toBe(404);
+        } finally {
+          s2.server.close();
+        }
+      });
+    });
+
+    describe("DELETE /api/ship/:id/delete", () => {
+      it("deletes a ship", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        const deleteShip = vi.fn().mockReturnValue(true);
+        depsWithDb.getShipManager.mockReturnValue({
+          ...depsWithDb.getShipManager(),
+          deleteShip,
+        } as unknown as ShipManager);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "DELETE", "/api/ship/ship-1/delete");
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("returns 404 when ship not found", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        const deleteShip = vi.fn().mockReturnValue(false);
+        depsWithDb.getShipManager.mockReturnValue({
+          ...depsWithDb.getShipManager(),
+          deleteShip,
+        } as unknown as ShipManager);
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "DELETE", "/api/ship/unknown/delete");
+          expect(res.status).toBe(404);
+        } finally {
+          s2.server.close();
+        }
+      });
+    });
+
+    describe("POST /api/ship-abandon", () => {
+      it("abandons via flagship route", async () => {
+        deps._handle.mockResolvedValue("[Ship Abandoned] Ship #42");
+        const res = await apiRequest(port, "POST", "/api/ship-abandon", {
+          shipId: "ship-123",
+        });
+        expect(res.status).toBe(200);
+        expect(res.data.ok).toBe(true);
+      });
+
+      it("rejects without shipId", async () => {
+        const res = await apiRequest(port, "POST", "/api/ship-abandon", {});
+        expect(res.status).toBe(400);
+        expect(res.data.error).toContain("shipId");
+      });
+    });
+
+    describe("POST /api/ship-delete", () => {
+      it("deletes via flagship route", async () => {
+        deps._handle.mockResolvedValue("[Ship Deleted] Ship #42");
+        const res = await apiRequest(port, "POST", "/api/ship-delete", {
+          shipId: "ship-123",
+        });
+        expect(res.status).toBe(200);
+        expect(res.data.ok).toBe(true);
+      });
+
+      it("rejects without shipId", async () => {
+        const res = await apiRequest(port, "POST", "/api/ship-delete", {});
+        expect(res.status).toBe(400);
+        expect(res.data.error).toContain("shipId");
+      });
+    });
+
     describe("unknown ship action", () => {
       it("returns 404 for unknown action", async () => {
         const depsWithDb = createMockDepsWithDb();

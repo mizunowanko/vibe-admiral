@@ -416,6 +416,74 @@ describe("shipMachine", () => {
       expect(actor.getSnapshot().value).toBe("done");
       actor.stop();
     });
+
+    it("ignores PROCESS_DIED in done state (no processDead flag set)", () => {
+      const actor = createTestActor();
+      actor.send({ type: "NOTHING_TO_DO" });
+      expect(actor.getSnapshot().value).toBe("done");
+      actor.send({ type: "PROCESS_DIED" });
+      // Final state ignores all events — processDead should remain false
+      expect(actor.getSnapshot().context.processDead).toBe(false);
+      actor.stop();
+    });
+  });
+
+  describe("ABANDON (stopped → done)", () => {
+    it("transitions stopped → done on ABANDON", () => {
+      const actor = createTestActor();
+      actor.send({ type: "STOP" });
+      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "ABANDON" });
+      expect(actor.getSnapshot().value).toBe("done");
+      expect(actor.getSnapshot().status).toBe("done");
+      actor.stop();
+    });
+
+    it("ABANDON is only available in stopped state", () => {
+      const actor = createTestActor();
+      // ABANDON in planning should be ignored
+      actor.send({ type: "ABANDON" });
+      expect(actor.getSnapshot().value).toBe("planning");
+      actor.stop();
+    });
+  });
+
+  describe("SET_PHASE_BEFORE_STOPPED", () => {
+    it("updates phaseBeforeStopped context", () => {
+      const actor = createTestActor();
+      actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "implementing" });
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("implementing");
+      actor.stop();
+    });
+
+    it("enables correct RESUME after context sync", () => {
+      // Simulate Engine restart scenario:
+      // 1. Actor created with phaseBeforeStopped = null (default)
+      // 2. SET_PHASE_BEFORE_STOPPED syncs from DB
+      // 3. RESUME uses the synced value
+      const actor = createTestActor();
+      actor.send({ type: "STOP" }); // phaseBeforeStopped = "planning"
+      // Simulate context override from DB
+      actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "merging" });
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("merging");
+      actor.send({ type: "RESUME" });
+      expect(actor.getSnapshot().value).toBe("merging");
+      actor.stop();
+    });
+  });
+
+  describe("phaseBeforeStopped via input", () => {
+    it("initializes phaseBeforeStopped from input", () => {
+      const actor = createTestActor({ phaseBeforeStopped: "acceptance-test" });
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("acceptance-test");
+      actor.stop();
+    });
+
+    it("defaults phaseBeforeStopped to null when not provided", () => {
+      const actor = createTestActor();
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBeNull();
+      actor.stop();
+    });
   });
 });
 

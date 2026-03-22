@@ -235,6 +235,8 @@ export type FlagshipRequest =
   | { request: "ship-status" }
   | { request: "ship-stop"; shipId: string }
   | { request: "ship-resume"; shipId: string }
+  | { request: "ship-abandon"; shipId: string }
+  | { request: "ship-delete"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
 ;
 

@@ -47,6 +47,7 @@ export type ShipMachineEvent =
   | { type: "COMPLETE" }
   | { type: "STOP" }
   | { type: "RESUME" }
+  | { type: "ABANDON" }
   | { type: "PROCESS_DIED" }
   | { type: "PROCESS_OUTPUT"; timestamp: number }
   | { type: "COMPACT_START" }
@@ -55,7 +56,8 @@ export type ShipMachineEvent =
   | { type: "SET_SESSION_ID"; sessionId: string }
   | { type: "SET_PR_URL"; prUrl: string }
   | { type: "SET_QA_REQUIRED"; qaRequired: boolean }
-  | { type: "SET_PR_REVIEW_STATUS"; status: PRReviewStatus };
+  | { type: "SET_PR_REVIEW_STATUS"; status: PRReviewStatus }
+  | { type: "SET_PHASE_BEFORE_STOPPED"; phase: Phase };
 
 // === Input (for actor creation) ===
 
@@ -69,6 +71,7 @@ export interface ShipMachineInput {
   sessionId?: string | null;
   prUrl?: string | null;
   qaRequired?: boolean;
+  phaseBeforeStopped?: Phase | null;
 }
 
 // === Helper: Create GateCheckState ===
@@ -120,7 +123,7 @@ export const shipMachine = setup({
     lastOutputAt: null,
     isCompacting: false,
     processDead: false,
-    phaseBeforeStopped: null,
+    phaseBeforeStopped: input.phaseBeforeStopped ?? null,
     qaRequired: input.qaRequired ?? true,
   }),
   initial: "planning",
@@ -152,6 +155,11 @@ export const shipMachine = setup({
     },
     PROCESS_DIED: {
       actions: assign({ processDead: () => true }),
+    },
+    SET_PHASE_BEFORE_STOPPED: {
+      actions: assign({
+        phaseBeforeStopped: ({ event }) => event.phase,
+      }),
     },
   },
   states: {
@@ -292,11 +300,17 @@ export const shipMachine = setup({
     },
 
     done: {
+      // Final state — XState v5 ignores all events (including global PROCESS_DIED).
+      // Process death after completion is handled by ShipManager.notifyProcessDead()
+      // which skips ships in "done" phase.
       type: "final",
     },
 
     stopped: {
       on: {
+        ABANDON: {
+          target: "done",
+        },
         RESUME: [
           {
             target: "planning",
