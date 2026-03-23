@@ -200,6 +200,116 @@ describe("EscortManager", () => {
       escortManager.onEscortExit("unknown-escort", 0);
       // No error thrown
     });
+
+    describe("gate phase revert via XState (ESCORT_DIED)", () => {
+      let mockDb: {
+        getShipById: ReturnType<typeof vi.fn>;
+        persistPhaseTransition: ReturnType<typeof vi.fn>;
+      };
+      let mockActorManager: {
+        send: ReturnType<typeof vi.fn>;
+        requestTransition: ReturnType<typeof vi.fn>;
+      };
+      let deathHandler: ReturnType<typeof vi.fn>;
+
+      beforeEach(() => {
+        mockDb = {
+          getShipById: vi.fn(),
+          persistPhaseTransition: vi.fn().mockReturnValue(true),
+        };
+        mockActorManager = {
+          send: vi.fn().mockReturnValue(true),
+          requestTransition: vi.fn(),
+        };
+        deathHandler = vi.fn();
+
+        // Recreate EscortManager with DB and ActorManager
+        escortManager = new EscortManager(
+          mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
+          mockShipManager as unknown as ConstructorParameters<typeof EscortManager>[1],
+          () => mockDb as unknown as ConstructorParameters<typeof EscortManager>[2] extends () => infer R ? R : never,
+        );
+        escortManager.setActorManager(mockActorManager as unknown as Parameters<EscortManager["setActorManager"]>[0]);
+        escortManager.setEscortDeathHandler(deathHandler);
+      });
+
+      it("reverts gate phase via XState requestTransition and persists to DB", () => {
+        // Launch escort to set up mapping
+        escortManager.launchEscort("ship-001");
+
+        // Parent ship is in gate phase
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "planning-gate",
+          issueTitle: "Test issue",
+        });
+        mockActorManager.requestTransition.mockReturnValue({
+          success: true,
+          fromPhase: "planning-gate",
+          toPhase: "planning",
+        });
+
+        escortManager.onEscortExit("escort-001", 1);
+
+        // XState should be consulted via requestTransition (not send)
+        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
+          type: "ESCORT_DIED",
+          exitCode: 1,
+          feedback: expect.stringContaining("exited unexpectedly"),
+        });
+
+        // DB should be persisted after XState approved
+        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
+          "ship-001",
+          "planning-gate",
+          "planning",
+          "escort",
+          expect.objectContaining({ gate_result: "rejected" }),
+        );
+
+        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
+        expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
+        expect(deathHandler).toHaveBeenCalled();
+      });
+
+      it("does not persist to DB when XState rejects ESCORT_DIED", () => {
+        escortManager.launchEscort("ship-001");
+
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "planning-gate",
+          issueTitle: "Test issue",
+        });
+        mockActorManager.requestTransition.mockReturnValue({
+          success: false,
+          currentPhase: "implementing",
+        });
+
+        escortManager.onEscortExit("escort-001", 1);
+
+        expect(mockActorManager.requestTransition).toHaveBeenCalled();
+        expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
+      });
+
+      it("skips XState when parent is no longer in gate phase", () => {
+        escortManager.launchEscort("ship-001");
+
+        // Parent already moved past gate (verdict was submitted)
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "implementing",
+        });
+
+        escortManager.onEscortExit("escort-001", 0);
+
+        // Neither XState nor DB should be called for phase revert
+        expect(mockActorManager.requestTransition).not.toHaveBeenCalled();
+        expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
+
+        // But gate check should still be cleared
+        expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
+      });
+    });
   });
 
   describe("killAll", () => {
