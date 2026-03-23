@@ -210,7 +210,7 @@ describe("EscortManager", () => {
         send: ReturnType<typeof vi.fn>;
         requestTransition: ReturnType<typeof vi.fn>;
       };
-      let deathHandler: ReturnType<typeof vi.fn>;
+      let deathHandler: (shipId: string, message: string) => void;
 
       beforeEach(() => {
         mockDb = {
