@@ -109,11 +109,19 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 
 既存 ADR:
 - [ADR-0001: AI 最適化開発モデル](adr/0001-ai-optimized-dev-model.md)
-- [ADR-0002: 品質保証戦略](adr/0002-qa-strategy.md)
+- [ADR-0002: 品質保証戦略](adr/0002-qa-strategy.md) *(Superseded by ADR-0013)*
 - [ADR-0003: Ship ステータス管理のリアーキテクチャ](adr/0003-ship-status-rearchitecture.md)
 - [ADR-0004: XState 状態機械の可視化](adr/0004-xstate-state-machine-visualization.md)
 - [ADR-0005: E2E Config のポート共有パターン](adr/0005-e2e-port-sharing-pattern.md)
 - [ADR-0006: SessionChat 表示ルール](adr/0006-session-chat-display-rules.md)
+- [ADR-0007: 全 Unit 間通信を Engine REST API に統一](adr/0007-engine-rest-api-unification.md)
+- [ADR-0008: XState v5 による Ship/Escort ライフサイクル管理](adr/0008-xstate-ship-escort-lifecycle.md)
+- [ADR-0009: UI セッション中心モデル](adr/0009-session-centric-ui-model.md)
+- [ADR-0010: Bridge → Flagship/Dock 分離](adr/0010-bridge-to-flagship-dock-separation.md)
+- [ADR-0011: Phase-driven communication](adr/0011-phase-driven-communication.md)
+- [ADR-0012: Unit 用語の導入](adr/0012-unit-terminology.md)
+- [ADR-0013: テスト戦略の全体設計](adr/0013-test-strategy-design.md)
+- [ADR-0014: Gate ポーリングを回数ベースに変更](adr/0014-count-based-gate-polling.md)
 
 ## ラベル体系
 
