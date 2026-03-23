@@ -70,6 +70,13 @@ export interface GateCheckState {
 // === Ship Kind ===
 export type ShipKind = "ship" | "escort";
 
+// === Escort Info (attached to parent Ship by API) ===
+export interface EscortInfo {
+  id: string;
+  phase: Phase;
+  processDead: boolean;
+}
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -93,6 +100,8 @@ export interface Ship {
   kind?: ShipKind;
   /** For escort Ships, the ID of the parent Ship being reviewed. */
   parentShipId?: string | null;
+  /** Escort information attached by the API (only present when escorts exist). */
+  escorts?: EscortInfo[];
 }
 
 // === Issue ===

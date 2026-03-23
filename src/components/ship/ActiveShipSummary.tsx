@@ -21,7 +21,9 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
 
   const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({ fingerprint: "", ships: [] });
   const fleetShips = useShipStore((s) => {
-    const filtered = Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId);
+    const filtered = Array.from(s.ships.values()).filter(
+      (ship) => ship.fleetId === fleetId && ship.kind !== "escort",
+    );
     const fingerprint = buildSummaryFingerprint(filtered);
     if (fingerprint === prevRef.current.fingerprint) {
       return prevRef.current.ships;

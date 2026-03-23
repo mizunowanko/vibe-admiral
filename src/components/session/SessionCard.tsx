@@ -127,6 +127,12 @@ function ShipSessionCard({
               Gate
             </Badge>
           )}
+          {ship.escorts && ship.escorts.length > 0 && (
+            <Badge className="text-[10px] px-1 py-0 bg-amber-500/20 text-amber-400">
+              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
+              Escort
+            </Badge>
+          )}
         </div>
       </div>
       <p className="truncate text-foreground">
