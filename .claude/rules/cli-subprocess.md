@@ -11,7 +11,7 @@ See `engine/src/process-manager.ts` for the implementation.
 - **Ship / Session Resume / Escort**: `stdio: ['ignore', 'pipe', 'pipe']`
   - stdin MUST be `'ignore'`. Claude CLI is built on Bun, which replaces pipe FDs with Unix sockets when stdin is a pipe, breaking stdout capture.
   - Ships and Escorts receive their full prompt via `-p` and don't need stdin.
-  - Escort is "just another Ship" launched via `ShipManager.sortieEscort()` with the `/escort` skill. It persists across all gate phases, polling the parent Ship's phase via REST API.
+  - Escort is "just another Ship" launched via `ShipManager.sortieEscort()` with the `/escort` skill. It is launched on-demand per gate phase and exits after submitting its verdict. Session resume (`--resume sessionId`) preserves context across gates.
 
 - **Commander (Dock / Flagship)**: `stdio: ['pipe', 'pipe', 'pipe']`
   - stdin is a pipe for sending interactive messages via `--input-format stream-json`.

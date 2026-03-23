@@ -274,14 +274,13 @@ export class ShipManager {
   }
 
   /**
-   * Launch a persistent Escort as a Ship. Reuses the parent Ship's worktree,
-   * branch, and repo — skips worktree creation, skill deployment, npm install,
-   * issue label changes, and PR detection.
+   * Launch a new Escort for the first gate. Creates a fresh Escort Ship record
+   * and launches the `/escort` skill with the gate phase as context.
    *
-   * The Escort Ship runs the `/escort` skill, which polls the parent Ship's
-   * phase via REST API and performs gate reviews when gate phases are detected.
+   * Reuses the parent Ship's worktree, branch, and repo — skips worktree
+   * creation, skill deployment, npm install, issue label changes, and PR detection.
    */
-  sortieEscort(parentShip: ShipProcess, extraPrompt?: string): ShipProcess {
+  sortieEscort(parentShip: ShipProcess, gatePhase?: GatePhase, extraPrompt?: string): ShipProcess {
     const escortId = randomUUID();
 
     const escort: ShipProcess = {
@@ -337,27 +336,80 @@ export class ShipManager {
       qaRequired: false,
     });
 
-    // Launch via processManager.sortie() with /escort skill
+    // Launch via processManager.sortie() with /escort skill + gate phase context
     const escortEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
     };
+
+    const gateContext = gatePhase
+      ? `\n\n[Gate Context] The parent Ship is currently in ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`
+      : "";
+
     this.processManager.sortie(
       escortId,
       parentShip.worktreePath,
       parentShip.issueNumber,
-      extraPrompt,
+      [extraPrompt, gateContext].filter(Boolean).join("\n\n") || undefined,
       "/escort",
       escortEnv,
     );
 
     console.log(
-      `[ship-manager] Launched persistent Escort ${escortId.slice(0, 8)}... for Ship ${parentShip.id.slice(0, 8)}... (issue #${parentShip.issueNumber})`,
+      `[ship-manager] Launched new Escort ${escortId.slice(0, 8)}... for Ship ${parentShip.id.slice(0, 8)}... at ${gatePhase ?? "unknown"} gate (issue #${parentShip.issueNumber})`,
     );
 
     return escort;
+  }
+
+  /**
+   * Resume an existing Escort for a subsequent gate phase.
+   * Uses `--resume sessionId` to preserve context from prior gate reviews
+   * (e.g., planning review insights carry over to code review).
+   */
+  resumeEscort(
+    existingEscort: ShipProcess,
+    gatePhase: GatePhase,
+  ): ShipProcess {
+    if (!existingEscort.sessionId) {
+      throw new Error(`Cannot resume Escort ${existingEscort.id.slice(0, 8)}... — no sessionId`);
+    }
+
+    const escortId = existingEscort.id;
+
+    // Reset runtime state for the new gate
+    const rt = this.ensureRuntime(escortId);
+    if (rt) {
+      rt.processDead = false;
+      rt.isCompacting = false;
+    }
+
+    // Build Escort env vars
+    const escortEnv: Record<string, string> = {
+      VIBE_ADMIRAL_MAIN_REPO: existingEscort.repo,
+      VIBE_ADMIRAL_SHIP_ID: escortId,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
+      VIBE_ADMIRAL_PARENT_SHIP_ID: existingEscort.parentShipId!,
+    };
+
+    // Resume with gate context message
+    const resumeMessage = `The parent Ship has entered ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`;
+
+    this.processManager.resumeSession(
+      escortId,
+      existingEscort.sessionId,
+      resumeMessage,
+      existingEscort.worktreePath,
+      escortEnv,
+    );
+
+    console.log(
+      `[ship-manager] Resumed Escort ${escortId.slice(0, 8)}... (session: ${existingEscort.sessionId.slice(0, 12)}...) for ${gatePhase}`,
+    );
+
+    return this.getShip(escortId) ?? existingEscort;
   }
 
   /** Check if a Ship is an Escort by its kind field. */
