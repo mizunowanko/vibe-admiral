@@ -5,8 +5,6 @@ import type { ServerMessage, StreamMessage, ImageAttachment, CommanderRole } fro
 export function useCommander(fleetId: string | null, role: CommanderRole) {
   const [messages, setMessages] = useState<StreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-  const pendingToolUseId = useRef<string | null>(null);
   const historyLoadedRef = useRef(false);
   // Track the timestamp when we requested history so we can identify
   // which optimistic messages arrived after the request and must be preserved.
@@ -15,16 +13,11 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
   const prevFleetRef = useRef<{ fleetId: string | null; role: CommanderRole }>({ fleetId: null, role });
 
   const streamType = `${role}:stream` as const;
-  const questionType = `${role}:question` as const;
-  const questionTimeoutType = `${role}:question-timeout` as const;
-  const roleLabel = role === "flagship" ? "Flagship" : "Dock";
 
   useEffect(() => {
     if (!fleetId) {
       setMessages([]);
       setIsLoading(false);
-      setPendingQuestion(null);
-      pendingToolUseId.current = null;
       historyLoadedRef.current = false;
       prevFleetRef.current = { fleetId, role };
       return;
@@ -36,8 +29,6 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     const prev = prevFleetRef.current;
     if (prev.fleetId !== fleetId || prev.role !== role) {
       setMessages([]);
-      setPendingQuestion(null);
-      pendingToolUseId.current = null;
       historyLoadedRef.current = false;
     }
     prevFleetRef.current = { fleetId, role };
@@ -74,12 +65,6 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
                 return unique.length > 0 ? [...history, ...unique] : history;
               });
               historyLoadedRef.current = true;
-              // Restore pending question if the last history message is a question
-              const last = history[history.length - 1];
-              if (last?.type === "question") {
-                setPendingQuestion(last.content ?? null);
-                pendingToolUseId.current = last.toolUseId ?? null;
-              }
             } catch {
               // ignore parse errors
             }
@@ -93,27 +78,6 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
             }
             setMessages((prev) => [...prev, { ...data.message, timestamp: data.message.timestamp ?? Date.now() }]);
           }
-        }
-      }
-
-      // Commander question — AskUserQuestion from CLI
-      if (msg.type === questionType) {
-        const data = msg.data as { fleetId: string; message: StreamMessage };
-        if (data.fleetId === fleetId) {
-          setIsLoading(false);
-          setPendingQuestion(data.message.content ?? `${roleLabel} is asking a question`);
-          pendingToolUseId.current = data.message.toolUseId ?? null;
-          setMessages((prev) => [...prev, { ...data.message, timestamp: data.message.timestamp ?? Date.now() }]);
-        }
-      }
-
-      // Commander question timeout — clear pending state
-      if (msg.type === questionTimeoutType) {
-        const timeoutData = msg.data as { fleetId: string };
-        if (timeoutData.fleetId === fleetId) {
-          setPendingQuestion(null);
-          pendingToolUseId.current = null;
-          setIsLoading(false);
         }
       }
 
@@ -149,7 +113,7 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
       unsub();
       unsubConnect();
     };
-  }, [fleetId, role, streamType, questionType, questionTimeoutType, roleLabel]);
+  }, [fleetId, role, streamType]);
 
   const sendMessage = useCallback(
     (message: string, images?: ImageAttachment[]) => {
@@ -176,25 +140,5 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     [fleetId, role],
   );
 
-  const answerQuestion = useCallback(
-    (answer: string) => {
-      if (!fleetId) return;
-      const toolUseId = pendingToolUseId.current;
-      setPendingQuestion(null);
-      pendingToolUseId.current = null;
-      // Optimistic update: immediately show the answer in chat
-      setMessages((prev) => [
-        ...prev,
-        { type: "user", content: answer, timestamp: Date.now() },
-      ]);
-      setIsLoading(true);
-      wsClient.send({
-        type: `${role}:answer`,
-        data: { fleetId, answer, ...(toolUseId ? { toolUseId } : {}) },
-      });
-    },
-    [fleetId, role],
-  );
-
-  return { messages, sendMessage, answerQuestion, pendingQuestion, isLoading };
+  return { messages, sendMessage, isLoading };
 }

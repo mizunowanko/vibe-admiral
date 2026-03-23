@@ -113,6 +113,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - [ADR-0003: Ship ステータス管理のリアーキテクチャ](adr/0003-ship-status-rearchitecture.md)
 - [ADR-0004: XState 状態機械の可視化](adr/0004-xstate-state-machine-visualization.md)
 - [ADR-0005: E2E Config のポート共有パターン](adr/0005-e2e-port-sharing-pattern.md)
+- [ADR-0006: SessionChat 表示ルール](adr/0006-session-chat-display-rules.md)
 
 ## ラベル体系
 
