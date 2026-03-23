@@ -621,17 +621,20 @@ export class ShipManager {
   /**
    * Deploy a single skill to the worktree, skipping if the repo already provides it.
    * Returns true if deployed, false if skipped (repo skill preserved).
+   * When force=true, always overwrite (used by redeploySkills to refresh stale copies).
    */
   private async deploySkill(
     skillName: string,
     srcPath: string,
     worktreePath: string,
+    force = false,
   ): Promise<boolean> {
     const dest = join(worktreePath, ".claude", "skills", skillName, "SKILL.md");
 
     // Preserve repo-specific skill: if the worktree already has this skill
     // (inherited from git tracked files), do not overwrite it.
-    if (await this.fileExists(dest)) {
+    // When force=true, always overwrite — the Ship may have updated the skill source.
+    if (!force && await this.fileExists(dest)) {
       console.log(`[ship-manager] Skipping /${skillName} — repo-specific skill preserved`);
       return false;
     }
@@ -646,6 +649,7 @@ export class ShipManager {
     repoRoot: string,
     worktreePath: string,
     skillSources?: FleetSkillSources,
+    force = false,
   ): Promise<void> {
     // Resolve the Admiral skills directory.
     // admiralSkillsDir is auto-populated by resolveFleetContext(); fall back to
@@ -659,7 +663,7 @@ export class ShipManager {
       ? join(skillSources.implement, "SKILL.md")
       : join(admiralSkillsDir, "implement", "SKILL.md");
     try {
-      await this.deploySkill("implement", implementSrc, worktreePath);
+      await this.deploySkill("implement", implementSrc, worktreePath, force);
     } catch (err) {
       // Fatal: /implement is required for Ship operation
       throw new Error(`Failed to deploy /implement skill: ${err instanceof Error ? err.message : String(err)}`);
@@ -688,7 +692,7 @@ export class ShipManager {
     for (const skillName of admiralSkills) {
       const src = join(admiralSkillsDir, skillName, "SKILL.md");
       try {
-        await this.deploySkill(skillName, src, worktreePath);
+        await this.deploySkill(skillName, src, worktreePath, force);
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill`);
       }
@@ -702,11 +706,30 @@ export class ShipManager {
     for (const skillName of devSharedSkills) {
       const src = join(devSharedDir, skillName, "SKILL.md");
       try {
-        await this.deploySkill(skillName, src, worktreePath);
+        await this.deploySkill(skillName, src, worktreePath, force);
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill from dev-shared`);
       }
     }
+  }
+
+  /**
+   * Re-deploy all skills to a Ship's worktree, overwriting stale copies.
+   * Called before Escort launch at gate phase transitions so that skill
+   * changes made by the Ship during implementation are picked up.
+   */
+  async redeploySkills(
+    shipId: string,
+    skillSources?: FleetSkillSources,
+  ): Promise<void> {
+    const ship = this.getShip(shipId);
+    if (!ship) {
+      console.warn(`[ship-manager] redeploySkills: Ship ${shipId.slice(0, 8)}... not found`);
+      return;
+    }
+    const repoRoot = await worktree.getRepoRoot(ship.worktreePath);
+    await this.deploySkills(repoRoot, ship.worktreePath, skillSources, true);
+    console.log(`[ship-manager] Re-deployed skills to ${ship.worktreePath}`);
   }
 
   /**
