@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
 import { DirectoryPicker } from "./DirectoryPicker";
-import type { FleetRepo, FleetSkillSources } from "@/types";
+import { Textarea } from "@/components/ui/textarea";
+import type { FleetRepo, FleetSkillSources, CustomInstructions } from "@/types";
 
 function PathListEditor({
   label,
@@ -97,6 +98,9 @@ export function FleetSettings() {
   const [shipRulePaths, setShipRulePaths] = useState<string[]>(
     selectedFleet?.shipRulePaths ?? [],
   );
+  const [customInstructions, setCustomInstructions] = useState<CustomInstructions>(
+    selectedFleet?.customInstructions ?? {},
+  );
 
   const isNew = !selectedFleet;
 
@@ -110,6 +114,7 @@ export function FleetSettings() {
     setFlagshipRulePaths(selectedFleet?.flagshipRulePaths ?? selectedFleet?.bridgeRulePaths ?? []);
     setDockRulePaths(selectedFleet?.dockRulePaths ?? []);
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
+    setCustomInstructions(selectedFleet?.customInstructions ?? {});
   }, [selectedFleet]);
 
   const saveRepos = (nextRepos: FleetRepo[]) => {
@@ -134,6 +139,7 @@ export function FleetSettings() {
       flagshipRulePaths,
       dockRulePaths,
       shipRulePaths,
+      customInstructions,
     });
   };
 
@@ -334,6 +340,44 @@ export function FleetSettings() {
                 paths={shipRulePaths}
                 onChange={setShipRulePaths}
               />
+            </div>
+          )}
+
+          {/* Custom Instructions — only shown when editing */}
+          {!isNew && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium">Custom Instructions</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Per-actor system prompt instructions. Shared instructions are
+                  prepended to all actors.
+                </p>
+              </div>
+              {([
+                { key: "shared" as const, label: "Shared (all actors)", placeholder: "Instructions applied to Dock, Flagship, Ship, and Escort..." },
+                { key: "dock" as const, label: "Dock", placeholder: "Dock-specific instructions..." },
+                { key: "flagship" as const, label: "Flagship", placeholder: "Flagship-specific instructions..." },
+                { key: "ship" as const, label: "Ship", placeholder: "Ship-specific instructions..." },
+                { key: "escort" as const, label: "Escort", placeholder: "Escort-specific instructions..." },
+              ] as const).map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    {label}
+                  </label>
+                  <Textarea
+                    value={customInstructions[key] ?? ""}
+                    onChange={(e) =>
+                      setCustomInstructions({
+                        ...customInstructions,
+                        [key]: e.target.value || undefined,
+                      })
+                    }
+                    placeholder={placeholder}
+                    className="text-xs min-h-[80px] font-mono"
+                    rows={3}
+                  />
+                </div>
+              ))}
             </div>
           )}
 

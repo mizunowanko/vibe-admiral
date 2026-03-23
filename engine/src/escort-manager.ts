@@ -50,6 +50,7 @@ export class EscortManager {
     parentShipId: string,
     _gatePhase?: GatePhase,
     _gateType?: GateType,
+    extraPrompt?: string,
   ): string | null {
     // Prevent duplicate Escorts for the same parent Ship
     const existingEscortId = this.escorts.get(parentShipId);
@@ -67,7 +68,7 @@ export class EscortManager {
     }
 
     try {
-      const escort = this.shipManager.sortieEscort(parentShip);
+      const escort = this.shipManager.sortieEscort(parentShip, extraPrompt);
       this.escorts.set(parentShipId, escort.id);
 
       console.log(

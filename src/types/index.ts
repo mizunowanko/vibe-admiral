@@ -8,6 +8,21 @@ export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
 
+// === Custom Instructions ===
+/** Per-actor custom instructions injected via --append-system-prompt. */
+export interface CustomInstructions {
+  /** Instructions shared across all actors (Dock, Flagship, Ship, Escort). */
+  shared?: string;
+  /** Instructions specific to the Dock commander. */
+  dock?: string;
+  /** Instructions specific to the Flagship commander. */
+  flagship?: string;
+  /** Instructions specific to Ship sessions. */
+  ship?: string;
+  /** Instructions specific to Escort sessions. */
+  escort?: string;
+}
+
 // === Fleet ===
 export interface FleetRepo {
   localPath: string;
@@ -30,6 +45,8 @@ export interface Fleet {
   /** @deprecated Use flagshipRulePaths instead. */
   bridgeRulePaths?: string[];
   shipRulePaths?: string[];
+  /** Per-actor custom instructions (system prompts) injected at launch time. */
+  customInstructions?: CustomInstructions;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
@@ -189,6 +206,7 @@ export type ClientMessage =
         flagshipRulePaths?: string[];
         dockRulePaths?: string[];
         shipRulePaths?: string[];
+        customInstructions?: CustomInstructions;
         maxConcurrentSorties?: number;
       };
     }

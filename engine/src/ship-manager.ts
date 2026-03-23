@@ -281,7 +281,7 @@ export class ShipManager {
    * The Escort Ship runs the `/escort` skill, which polls the parent Ship's
    * phase via REST API and performs gate reviews when gate phases are detected.
    */
-  sortieEscort(parentShip: ShipProcess): ShipProcess {
+  sortieEscort(parentShip: ShipProcess, extraPrompt?: string): ShipProcess {
     const escortId = randomUUID();
 
     const escort: ShipProcess = {
@@ -348,7 +348,7 @@ export class ShipManager {
       escortId,
       parentShip.worktreePath,
       parentShip.issueNumber,
-      undefined,
+      extraPrompt,
       "/escort",
       escortEnv,
     );

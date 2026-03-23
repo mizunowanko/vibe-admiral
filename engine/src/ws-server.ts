@@ -31,7 +31,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -830,6 +830,7 @@ export class EngineServer {
     if (updates.flagshipRulePaths !== undefined) fleet.flagshipRulePaths = updates.flagshipRulePaths as string[];
     if (updates.dockRulePaths !== undefined) fleet.dockRulePaths = updates.dockRulePaths as string[];
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
+    if (updates.customInstructions !== undefined) fleet.customInstructions = updates.customInstructions as CustomInstructions;
     if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
     if (updates.maxConcurrentSorties !== undefined) fleet.maxConcurrentSorties = updates.maxConcurrentSorties as number;
     await this.saveFleets(fleets);
@@ -923,6 +924,12 @@ export class EngineServer {
         const rulesSuffix = [sharedRules, roleRules].filter(Boolean).join("\n\n");
         if (rulesSuffix) {
           prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
+        }
+
+        const ci = fleet.customInstructions;
+        const ciParts = [ci?.shared, role === "flagship" ? ci?.flagship : ci?.dock].filter(Boolean);
+        if (ciParts.length > 0) {
+          prompt = `${prompt}\n\n## Custom Instructions\n\n${ciParts.join("\n\n")}`;
         }
 
         await manager.launch(
