@@ -14,6 +14,7 @@ type MockShipManager = {
   sortieEscort: ReturnType<typeof vi.fn>;
   isEscort: ReturnType<typeof vi.fn>;
   getEscortForShip: ReturnType<typeof vi.fn>;
+  updatePhase: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Record<string, unknown> = {}) {
@@ -58,6 +59,7 @@ describe("EscortManager", () => {
       sortieEscort: vi.fn().mockReturnValue(makeEscortShip("ship-001")),
       isEscort: vi.fn().mockReturnValue(false),
       getEscortForShip: vi.fn().mockReturnValue(undefined),
+      updatePhase: vi.fn(),
     };
     escortManager = new EscortManager(
       mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
@@ -309,6 +311,35 @@ describe("EscortManager", () => {
         // But gate check should still be cleared
         expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
       });
+    });
+  });
+
+  describe("cleanupForDoneShip", () => {
+    it("kills Escort process and marks DB record as done", () => {
+      escortManager.launchEscort("ship-001");
+
+      escortManager.cleanupForDoneShip("ship-001");
+
+      expect(mockProcessManager.kill).toHaveBeenCalledWith("escort-001");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("escort-001", "done");
+    });
+
+    it("falls back to DB lookup when Escort not in memory", () => {
+      const escort = makeEscortShip("ship-001", { id: "db-escort" });
+      mockShipManager.getEscortForShip.mockReturnValue(escort);
+
+      escortManager.cleanupForDoneShip("ship-001");
+
+      expect(mockShipManager.getEscortForShip).toHaveBeenCalledWith("ship-001");
+      expect(mockProcessManager.kill).toHaveBeenCalledWith("db-escort");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("db-escort", "done");
+    });
+
+    it("is a no-op when no Escort exists for the parent Ship", () => {
+      escortManager.cleanupForDoneShip("ship-without-escort");
+
+      expect(mockProcessManager.kill).not.toHaveBeenCalled();
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
     });
   });
 

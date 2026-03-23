@@ -50,6 +50,10 @@ type MockStatusManager = {
   rollback: ReturnType<typeof vi.fn>;
 };
 
+type MockEscortManager = {
+  cleanupForDoneShip: ReturnType<typeof vi.fn>;
+};
+
 const REPO = "owner/repo";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -107,6 +111,7 @@ describe("StateSync", () => {
   let stateSync: StateSync;
   let mockShipManager: MockShipManager;
   let mockStatusManager: MockStatusManager;
+  let mockEscortManager: MockEscortManager;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -128,9 +133,15 @@ describe("StateSync", () => {
       markDone: vi.fn(),
       rollback: vi.fn(),
     };
+    mockEscortManager = {
+      cleanupForDoneShip: vi.fn(),
+    };
     stateSync = new StateSync(
       mockShipManager as unknown as ConstructorParameters<typeof StateSync>[0],
       mockStatusManager as unknown as ConstructorParameters<typeof StateSync>[1],
+    );
+    stateSync.setEscortManager(
+      mockEscortManager as unknown as Parameters<typeof stateSync.setEscortManager>[0],
     );
   });
 
@@ -281,6 +292,53 @@ describe("StateSync", () => {
       mockShipManager.getShip.mockReturnValue(undefined);
       await stateSync.onProcessExit("unknown", true);
       expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
+    });
+
+    it("cleans up Escort when parent Ship succeeds", async () => {
+      const ship = makeShip();
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockStatusManager.markDone.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", true);
+
+      expect(mockEscortManager.cleanupForDoneShip).toHaveBeenCalledWith("ship-1");
+    });
+
+    it("cleans up Escort when parent Ship is rescued (issue already closed)", async () => {
+      const ship = makeShip();
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetIssue.mockResolvedValue(
+        makeIssue({ state: "closed", labels: ["status/sortied"] }),
+      );
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockUpdateLabels.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", false);
+
+      expect(mockEscortManager.cleanupForDoneShip).toHaveBeenCalledWith("ship-1");
+    });
+
+    it("does not clean up Escort for Escort-Ships", async () => {
+      const escort = makeShip({ kind: "escort", parentShipId: "parent-1" });
+      mockShipManager.getShip.mockReturnValue(escort);
+
+      await stateSync.onProcessExit("escort-1", true);
+
+      expect(mockEscortManager.cleanupForDoneShip).not.toHaveBeenCalled();
+    });
+
+    it("does not clean up Escort on genuine failure", async () => {
+      const ship = makeShip();
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockGetIssue.mockResolvedValue(makeIssue({ state: "open" }));
+      mockStatusManager.rollback.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", false);
+
+      expect(mockEscortManager.cleanupForDoneShip).not.toHaveBeenCalled();
     });
   });
 

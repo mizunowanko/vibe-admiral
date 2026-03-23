@@ -1,5 +1,6 @@
 import type { ShipManager } from "./ship-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
+import type { EscortManager } from "./escort-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
@@ -16,6 +17,7 @@ function sleep(ms: number): Promise<void> {
 export class StateSync {
   private shipManager: ShipManager;
   private actorManager: ShipActorManager | null = null;
+  private escortManager: EscortManager | null = null;
   private statusManager: StatusManager;
 
   constructor(shipManager: ShipManager, statusManager: StatusManager) {
@@ -25,6 +27,10 @@ export class StateSync {
 
   setActorManager(actorManager: ShipActorManager): void {
     this.actorManager = actorManager;
+  }
+
+  setEscortManager(escortManager: EscortManager): void {
+    this.escortManager = escortManager;
   }
 
   async sortieGuard(
@@ -140,6 +146,9 @@ export class StateSync {
       this.actorManager?.send(shipId, { type: "COMPLETE" });
       this.shipManager.updatePhase(shipId, "done");
 
+      // Clean up Escort: kill process + mark DB record as done
+      this.escortManager?.cleanupForDoneShip(shipId);
+
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
@@ -188,6 +197,9 @@ export class StateSync {
         // Transition to done via XState (sole authority for phase transitions)
         this.actorManager?.send(shipId, { type: "NOTHING_TO_DO", reason: "Issue already closed on GitHub" });
         this.shipManager.updatePhase(shipId, "done");
+
+        // Clean up Escort: kill process + mark DB record as done
+        this.escortManager?.cleanupForDoneShip(shipId);
 
         try {
           await this.auditDependencies(ship.repo, ship.issueNumber);
