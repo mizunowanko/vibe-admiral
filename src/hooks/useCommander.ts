@@ -29,6 +29,7 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     const prev = prevFleetRef.current;
     if (prev.fleetId !== fleetId || prev.role !== role) {
       setMessages([]);
+      setIsLoading(false);
       historyLoadedRef.current = false;
     }
     prevFleetRef.current = { fleetId, role };
