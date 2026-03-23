@@ -173,42 +173,58 @@ export class FleetDatabase {
   }
 
   private applyV5(): void {
-    // V5: Remove stale UNIQUE(repo_id, issue_number) inline constraint from V1 schema.
-    // V4 tried DROP INDEX but the constraint was inline (auto-generated as
-    // sqlite_autoindex_ships_2), so it was never removed. This blocks Escort
-    // insertion for the same issue. SQLite requires table rebuild to drop
-    // inline constraints.
-    this.db.exec(`
-      CREATE TABLE ships_new (
-        id TEXT PRIMARY KEY,
-        repo_id INTEGER NOT NULL REFERENCES repos(id),
-        issue_number INTEGER NOT NULL,
-        issue_title TEXT,
-        worktree_path TEXT,
-        branch_name TEXT,
-        session_id TEXT,
-        pr_url TEXT,
-        pr_number INTEGER,
-        qa_required BOOLEAN,
-        process_pid INTEGER,
-        fleet_id TEXT,
-        phase TEXT NOT NULL DEFAULT 'planning',
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        completed_at TEXT,
-        kind TEXT NOT NULL DEFAULT 'ship',
-        parent_ship_id TEXT
-      );
+    // V5: Remove stale UNIQUE(repo_id, issue_number) inline constraint.
+    // foreign_keys=ON blocks DROP TABLE when other tables reference it.
+    // PRAGMA foreign_keys cannot be changed inside a transaction,
+    // so we toggle it outside, then use a transaction for the DDL.
 
-      INSERT INTO ships_new SELECT * FROM ships;
+    this.db.pragma("foreign_keys = OFF");
 
-      DROP TABLE ships;
+    try {
+      this.db.exec(`
+        DROP TABLE IF EXISTS ships_new;
 
-      ALTER TABLE ships_new RENAME TO ships;
+        BEGIN;
 
-      CREATE UNIQUE INDEX idx_ships_repo_issue_kind ON ships (repo_id, issue_number, kind);
+        CREATE TABLE ships_new (
+          id TEXT PRIMARY KEY,
+          repo_id INTEGER NOT NULL REFERENCES repos(id),
+          issue_number INTEGER NOT NULL,
+          issue_title TEXT,
+          worktree_path TEXT,
+          branch_name TEXT,
+          session_id TEXT,
+          pr_url TEXT,
+          pr_number INTEGER,
+          qa_required BOOLEAN,
+          process_pid INTEGER,
+          fleet_id TEXT,
+          phase TEXT NOT NULL DEFAULT 'planning',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT,
+          kind TEXT NOT NULL DEFAULT 'ship',
+          parent_ship_id TEXT
+        );
 
-      INSERT INTO schema_version (version) VALUES (5);
-    `);
+        INSERT INTO ships_new SELECT * FROM ships;
+
+        DROP TABLE ships;
+
+        ALTER TABLE ships_new RENAME TO ships;
+
+        CREATE UNIQUE INDEX idx_ships_repo_issue_kind
+          ON ships (repo_id, issue_number, kind);
+
+        INSERT INTO schema_version (version) VALUES (5);
+
+        COMMIT;
+      `);
+    } catch (e) {
+      try { this.db.exec("ROLLBACK;"); } catch { /* already rolled back */ }
+      throw e;
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
   }
 
   /** Ensure a repo row exists and return its ID. */
