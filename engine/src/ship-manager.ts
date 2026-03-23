@@ -63,6 +63,9 @@ export class ShipManager {
   private onPhaseChange:
     | ((id: string, phase: Phase, detail?: string) => void)
     | null = null;
+  private onShipCreated:
+    | ((id: string) => void)
+    | null = null;
 
   constructor(
     processManager: ProcessManager,
@@ -89,6 +92,10 @@ export class ShipManager {
     handler: (id: string, phase: Phase, detail?: string) => void,
   ): void {
     this.onPhaseChange = handler;
+  }
+
+  setShipCreatedHandler(handler: (id: string) => void): void {
+    this.onShipCreated = handler;
   }
 
   async sortie(
@@ -254,6 +261,7 @@ export class ShipManager {
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
     this.updatePhase(shipId, "planning");
+    this.onShipCreated?.(shipId);
     return ship;
   }
 

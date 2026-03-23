@@ -235,8 +235,8 @@ export type ServerMessage =
     }
   | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
   | {
-      type: "ship:status";
-      data: { id: string; phase: Phase; detail?: string };
+      type: "ship:updated";
+      data: { shipId: string };
     }
   | {
       type: "ship:compacting";
@@ -244,19 +244,11 @@ export type ServerMessage =
     }
   | {
       type: "ship:created";
-      data: {
-        id: string;
-        fleetId: string;
-        repo: string;
-        issueNumber: number;
-        issueTitle: string;
-        phase: Phase;
-        branchName: string;
-      };
+      data: { shipId: string };
     }
   | {
       type: "ship:done";
-      data: { id: string; prUrl?: string; merged: boolean };
+      data: { shipId: string };
     }
   | {
       type: "ship:gate-pending";

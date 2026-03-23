@@ -134,6 +134,7 @@ export class EngineServer {
     this.setupWSS();
     this.setupProcessEvents();
     this.setupShipStatusHandler();
+    this.setupShipCreatedHandler();
     this.runStartupReconciliation();
     this.startQuestionTimeoutScanner();
     this.setupLookout();
@@ -454,18 +455,12 @@ export class EngineServer {
     this.shipManager.setPhaseChangeHandler((id, phase, detail) => {
       const ship = this.shipManager.getShip(id);
 
-      this.broadcast({
-        type: "ship:status",
-        data: {
-          id,
-          phase: phase,
-          detail,
-          fleetId: ship?.fleetId,
-          repo: ship?.repo,
-          issueNumber: ship?.issueNumber,
-          issueTitle: ship?.issueTitle,
-        },
-      });
+      // Event Notification pattern: send minimal notification, Frontend fetches via REST API
+      if (phase === "done") {
+        this.broadcast({ type: "ship:done", data: { shipId: id } });
+      } else {
+        this.broadcast({ type: "ship:updated", data: { shipId: id } });
+      }
 
       // Inject Ship status into Flagship chat (Ship management is Flagship's domain)
       if (ship) {
@@ -498,6 +493,12 @@ export class EngineServer {
           );
         }
       }
+    });
+  }
+
+  private setupShipCreatedHandler(): void {
+    this.shipManager.setShipCreatedHandler((id) => {
+      this.broadcast({ type: "ship:created", data: { shipId: id } });
     });
   }
 
@@ -1065,19 +1066,8 @@ export class EngineServer {
     // Store PR URL on ship (DB + runtime)
     this.shipManager.setPrUrl(id, prUrl);
 
-    // Broadcast PR creation to frontend
-    this.broadcast({
-      type: "ship:status",
-      data: {
-        id,
-        phase: ship.phase,
-        detail: `PR created: ${prUrl}`,
-        fleetId: ship.fleetId,
-        repo: ship.repo,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-      },
-    });
+    // Broadcast PR detection as ship:updated notification — Frontend fetches via REST API
+    this.broadcast({ type: "ship:updated", data: { shipId: id } });
   }
 
   private detectCompactStatus(
