@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useUIStore } from "@/stores/uiStore";
 import { useFleetStore } from "@/stores/fleetStore";
 import {
@@ -10,6 +10,7 @@ import { SessionChat } from "@/components/session/SessionChat";
 import { SessionCardList } from "@/components/session/SessionCardList";
 import { ShipGrid } from "@/components/ship/ShipGrid";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
+import { KeyboardShortcutsDialog } from "@/components/layout/KeyboardShortcutsDialog";
 
 export function MainPanel() {
   const mainView = useUIStore((s) => s.mainView);
@@ -17,6 +18,7 @@ export function MainPanel() {
   const focusedSessionId = useSessionStore((s) => s.focusedSessionId);
   const setFocus = useSessionStore((s) => s.setFocus);
   const registerSession = useSessionStore((s) => s.registerSession);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Register commander sessions when fleet changes and auto-focus flagship
   useEffect(() => {
@@ -30,9 +32,32 @@ export function MainPanel() {
     }
   }, [selectedFleetId, registerSession, setFocus]);
 
-  // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships
+  // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships, ? or Ctrl+/ → help
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // ? key (without modifier, not in input/textarea)
+      if (
+        e.key === "?" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        if ((e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        setShortcutsOpen((prev) => !prev);
+        return;
+      }
+
+      // Ctrl+/ → toggle shortcuts dialog
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen((prev) => !prev);
+        return;
+      }
+
+      // Navigation shortcuts require a selected fleet
       if (!selectedFleetId) return;
       if (!e.ctrlKey && !e.metaKey) return;
 
@@ -72,33 +97,51 @@ export function MainPanel() {
 
   if (!selectedFleetId && mainView !== "fleet-settings") {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        <div className="text-center">
-          <p className="text-lg font-medium">Select or create a Fleet</p>
-          <p className="text-sm mt-1">
-            Choose a fleet from the sidebar to begin
-          </p>
+      <>
+        <div className="flex flex-1 items-center justify-center text-muted-foreground">
+          <div className="text-center">
+            <p className="text-lg font-medium">Select or create a Fleet</p>
+            <p className="text-sm mt-1">
+              Choose a fleet from the sidebar to begin
+            </p>
+          </div>
         </div>
-      </div>
+        <KeyboardShortcutsDialog
+          open={shortcutsOpen}
+          onOpenChange={setShortcutsOpen}
+        />
+      </>
     );
   }
 
-  switch (mainView) {
-    case "command":
-      return (
-        <div className="flex flex-1 min-h-0">
-          {/* Left: Session Chat */}
-          <SessionChat sessionId={focusedSessionId} />
+  const content = (() => {
+    switch (mainView) {
+      case "command":
+        return (
+          <div className="flex flex-1 min-h-0">
+            {/* Left: Session Chat */}
+            <SessionChat sessionId={focusedSessionId} />
 
-          {/* Right: Session Card List */}
-          <SessionCardList fleetId={selectedFleetId!} />
-        </div>
-      );
-    case "ships":
-      return <ShipGrid fleetId={selectedFleetId} />;
-    case "fleet-settings":
-      return <FleetSettings />;
-    default:
-      return null;
-  }
+            {/* Right: Session Card List */}
+            <SessionCardList fleetId={selectedFleetId!} />
+          </div>
+        );
+      case "ships":
+        return <ShipGrid fleetId={selectedFleetId} />;
+      case "fleet-settings":
+        return <FleetSettings />;
+      default:
+        return null;
+    }
+  })();
+
+  return (
+    <>
+      {content}
+      <KeyboardShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+      />
+    </>
+  );
 }
