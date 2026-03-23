@@ -5,7 +5,7 @@ import { useShip } from "@/hooks/useShip";
 import { SessionInput } from "./SessionInput";
 import { SessionMessage } from "./SessionMessage";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, ArrowDown, HelpCircle } from "lucide-react";
+import { Loader2, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StreamMessage } from "@/types";
 import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
@@ -65,7 +65,7 @@ interface SessionChatProps {
 }
 
 export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatProps) {
-  const { messages, sendMessage, answerQuestion, pendingQuestion, isLoading, session } =
+  const { messages, sendMessage, isLoading, session } =
     useSessionMessages(sessionId);
   const engineConnected = useUIStore((s) => s.engineConnected);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,7 +77,7 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
   const shipId = session?.type === "ship" ? session.shipId ?? null : null;
   const { ship } = useShip(shipId);
 
-  const isCommander = session?.type === "dock" || session?.type === "flagship";
+  const isFlagship = session?.type === "flagship";
   const isShip = session?.type === "ship";
 
   // Apply tail limit for ship logs
@@ -88,9 +88,10 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
     return messages;
   }, [messages, isShip]);
 
+  // collapseShipStatus only for Flagship (Dock doesn't show ship-status; Ship shows raw)
   const displayItems = useMemo(
-    () => groupToolMessages(isCommander ? collapseShipStatus(visibleMessages) : visibleMessages),
-    [visibleMessages, isCommander],
+    () => groupToolMessages(isFlagship ? collapseShipStatus(visibleMessages) : visibleMessages),
+    [visibleMessages, isFlagship],
   );
 
   const config = session ? SESSION_CONFIG[session.type] : SESSION_CONFIG.flagship;
@@ -212,30 +213,13 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
         )}
       </div>
 
-      {/* Pending Question Banner */}
-      {pendingQuestion && (
-        <div className="flex items-start gap-2 border-t border-blue-500/20 bg-blue-500/5 px-4 py-2.5">
-          <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-blue-500">{config.label} is asking:</p>
-            <p className="mt-0.5 text-sm text-foreground">{pendingQuestion}</p>
-          </div>
-        </div>
-      )}
-
       {/* Input — only for sessions with input */}
       {session.hasInput && sendMessage && (
         <SessionInput
-          onSend={pendingQuestion && answerQuestion ? answerQuestion : sendMessage}
+          onSend={sendMessage}
           disabled={!engineConnected}
           sessionId={session.id}
-          placeholder={
-            !engineConnected
-              ? "Engine disconnected"
-              : pendingQuestion
-                ? "Type your answer..."
-                : config.inputPlaceholder
-          }
+          placeholder={!engineConnected ? "Engine disconnected" : config.inputPlaceholder}
         />
       )}
     </div>

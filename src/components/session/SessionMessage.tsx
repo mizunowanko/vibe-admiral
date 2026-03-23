@@ -10,12 +10,57 @@ interface SessionMessageProps {
   context?: "command" | "bridge" | "ship";
 }
 
+/**
+ * Display-rule scope filter for SessionChat messages.
+ *
+ * | Message subtype        | Dock | Flagship   | Ship          |
+ * |------------------------|------|------------|---------------|
+ * | ship-status            |  -   | all Ships  | own Ship only |
+ * | gate-check-request     |  -   | all Ships  | own Ship only |
+ * | pr-review-request      |  -   | all Ships  | own Ship only |
+ * | lookout-alert          |  -   | all Ships  | -             |
+ * | commander-status       |  ✓   | ✓          | -             |
+ * | escort-log             |  -   | -          | ✓             |
+ * | User message           |  ✓   | ✓          | -             |
+ *
+ * Flagship/Ship "own Ship" filtering is handled by the data source —
+ * each session only receives messages for its scope. The render-level
+ * guards here enforce Dock suppression & cross-scope rules.
+ */
 export const SessionMessage = memo(function SessionMessage({
   message,
   repeatCount,
   context,
 }: SessionMessageProps) {
   const isSystem = message.type === "system";
+  const isShip = context === "ship";
+
+  // --- Unit-type scope guards ---
+
+  // Ship sessions never have User messages (-p mode, stdin ignored)
+  if (isShip && message.type === "user") return null;
+
+  // Ship operation messages: suppress in Dock (context="command" without ship scope)
+  // Dock and Flagship both use context="command", but Dock never receives ship
+  // operation messages from Engine — this guard is defensive.
+  if (
+    isSystem &&
+    (message.subtype === "ship-status" ||
+      message.subtype === "gate-check-request" ||
+      message.subtype === "pr-review-request" ||
+      message.subtype === "lookout-alert")
+  ) {
+    // Lookout alerts: Flagship only (suppress in Ship)
+    if (message.subtype === "lookout-alert" && isShip) return null;
+  }
+
+  // Commander status: suppress in Ship sessions
+  if (isSystem && message.subtype === "commander-status" && isShip) return null;
+
+  // Escort log: Ship only
+  if (isSystem && message.subtype === "escort-log" && !isShip) return null;
+
+  // --- Render routing ---
 
   // System messages with structured metadata — render as compact 1-line card
   if (
@@ -30,7 +75,7 @@ export const SessionMessage = memo(function SessionMessage({
     );
   }
 
-  // Commander status (CLI lifecycle) — Dock/Flagship
+  // Commander status (CLI lifecycle) — Dock/Flagship only
   if (isSystem && message.subtype === "commander-status") {
     const content = message.content ?? "";
     const isErrorStatus = content.includes("Failed");
@@ -48,22 +93,6 @@ export const SessionMessage = memo(function SessionMessage({
           )}
         >
           {content}
-        </div>
-      </div>
-    );
-  }
-
-  // AskUserQuestion — highlighted question banner
-  if (message.type === "question") {
-    return (
-      <div className="flex w-full justify-start">
-        <div className="max-w-[90%] rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm">
-          <span className="text-xs font-semibold text-blue-400 block mb-1">
-            Question
-          </span>
-          <p className="whitespace-pre-wrap break-words text-blue-200/80">
-            {message.content}
-          </p>
         </div>
       </div>
     );

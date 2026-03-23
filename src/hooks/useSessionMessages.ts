@@ -7,8 +7,6 @@ import type { StreamMessage, ImageAttachment, Session } from "@/types";
 interface SessionMessages {
   messages: StreamMessage[];
   sendMessage?: (message: string, images?: ImageAttachment[]) => void;
-  answerQuestion?: (answer: string) => void;
-  pendingQuestion: string | null;
   isLoading: boolean;
   session: Session | null;
 }
@@ -38,7 +36,6 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
     if (!session) {
       return {
         messages: EMPTY_MESSAGES,
-        pendingQuestion: null,
         isLoading: false,
         session: null,
       };
@@ -48,8 +45,6 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
       return {
         messages: commander.messages,
         sendMessage: commander.sendMessage,
-        answerQuestion: commander.answerQuestion,
-        pendingQuestion: commander.pendingQuestion,
         isLoading: commander.isLoading,
         session,
       };
@@ -58,7 +53,6 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
     // Ship session
     return {
       messages: logs,
-      pendingQuestion: null,
       isLoading: false,
       session,
     };

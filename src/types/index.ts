@@ -147,15 +147,13 @@ export interface StreamMessage {
     | "error"
     | "tool_use"
     | "tool_result"
-    | "history"
-    | "question";
+    | "history";
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
   subtype?: StreamMessageSubtype;
   meta?: SystemMessageMeta;
   timestamp?: number;
-  toolUseId?: string;
   images?: ImageAttachment[];
   imageCount?: number;
 }
