@@ -284,7 +284,7 @@ async function handleShipRoute(
 
     shipManager.syncPhaseFromDb(shipId);
 
-    // Handle gate-specific side effects
+    // Handle gate-specific side effects: launch Escort on-demand for each gate
     if (isGatePhase(result.toPhase)) {
       const gatePhase = result.toPhase as GatePhase;
       const gateType = DEFAULT_GATE_TYPES[gatePhase];
@@ -301,48 +301,48 @@ async function handleShipRoute(
         // Non-fatal: Escort can still run with existing (possibly stale) skills
       }
 
-      // Launch Escort if not already running
+      // On-demand Escort launch: start (or resume) an Escort for this gate.
+      // Unlike the persistent model, Escorts exit after each gate review
+      // and are resumed with --resume sessionId for the next gate.
       const escortManager = deps.getEscortManager();
-      if (!escortManager.isEscortRunning(shipId)) {
-        // Build Escort custom instructions from fleet settings
-        let escortExtraPrompt: string | undefined;
-        const ship = db.getShipById(shipId);
-        if (ship) {
-          const fleets = await deps.loadFleets();
-          const fleet = fleets.find((f) => f.id === ship.fleetId);
-          const ci = fleet?.customInstructions;
-          const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
-          if (ciParts.length > 0) {
-            escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
-          }
+
+      // Build Escort custom instructions from fleet settings
+      let escortExtraPrompt: string | undefined;
+      {
+        const fleets = await deps.loadFleets();
+        const fleet = fleets.find((f) => f.id === ship.fleetId);
+        const ci = fleet?.customInstructions;
+        const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
+        if (ciParts.length > 0) {
+          escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
         }
-        const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
-        if (!escortId) {
-          // Escort launch failed — revert via XState ESCORT_DIED
-          const prevPhase = GATE_PREV_PHASE[gatePhase];
-          console.error(
-            `[api-server] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
-          );
-          const revertResult = actorManager.requestTransition(shipId, {
-            type: "ESCORT_DIED",
-            exitCode: null,
-            feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-          });
-          if (revertResult.success) {
-            try {
-              db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
-                gate_result: "rejected",
-                feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-              });
-            } catch (revertErr) {
-              console.error(`[api-server] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
-            }
-            shipManager.syncPhaseFromDb(shipId);
+      }
+      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
+      if (!escortId) {
+        // Escort launch failed — revert via XState ESCORT_DIED
+        const prevPhase = GATE_PREV_PHASE[gatePhase];
+        console.error(
+          `[api-server] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
+        );
+        const revertResult = actorManager.requestTransition(shipId, {
+          type: "ESCORT_DIED",
+          exitCode: null,
+          feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+        });
+        if (revertResult.success) {
+          try {
+            db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
+              gate_result: "rejected",
+              feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+            });
+          } catch (revertErr) {
+            console.error(`[api-server] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
           }
-          shipManager.clearGateCheck(shipId);
-          sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
-          return;
+          shipManager.syncPhaseFromDb(shipId);
         }
+        shipManager.clearGateCheck(shipId);
+        sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
+        return;
       }
     }
 

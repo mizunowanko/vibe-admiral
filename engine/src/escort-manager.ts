@@ -6,16 +6,19 @@ import type { GatePhase, GateType, Phase } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
 /**
- * Thin coordination layer for persistent Escort Ships.
+ * On-demand Escort coordination layer using session resume.
  *
- * Escort is "just another Ship with a different skill" — launched via
- * ShipManager.sortieEscort() at parent Ship's sortie time.
+ * Escorts are launched on-demand when a gate phase is reached, perform their
+ * review, submit a verdict, and exit. Session resume (`--resume sessionId`)
+ * preserves context across gate phases so that planning review insights carry
+ * over to code review and acceptance testing.
  *
- * EscortManager's responsibilities:
- * 1. Track parentShipId → escortShipId mapping (in-memory)
- * 2. Launch persistent Escort via ShipManager.sortieEscort()
- * 3. Handle Escort-Ship exit (gate revert if verdict not submitted)
- * 4. Kill Escort when parent Ship completes
+ * Lifecycle per gate:
+ *   1. Ship enters gate phase (e.g., planning-gate)
+ *   2. Engine calls launchEscort(parentShipId, gatePhase, gateType)
+ *   3. EscortManager creates or resumes an Escort process
+ *   4. Escort reviews, submits verdict, and exits
+ *   5. onEscortExit() handles cleanup or phase revert (if no verdict)
  */
 export class EscortManager {
   private processManager: ProcessManager;
@@ -42,13 +45,17 @@ export class EscortManager {
   }
 
   /**
-   * Launch a persistent Escort Ship for a parent Ship.
-   * Called once at parent Ship's sortie time.
-   * Returns the escort Ship ID if launched, null if an Escort already exists.
+   * Launch an Escort on-demand for a specific gate phase.
+   *
+   * - First gate (no existing Escort): creates a new Escort Ship and launches fresh
+   * - Subsequent gates (existing Escort with sessionId): resumes the previous session
+   * - If an Escort process is already running, returns null (duplicate prevention)
+   *
+   * Returns the escort Ship ID if launched, null if skipped or failed.
    */
   launchEscort(
     parentShipId: string,
-    _gatePhase?: GatePhase,
+    gatePhase?: GatePhase,
     _gateType?: GateType,
     extraPrompt?: string,
   ): string | null {
@@ -68,11 +75,30 @@ export class EscortManager {
     }
 
     try {
-      const escort = this.shipManager.sortieEscort(parentShip, extraPrompt);
+      // Check for an existing Escort Ship (from a previous gate) with a sessionId
+      const existingEscort = this.shipManager.getEscortForShip(parentShipId);
+
+      if (existingEscort?.sessionId) {
+        // Resume previous Escort session — preserves context from prior gate reviews
+        const escort = this.shipManager.resumeEscort(
+          existingEscort,
+          gatePhase ?? "planning-gate",
+        );
+        this.escorts.set(parentShipId, escort.id);
+
+        console.log(
+          `[escort-manager] Resumed Escort ${escort.id.slice(0, 8)}... (session: ${existingEscort.sessionId.slice(0, 12)}...) for Ship ${parentShipId.slice(0, 8)}... at ${gatePhase ?? "unknown"} gate`,
+        );
+
+        return escort.id;
+      }
+
+      // First gate or no sessionId — launch a fresh Escort
+      const escort = this.shipManager.sortieEscort(parentShip, gatePhase, extraPrompt);
       this.escorts.set(parentShipId, escort.id);
 
       console.log(
-        `[escort-manager] Launched persistent Escort ${escort.id.slice(0, 8)}... for Ship ${parentShipId.slice(0, 8)}... (issue #${parentShip.issueNumber})`,
+        `[escort-manager] Launched new Escort ${escort.id.slice(0, 8)}... for Ship ${parentShipId.slice(0, 8)}... at ${gatePhase ?? "unknown"} gate (issue #${parentShip.issueNumber})`,
       );
 
       return escort.id;
@@ -156,13 +182,16 @@ export class EscortManager {
 
   /**
    * Handle Escort Ship process exit.
-   * If the parent Ship is still in a gate phase (verdict not submitted),
-   * treat as rejection: revert phase and notify Flagship.
+   *
+   * In the on-demand model, Escort exit is expected after each gate review
+   * (verdict submitted → process exits normally). We only treat it as an error
+   * if the parent Ship is still in a gate phase (verdict not submitted).
    */
   onEscortExit(escortShipId: string, code: number | null): void {
     const parentShipId = this.findShipIdByEscortId(escortShipId);
     if (!parentShipId) return;
 
+    // Remove from active process tracking (but preserve DB record for session resume)
     this.escorts.delete(parentShipId);
 
     console.log(
@@ -177,7 +206,8 @@ export class EscortManager {
 
     const currentPhase = parentShip.phase as Phase;
     if (!isGatePhase(currentPhase)) {
-      // Phase already moved past gate — verdict was submitted successfully
+      // Phase already moved past gate — verdict was submitted successfully.
+      // This is the normal path in the on-demand model.
       this.shipManager.clearGateCheck(parentShipId);
       return;
     }
