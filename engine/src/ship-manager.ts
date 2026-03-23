@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
+import { parseStreamMessage } from "./stream-parser.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
@@ -886,7 +887,8 @@ export class ShipManager {
         const msgs: StreamMessage[] = [];
         for (const line of lines) {
           try {
-            msgs.push(JSON.parse(line) as StreamMessage);
+            const parsed = parseStreamMessage(JSON.parse(line));
+            if (parsed) msgs.push(parsed);
           } catch {
             // Skip malformed lines
           }
