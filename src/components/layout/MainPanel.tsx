@@ -8,7 +8,6 @@ import {
 } from "@/stores/sessionStore";
 import { SessionChat } from "@/components/session/SessionChat";
 import { SessionCardList } from "@/components/session/SessionCardList";
-import { ShipGrid } from "@/components/ship/ShipGrid";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
 
 export function MainPanel() {
@@ -94,8 +93,6 @@ export function MainPanel() {
           <SessionCardList fleetId={selectedFleetId!} />
         </div>
       );
-    case "ships":
-      return <ShipGrid fleetId={selectedFleetId} />;
     case "fleet-settings":
       return <FleetSettings />;
     default:
