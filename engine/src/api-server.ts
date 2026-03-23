@@ -444,6 +444,20 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         return;
       }
 
+      // GET /api/ships/:id — Individual Ship data (for Frontend notification→fetch pattern)
+      const shipByIdMatch = route.match(/^ships\/([^/]+)$/);
+      if (shipByIdMatch && req.method === "GET") {
+        const shipId = shipByIdMatch[1]!;
+        const shipManager = deps.getShipManager();
+        const ship = shipManager.getShip(shipId);
+        if (!ship) {
+          sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+          return;
+        }
+        sendJson(res, 200, { ok: true, ships: [ship] });
+        return;
+      }
+
       // === Flagship API endpoints (legacy routes) ===
 
       // GET /api/ship-status
