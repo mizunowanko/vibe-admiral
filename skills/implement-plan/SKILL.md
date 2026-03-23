@@ -101,7 +101,8 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
 
 ### Gate ポーリング（plan-review）
 
-Phase 遷移後、Engine が Escort プロセスを起動する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
+Phase 遷移後、Engine が Escort プロセスを起動する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
+**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
 
 ```bash
 TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in implementing) echo "Gate approved"; break ;; planning) echo "Gate rejected"; break ;; planning-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"

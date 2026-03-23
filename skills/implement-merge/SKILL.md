@@ -70,7 +70,8 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
   -d '{"phase": "acceptance-test-gate", "metadata": {}}'
 ```
 
-Engine が Escort プロセスを起動して playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）:
+Engine が Escort プロセスを起動して playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
+**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
 
 ```bash
 TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"

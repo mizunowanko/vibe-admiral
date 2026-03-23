@@ -30,6 +30,14 @@ This Ship is managed by vibe-admiral. Use the /implement skill to execute the wo
 - \`VIBE_ADMIRAL_MAIN_REPO\` — The fleet's main repository (owner/repo)
 - \`VIBE_ADMIRAL_ENGINE_PORT\` — Engine API port (default: 9721)
 
+## Rate Limit vs Polling vs Machine Sleep
+
+- **Rate limit**: stderr に \`429\` / \`rate_limit_error\` が出る。全 Unit が同時に停止する。
+- **ポーリング sleep**: スキル内の意図的な待機。エラーは出ない。
+- **マシンスリープ復帰**: 応答遅延するがエラーメッセージはない。1 Unit だけの遅延なら rate limit ではない。
+
+rate limit でない遅延に対して不要な待機やリトライを行わないこと。
+
 ## Constraints
 
 - Do not modify \`.env\` files
