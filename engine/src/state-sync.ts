@@ -1,4 +1,5 @@
 import type { ShipManager } from "./ship-manager.js";
+import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
@@ -14,11 +15,16 @@ function sleep(ms: number): Promise<void> {
 
 export class StateSync {
   private shipManager: ShipManager;
+  private actorManager: ShipActorManager | null = null;
   private statusManager: StatusManager;
 
   constructor(shipManager: ShipManager, statusManager: StatusManager) {
     this.shipManager = shipManager;
     this.statusManager = statusManager;
+  }
+
+  setActorManager(actorManager: ShipActorManager): void {
+    this.actorManager = actorManager;
   }
 
   async sortieGuard(
@@ -130,6 +136,8 @@ export class StateSync {
         return;
       }
 
+      // Transition to done via XState (sole authority for phase transitions)
+      this.actorManager?.send(shipId, { type: "COMPLETE" });
       this.shipManager.updatePhase(shipId, "done");
 
       // Successful completion: remove worktree, mark done (label + close issue)
@@ -177,6 +185,8 @@ export class StateSync {
           `[state-sync] Ship #${ship.issueNumber} exited but issue is already closed — treating as done`,
         );
         await this.removeWorktreeWithRetry(ship.worktreePath);
+        // Transition to done via XState (sole authority for phase transitions)
+        this.actorManager?.send(shipId, { type: "NOTHING_TO_DO", reason: "Issue already closed on GitHub" });
         this.shipManager.updatePhase(shipId, "done");
 
         try {

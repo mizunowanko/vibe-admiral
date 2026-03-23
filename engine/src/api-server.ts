@@ -6,7 +6,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
-import { isGatePhase, DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { isGatePhase, DEFAULT_GATE_TYPES, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
@@ -244,63 +244,82 @@ async function handleShipRoute(
     const metadata = (body.metadata as Record<string, unknown>) ?? {};
     const triggeredBy = (body.triggeredBy as string) ?? "ship";
 
+    // Determine the XState event based on target phase
+    const actorManager = deps.getActorManager();
+    let xstateEvent: import("./ship-machine.js").ShipMachineEvent;
+    if (isGatePhase(targetPhase as Phase)) {
+      xstateEvent = { type: "GATE_ENTER" };
+    } else if (targetPhase === "done") {
+      xstateEvent = { type: "COMPLETE" };
+    } else {
+      // For non-gate, non-done transitions requested by Ship (shouldn't normally happen)
+      sendJson(res, 400, { ok: false, error: `Ships can only transition to gate phases or done, not ${targetPhase}` });
+      return;
+    }
+
+    // XState is the sole authority: request transition through XState first
+    const result = actorManager.requestTransition(shipId, xstateEvent);
+    if (!result.success) {
+      sendJson(res, 409, { ok: false, error: `Transition rejected by XState: current phase is ${result.currentPhase ?? "unknown"}, cannot process ${xstateEvent.type}` });
+      return;
+    }
+
+    // XState approved — persist to DB
     try {
-      const applied = db.transitionPhase(
+      db.persistPhaseTransition(
         shipId,
-        ship.phase as Phase,
-        targetPhase as Phase,
+        result.fromPhase,
+        result.toPhase,
         triggeredBy,
         metadata,
       );
+    } catch (err) {
+      console.error(`[api-server] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}...:`, err);
+      // DB failed but XState already transitioned — log and continue
+    }
 
-      if (applied) {
-        shipManager.syncPhaseFromDb(shipId);
+    shipManager.syncPhaseFromDb(shipId);
 
-        // Send event to XState Actor for gate transitions
-        const actorManager = deps.getActorManager();
-        if (isGatePhase(targetPhase as Phase)) {
-          const gatePhase = targetPhase as GatePhase;
-          const gateType = DEFAULT_GATE_TYPES[gatePhase];
-          shipManager.setGateCheck(shipId, gatePhase, gateType);
+    // Handle gate-specific side effects
+    if (isGatePhase(result.toPhase)) {
+      const gatePhase = result.toPhase as GatePhase;
+      const gateType = DEFAULT_GATE_TYPES[gatePhase];
+      shipManager.setGateCheck(shipId, gatePhase, gateType);
 
-          // Notify Actor of gate entry
-          actorManager.send(shipId, { type: "GATE_ENTER" });
-
-          // Persistent Escort detects gate phase via polling — no explicit launch needed.
-          // If no Escort is running (died or not yet launched), launch one now.
-          const escortManager = deps.getEscortManager();
-          if (!escortManager.isEscortRunning(shipId)) {
-            const escortId = escortManager.launchEscort(shipId, gatePhase, gateType);
-            if (!escortId) {
-              // Escort launch failed — revert phase to pre-gate to avoid permanent stall
-              const prevPhase = GATE_PREV_PHASE[gatePhase];
-              console.error(
-                `[api-server] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
-              );
-              try {
-                db.transitionPhase(shipId, gatePhase, prevPhase, "engine", {
-                  gate_result: "rejected",
-                  feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-                });
-                shipManager.syncPhaseFromDb(shipId);
-              } catch (revertErr) {
-                console.error(`[api-server] Failed to revert phase for Ship ${shipId.slice(0, 8)}...:`, revertErr);
-              }
-              shipManager.clearGateCheck(shipId);
-              sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
-              return;
+      // Launch Escort if not already running
+      const escortManager = deps.getEscortManager();
+      if (!escortManager.isEscortRunning(shipId)) {
+        const escortId = escortManager.launchEscort(shipId, gatePhase, gateType);
+        if (!escortId) {
+          // Escort launch failed — revert via XState ESCORT_DIED
+          const prevPhase = GATE_PREV_PHASE[gatePhase];
+          console.error(
+            `[api-server] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
+          );
+          const revertResult = actorManager.requestTransition(shipId, {
+            type: "ESCORT_DIED",
+            exitCode: null,
+            feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+          });
+          if (revertResult.success) {
+            try {
+              db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
+                gate_result: "rejected",
+                feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+              });
+            } catch (revertErr) {
+              console.error(`[api-server] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
             }
+            shipManager.syncPhaseFromDb(shipId);
           }
-        } else if (targetPhase === "done") {
-          actorManager.send(shipId, { type: "COMPLETE" });
+          shipManager.clearGateCheck(shipId);
+          sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
+          return;
         }
       }
-
-      sendJson(res, 200, { ok: true, phase: targetPhase });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 400, { ok: false, error: message });
     }
+
+    sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
   }
 
@@ -324,37 +343,35 @@ async function handleShipRoute(
       return;
     }
 
-    const gatePhase = currentPhase as GatePhase;
     const feedback = body.feedback as string | undefined;
-    let targetPhase: Phase;
-    let metadata: Record<string, unknown>;
 
-    if (verdict === "approve") {
-      targetPhase = GATE_NEXT_PHASE[gatePhase];
-      metadata = { gate_result: "approved" };
-    } else {
-      targetPhase = GATE_PREV_PHASE[gatePhase];
-      metadata = { gate_result: "rejected", feedback: feedback ?? "" };
+    // XState is the sole authority: request transition through XState first
+    const actorManager = deps.getActorManager();
+    const xstateEvent: import("./ship-machine.js").ShipMachineEvent = verdict === "approve"
+      ? { type: "GATE_APPROVED" }
+      : { type: "GATE_REJECTED", feedback: feedback ?? "" };
+
+    const result = actorManager.requestTransition(shipId, xstateEvent);
+    if (!result.success) {
+      sendJson(res, 409, { ok: false, error: `Gate verdict rejected by XState: current phase is ${result.currentPhase ?? "unknown"}` });
+      return;
     }
+
+    // XState approved — persist to DB
+    const metadata: Record<string, unknown> = verdict === "approve"
+      ? { gate_result: "approved" }
+      : { gate_result: "rejected", feedback: feedback ?? "" };
 
     try {
-      db.transitionPhase(shipId, currentPhase, targetPhase, "escort", metadata);
-      shipManager.syncPhaseFromDb(shipId);
-      shipManager.clearGateCheck(shipId);
-
-      // Send gate verdict event to XState Actor
-      const actorManager = deps.getActorManager();
-      if (verdict === "approve") {
-        actorManager.send(shipId, { type: "GATE_APPROVED" });
-      } else {
-        actorManager.send(shipId, { type: "GATE_REJECTED", feedback: feedback ?? "" });
-      }
-
-      sendJson(res, 200, { ok: true, phase: targetPhase });
+      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 400, { ok: false, error: message });
+      console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}...:`, err);
     }
+
+    shipManager.syncPhaseFromDb(shipId);
+    shipManager.clearGateCheck(shipId);
+
+    sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
   }
 
@@ -367,19 +384,23 @@ async function handleShipRoute(
       return;
     }
 
-    try {
-      db.transitionPhase(shipId, ship.phase as Phase, "done", "ship", { reason, nothingToDo: true });
-      shipManager.syncPhaseFromDb(shipId);
-
-      // Send nothing-to-do event to XState Actor
-      const actorManager = deps.getActorManager();
-      actorManager.send(shipId, { type: "NOTHING_TO_DO", reason });
-
-      sendJson(res, 200, { ok: true, phase: "done" });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 400, { ok: false, error: message });
+    // XState is the sole authority: request transition through XState first
+    const actorManager = deps.getActorManager();
+    const result = actorManager.requestTransition(shipId, { type: "NOTHING_TO_DO", reason });
+    if (!result.success) {
+      sendJson(res, 409, { ok: false, error: `Nothing-to-do rejected by XState: current phase is ${result.currentPhase ?? "unknown"}` });
+      return;
     }
+
+    // XState approved — persist to DB
+    try {
+      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "ship", { reason, nothingToDo: true });
+    } catch (err) {
+      console.error(`[api-server] DB persist failed after nothing-to-do for Ship ${shipId.slice(0, 8)}...:`, err);
+    }
+
+    shipManager.syncPhaseFromDb(shipId);
+    sendJson(res, 200, { ok: true, phase: "done" });
     return;
   }
 

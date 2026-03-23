@@ -111,6 +111,33 @@ export class ShipActorManager {
   }
 
   /**
+   * Request a phase transition through XState. XState is the sole authority
+   * for validating phase transitions — if XState rejects the event, the
+   * transition is denied.
+   *
+   * Returns `{ success: true, fromPhase, toPhase }` if the transition occurred,
+   * or `{ success: false, currentPhase }` if XState did not transition.
+   */
+  requestTransition(
+    shipId: string,
+    event: ShipMachineEvent,
+  ): { success: true; fromPhase: Phase; toPhase: Phase } | { success: false; currentPhase: Phase | undefined } {
+    const actor = this.actors.get(shipId);
+    if (!actor) {
+      return { success: false, currentPhase: undefined };
+    }
+
+    const beforePhase = this.getPhase(shipId);
+    actor.send(event);
+    const afterPhase = this.getPhase(shipId);
+
+    if (afterPhase && afterPhase !== beforePhase) {
+      return { success: true, fromPhase: beforePhase!, toPhase: afterPhase };
+    }
+    return { success: false, currentPhase: afterPhase };
+  }
+
+  /**
    * Get the current phase from the Actor's state.
    * For restored actors, returns the effective DB phase until a real
    * transition occurs through the Actor. Falls back to undefined if no actor exists.

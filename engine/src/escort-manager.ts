@@ -158,22 +158,27 @@ export class EscortManager {
       `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict — reverting Ship ${parentShipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
     );
 
-    // Send ESCORT_DIED event to parent Ship's XState Actor
-    this.actorManager?.send(parentShipId, {
+    // XState is the sole authority: request transition through XState first
+    const feedback = `Escort process exited unexpectedly (code=${code}) without submitting verdict`;
+    const result = this.actorManager?.requestTransition(parentShipId, {
       type: "ESCORT_DIED",
       exitCode: code,
-      feedback: `Escort process exited unexpectedly (code=${code}) without submitting verdict`,
+      feedback,
     });
 
-    // Revert phase to pre-gate
-    try {
-      db.transitionPhase(parentShipId, currentPhase, prevPhase, "escort", {
-        gate_result: "rejected",
-        feedback: `Escort process exited unexpectedly (code=${code}) without submitting verdict`,
-      });
-      this.shipManager.syncPhaseFromDb(parentShipId);
-    } catch (err) {
-      console.error(`[escort-manager] Failed to revert phase for Ship ${parentShipId.slice(0, 8)}...:`, err);
+    // If XState approved the revert, persist to DB
+    if (result?.success) {
+      try {
+        db.persistPhaseTransition(parentShipId, result.fromPhase, result.toPhase, "escort", {
+          gate_result: "rejected",
+          feedback,
+        });
+        this.shipManager.syncPhaseFromDb(parentShipId);
+      } catch (err) {
+        console.error(`[escort-manager] Failed to persist phase revert for Ship ${parentShipId.slice(0, 8)}...:`, err);
+      }
+    } else {
+      console.error(`[escort-manager] XState rejected ESCORT_DIED for Ship ${parentShipId.slice(0, 8)}... (current: ${result?.currentPhase})`);
     }
 
     // Clear gate check state
