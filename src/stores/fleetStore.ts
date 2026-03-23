@@ -36,15 +36,13 @@ export const useFleetStore = create<FleetState>()(
       setFleets: (fleets) => {
         const { selectedFleetId } = get();
         const selectedFleet = fleets.find((f) => f.id === selectedFleetId) ?? null;
-        set({
-          fleets,
-          selectedFleet,
-          // Clear persisted ID only when the fleet list is non-empty but
-          // the selected fleet is genuinely missing. An empty array may
-          // arrive during a transient reconnection; clearing in that case
-          // would cause the UI to jump to the Fleet selection screen.
-          ...(selectedFleetId && !selectedFleet && fleets.length > 0 && { selectedFleetId: null }),
-        });
+        // Never reset selectedFleetId from setFleets(). During WS
+        // reconnection the fleet list may arrive incomplete/empty before
+        // the full list is available, causing a transient null that
+        // unmounts the entire MainPanel and destroys draft state.
+        // selectedFleetId is only cleared explicitly via selectFleet()
+        // or deleteFleet().
+        set({ fleets, selectedFleet });
       },
 
       selectFleet: (id) => {
