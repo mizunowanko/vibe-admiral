@@ -114,6 +114,20 @@ export interface Ship {
   escorts?: EscortInfo[];
 }
 
+// === Dispatch (Commander sub-agent launched via Task tool) ===
+export type DispatchStatus = "running" | "completed" | "failed";
+
+export interface Dispatch {
+  id: string;
+  parentRole: CommanderRole;
+  fleetId: string;
+  name: string;
+  status: DispatchStatus;
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
+}
+
 // === Issue ===
 export interface Issue {
   number: number;
@@ -241,6 +255,22 @@ export type ServerMessage =
   | {
       type: "dock:question-timeout";
       data: { fleetId: string };
+    }
+  | {
+      type: "flagship:dispatch-started";
+      data: { fleetId: string; dispatch: Dispatch };
+    }
+  | {
+      type: "flagship:dispatch-completed";
+      data: { fleetId: string; dispatch: Dispatch };
+    }
+  | {
+      type: "dock:dispatch-started";
+      data: { fleetId: string; dispatch: Dispatch };
+    }
+  | {
+      type: "dock:dispatch-completed";
+      data: { fleetId: string; dispatch: Dispatch };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
