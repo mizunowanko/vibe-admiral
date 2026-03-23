@@ -185,44 +185,47 @@ describe("FleetDatabase", () => {
     });
   });
 
-  describe("transitionPhase", () => {
+  describe("persistPhaseTransition", () => {
     it("applies a valid forward transition", () => {
       db.upsertShip(makeShip());
-      const applied = db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      const applied = db.persistPhaseTransition("ship-001", "planning", "planning-gate", "engine");
       expect(applied).toBe(true);
 
       const ships = db.getActiveShips();
       expect(ships[0]!.phase).toBe("planning-gate");
     });
 
-    it("rejects backward transitions", () => {
+    it("persists backward transitions (validation is XState's job)", () => {
       db.upsertShip(makeShip({ phase: "implementing" }));
-      expect(() =>
-        db.transitionPhase("ship-001", "implementing", "planning", "engine"),
-      ).toThrow("Cannot go backward");
+      // DB no longer validates forward-only — that's XState's responsibility
+      const applied = db.persistPhaseTransition("ship-001", "implementing", "planning", "engine");
+      expect(applied).toBe(true);
+
+      const ships = db.getActiveShips();
+      expect(ships[0]!.phase).toBe("planning");
     });
 
-    it("throws on phase mismatch", () => {
+    it("throws on phase mismatch (optimistic lock)", () => {
       db.upsertShip(makeShip({ phase: "planning" }));
       expect(() =>
-        db.transitionPhase("ship-001", "implementing", "implementing-gate", "engine"),
+        db.persistPhaseTransition("ship-001", "implementing", "implementing-gate", "engine"),
       ).toThrow("Phase mismatch");
     });
 
     it("is idempotent within 5 seconds", () => {
       db.upsertShip(makeShip());
-      const first = db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      const first = db.persistPhaseTransition("ship-001", "planning", "planning-gate", "engine");
       expect(first).toBe(true);
 
       // Same transition again — should be no-op
       db.updateShipPhase("ship-001", "planning"); // reset phase for re-attempt
-      const second = db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      const second = db.persistPhaseTransition("ship-001", "planning", "planning-gate", "engine");
       expect(second).toBe(false);
     });
 
     it("records transition in audit log", () => {
       db.upsertShip(makeShip());
-      db.transitionPhase("ship-001", "planning", "planning-gate", "engine", { reason: "gate triggered" });
+      db.persistPhaseTransition("ship-001", "planning", "planning-gate", "engine", { reason: "gate triggered" });
 
       // Verify by attempting to delete — deleteShip cleans up phase_transitions too
       // If the audit record exists, no error is thrown
@@ -232,7 +235,7 @@ describe("FleetDatabase", () => {
 
     it("throws for non-existent ship", () => {
       expect(() =>
-        db.transitionPhase("non-existent", "planning", "implementing", "engine"),
+        db.persistPhaseTransition("non-existent", "planning", "implementing", "engine"),
       ).toThrow("not found");
     });
   });
@@ -273,9 +276,9 @@ describe("FleetDatabase", () => {
       return rows;
     }
 
-    it("stores metadata JSON via transitionPhase", () => {
+    it("stores metadata JSON via persistPhaseTransition", () => {
       db.upsertShip(makeShip());
-      db.transitionPhase("ship-001", "planning", "planning-gate", "ship", {
+      db.persistPhaseTransition("ship-001", "planning", "planning-gate", "ship", {
         planCommentUrl: "https://github.com/owner/repo/issues/42#comment-1",
         qaRequired: true,
       });
@@ -289,11 +292,10 @@ describe("FleetDatabase", () => {
       expect(meta.qaRequired).toBe(true);
     });
 
-    it("stores gate rejection feedback via transitionPhase", () => {
+    it("stores gate rejection feedback via persistPhaseTransition", () => {
       db.upsertShip(makeShip({ phase: "planning-gate" }));
-      // Escort rejects: planning-gate → planning (backward is disallowed by transitionPhase)
-      // Use recordPhaseTransition for rejection (which doesn't enforce forward-only)
-      db.recordPhaseTransition("ship-001", "planning-gate", "planning", "escort", {
+      // Escort rejects: planning-gate → planning (DB persists after XState validates)
+      db.persistPhaseTransition("ship-001", "planning-gate", "planning", "escort", {
         gate_result: "rejected",
         feedback: "Plan is too broad, narrow the scope",
       });
@@ -323,7 +325,7 @@ describe("FleetDatabase", () => {
 
     it("stores null metadata when not provided", () => {
       db.upsertShip(makeShip());
-      db.transitionPhase("ship-001", "planning", "planning-gate", "engine");
+      db.persistPhaseTransition("ship-001", "planning", "planning-gate", "engine");
 
       const rows = queryTransitions(db.path);
       expect(rows[0]!.metadata).toBeNull();
@@ -333,12 +335,12 @@ describe("FleetDatabase", () => {
       db.upsertShip(makeShip());
 
       // Ship enters gate
-      db.transitionPhase("ship-001", "planning", "planning-gate", "ship", {
+      db.persistPhaseTransition("ship-001", "planning", "planning-gate", "ship", {
         planCommentUrl: "https://example.com",
       });
 
       // Escort approves (updates phase to implementing)
-      db.transitionPhase("ship-001", "planning-gate", "implementing", "escort", {
+      db.persistPhaseTransition("ship-001", "planning-gate", "implementing", "escort", {
         gate_result: "approved",
       });
 
@@ -388,16 +390,16 @@ describe("FleetDatabase", () => {
   });
 
   describe("concurrent phase updates (gate exclusivity)", () => {
-    it("transitionPhase rejects stale expectedPhase (optimistic locking)", () => {
+    it("persistPhaseTransition rejects stale expectedPhase (optimistic locking)", () => {
       db.upsertShip(makeShip({ phase: "planning-gate" }));
 
       // Escort approves: planning-gate → implementing
-      const first = db.transitionPhase("ship-001", "planning-gate", "implementing", "escort");
+      const first = db.persistPhaseTransition("ship-001", "planning-gate", "implementing", "escort");
       expect(first).toBe(true);
 
       // A stale Ship attempt using old expectedPhase should fail
       expect(() =>
-        db.transitionPhase("ship-001", "planning-gate", "implementing", "ship"),
+        db.persistPhaseTransition("ship-001", "planning-gate", "implementing", "ship"),
       ).toThrow("Phase mismatch");
     });
 
@@ -405,18 +407,18 @@ describe("FleetDatabase", () => {
       db.upsertShip(makeShip({ phase: "implementing" }));
 
       // First transition succeeds
-      const result1 = db.transitionPhase("ship-001", "implementing", "implementing-gate", "ship");
+      const result1 = db.persistPhaseTransition("ship-001", "implementing", "implementing-gate", "ship");
       expect(result1).toBe(true);
 
       // Second transition with same expected phase fails (phase already changed)
       expect(() =>
-        db.transitionPhase("ship-001", "implementing", "implementing-gate", "engine"),
+        db.persistPhaseTransition("ship-001", "implementing", "implementing-gate", "engine"),
       ).toThrow("Phase mismatch");
     });
 
     it("phases table is updated atomically with ships table", () => {
       db.upsertShip(makeShip());
-      db.transitionPhase("ship-001", "planning", "planning-gate", "ship");
+      db.persistPhaseTransition("ship-001", "planning", "planning-gate", "ship");
 
       // Both ships and phases tables should reflect the same state
       const ships = db.getActiveShips();

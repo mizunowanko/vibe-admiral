@@ -74,16 +74,16 @@ export class EngineServer {
     this.actorManager = new ShipActorManager();
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
 
-    // Wire up ShipActorManager to ShipManager and EscortManager
+    // Wire up ShipActorManager to ShipManager, EscortManager, and StateSync
     this.shipManager.setActorManager(this.actorManager);
     this.escortManager.setActorManager(this.actorManager);
+    this.stateSync.setActorManager(this.actorManager);
 
     // Configure Actor side effects
     this.actorManager.setSideEffects({
       onPhaseChange: (shipId, phase, detail) => {
         // Actor-driven phase changes are informational — DB updates are
-        // still handled by the existing flow (ship-manager.updatePhase / db.transitionPhase).
-        // The Actor tracks state in parallel to validate transitions.
+        // handled after XState validates (db.persistPhaseTransition / ship-manager.updatePhase).
         console.log(`[actor] Ship ${shipId.slice(0, 8)}... phase: ${phase}${detail ? ` (${detail})` : ""}`);
       },
       onRecordTransition: (shipId, fromPhase, toPhase, triggeredBy, _metadata) => {

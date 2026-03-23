@@ -2,7 +2,6 @@ import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShipProcess, Phase, ShipKind } from "./types.js";
-import { PHASE_ORDER } from "./types.js";
 
 /** Persisted ship row stored in SQLite. */
 export interface ShipRow {
@@ -415,16 +414,20 @@ export class FleetDatabase {
   }
 
   /**
-   * Transactional phase transition.
-   * 1. Verify current phase matches expected
-   * 2. Insert phase_transition audit log
-   * 3. Update phases table
-   * 4. Update ships.phase
+   * Persist a phase transition that was already validated by XState.
+   * DB is responsible only for:
+   * 1. Optimistic lock (verify current DB phase matches expectedPhase)
+   * 2. Audit log recording
+   * 3. Phase persistence (phases + ships tables)
    *
    * Idempotent: if the same transition was recorded within the last 5 seconds, no-op.
    * Returns true if the transition was applied, false if no-op.
+   *
+   * IMPORTANT: This method must only be called from XState side-effect callbacks
+   * or after XState has validated the transition. Direct calls from API handlers
+   * are prohibited — use ShipActorManager.requestTransition() instead.
    */
-  transitionPhase(
+  persistPhaseTransition(
     shipId: string,
     expectedPhase: Phase,
     newPhase: Phase,
@@ -432,7 +435,7 @@ export class FleetDatabase {
     metadata?: Record<string, unknown>,
   ): boolean {
     const txn = this.db.transaction(() => {
-      // Check current phase
+      // Optimistic lock: verify current phase matches expected
       const current = this.db.prepare(
         "SELECT phase FROM ships WHERE id = ?",
       ).get(shipId) as { phase: string } | undefined;
@@ -442,20 +445,6 @@ export class FleetDatabase {
       }
       if (current.phase !== expectedPhase) {
         throw new Error(`Phase mismatch: expected ${expectedPhase}, got ${current.phase}`);
-      }
-
-      // Validate forward-only (with gate-reject exception)
-      const currentIdx = PHASE_ORDER.indexOf(expectedPhase as Phase);
-      const newIdx = PHASE_ORDER.indexOf(newPhase);
-      if (newIdx <= currentIdx) {
-        // Allow gate rejection: gate-phase → preceding work phase
-        const isGateReject =
-          (expectedPhase === "planning-gate" && newPhase === "planning") ||
-          (expectedPhase === "implementing-gate" && newPhase === "implementing") ||
-          (expectedPhase === "acceptance-test-gate" && newPhase === "acceptance-test");
-        if (!isGateReject) {
-          throw new Error(`Cannot go backward: ${expectedPhase} → ${newPhase}`);
-        }
       }
 
       // Idempotency: check if same transition was recorded in last 5 seconds

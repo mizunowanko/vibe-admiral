@@ -206,6 +206,96 @@ describe("ShipActorManager", () => {
     });
   });
 
+  describe("requestTransition", () => {
+    it("returns success with phase change on valid transition", () => {
+      manager.createActor(DEFAULT_INPUT);
+      const result = manager.requestTransition("ship-1", { type: "GATE_ENTER" });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.fromPhase).toBe("planning");
+        expect(result.toPhase).toBe("planning-gate");
+      }
+      manager.stopAll();
+    });
+
+    it("returns failure when XState rejects the event", () => {
+      manager.createActor(DEFAULT_INPUT);
+      // planning state does not accept GATE_APPROVED — only GATE_ENTER
+      const result = manager.requestTransition("ship-1", { type: "GATE_APPROVED" });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.currentPhase).toBe("planning");
+      }
+      // Phase should not have changed
+      expect(manager.getPhase("ship-1")).toBe("planning");
+      manager.stopAll();
+    });
+
+    it("returns failure with undefined currentPhase when no actor exists", () => {
+      const result = manager.requestTransition("nonexistent", { type: "GATE_ENTER" });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.currentPhase).toBeUndefined();
+      }
+    });
+
+    it("supports gate rejection (gate → previous work phase)", () => {
+      manager.createActor(DEFAULT_INPUT);
+      // Advance to planning-gate
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(manager.getPhase("ship-1")).toBe("planning-gate");
+
+      // Reject the gate
+      const result = manager.requestTransition("ship-1", { type: "GATE_REJECTED", feedback: "needs work" });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.fromPhase).toBe("planning-gate");
+        expect(result.toPhase).toBe("planning");
+      }
+      manager.stopAll();
+    });
+
+    it("supports ESCORT_DIED event (gate → previous work phase)", () => {
+      manager.createActor(DEFAULT_INPUT);
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(manager.getPhase("ship-1")).toBe("planning-gate");
+
+      const result = manager.requestTransition("ship-1", {
+        type: "ESCORT_DIED",
+        exitCode: 1,
+        feedback: "Escort process crashed",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.fromPhase).toBe("planning-gate");
+        expect(result.toPhase).toBe("planning");
+      }
+      manager.stopAll();
+    });
+
+    it("supports NOTHING_TO_DO event (any work phase → done)", () => {
+      manager.createActor(DEFAULT_INPUT);
+      const result = manager.requestTransition("ship-1", { type: "NOTHING_TO_DO", reason: "issue resolved" });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.fromPhase).toBe("planning");
+        expect(result.toPhase).toBe("done");
+      }
+      manager.stopAll();
+    });
+
+    it("prevents skipping phases (e.g. planning → merging)", () => {
+      manager.createActor(DEFAULT_INPUT);
+      // COMPLETE event from planning should not transition (merging → done is valid, but planning → done via COMPLETE is not)
+      const result = manager.requestTransition("ship-1", { type: "COMPLETE" });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.currentPhase).toBe("planning");
+      }
+      manager.stopAll();
+    });
+  });
+
   describe("side effects", () => {
     it("fires onPhaseChange when actor transitions", () => {
       manager.createActor(DEFAULT_INPUT);

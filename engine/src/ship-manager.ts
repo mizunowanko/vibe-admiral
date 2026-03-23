@@ -524,7 +524,7 @@ export class ShipManager {
 
   /**
    * Sync phase from DB and notify frontend.
-   * Called by the REST API after it has already updated the DB via transitionPhase().
+   * Called by the REST API after it has already updated the DB via persistPhaseTransition().
    * Unlike updatePhase(), this does NOT write to DB — it only reads and notifies.
    */
   syncPhaseFromDb(id: string): void {
