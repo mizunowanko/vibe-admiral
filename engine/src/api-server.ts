@@ -286,6 +286,17 @@ async function handleShipRoute(
       const gateType = DEFAULT_GATE_TYPES[gatePhase];
       shipManager.setGateCheck(shipId, gatePhase, gateType);
 
+      // Re-deploy skills so Escort picks up any changes made by the Ship
+      // (e.g., when the Ship modified skill source files during implementation).
+      try {
+        const fleetCtx = await resolveFleetContext(deps, ship.fleetId);
+        const skillSources = typeof fleetCtx === "string" ? undefined : fleetCtx.skillSources;
+        await shipManager.redeploySkills(shipId, skillSources);
+      } catch (err) {
+        console.warn(`[api-server] Skill redeploy failed for Ship ${shipId.slice(0, 8)}...:`, err);
+        // Non-fatal: Escort can still run with existing (possibly stale) skills
+      }
+
       // Launch Escort if not already running
       const escortManager = deps.getEscortManager();
       if (!escortManager.isEscortRunning(shipId)) {
