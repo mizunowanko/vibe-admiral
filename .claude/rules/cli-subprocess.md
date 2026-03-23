@@ -78,6 +78,20 @@ Tool results (for AskUserQuestion answers):
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"...","content":"answer","is_error":false}]}}\n
 ```
 
+## Rate Limit Detection vs Polling Sleep
+
+Engine の `process-manager.ts` は stderr を `RETRYABLE_ERROR_PATTERNS` でパターンマッチし、`429` / `rate_limit_error` / `too many requests` 等を検知して自動リトライする。これは **stderr に明示的なエラーメッセージが出た場合のみ** 発火する。
+
+一方、Skills 内の gate ポーリング（`sleep 60` 等）は Escort の承認を待つ**意図的な待機**であり、エラーではない。
+
+| 状態 | 観測されるもの | 影響範囲 |
+|------|--------------|---------|
+| **Rate limit** | stderr に `429` / `rate_limit_error` が出る | **全 Unit が同時に停止** |
+| **マシンスリープ復帰** | 応答遅延（エラーメッセージなし） | 一部 Unit のみ遅延 |
+| **ポーリング sleep** | スキル内の意図的な `sleep` | 該当 Unit のみ |
+
+**判別ポイント**: rate limit なら全 Unit が同時に止まる。1 Unit だけ遅いならマシンスリープ復帰か一時的遅延であり、rate limit ではない。不要な待機やリトライを行わないこと。
+
 ## Skill File Location
 
 Claude CLI expects skills at `.claude/skills/<name>/SKILL.md` inside the project directory, not at the repository root `skills/` directory. The `ShipManager.deploySkills()` method copies skills to worktree during sortie.

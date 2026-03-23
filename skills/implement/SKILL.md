@@ -86,6 +86,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
   case "$PHASE" in
     <expected-next-phase>) echo "Gate approved"; break ;;
     <rejection-phase>) echo "Gate rejected"; break ;;
+    # NOTE: This sleep is an intentional polling interval, NOT rate limit backoff.
     <current-gate-phase>) sleep 60 ;;
     *) echo "UNEXPECTED_PHASE: $PHASE"; break ;;
   esac

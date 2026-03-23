@@ -49,6 +49,7 @@ while true; do
       ;;
     *)
       # Parent Ship is in a work phase — wait and poll again
+      # NOTE: This sleep is an intentional polling interval, NOT rate limit backoff.
       sleep $POLL_INTERVAL
       ;;
   esac

@@ -86,5 +86,11 @@ Always query the DB via \`sqlite3\` before reporting Ship state to the user. Nev
 3. **Lookout Alerts**: query Ship status via \`sqlite3\` DB query (see \`/admiral-protocol\`) to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Task tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
+
+## Troubleshooting: Rate Limit vs Sleep
+
+Ship の応答が遅い場合:
+- 全 Unit が同時停止 → rate limit（Engine が自動リトライ）
+- 1 Unit だけ遅延 → マシンスリープ復帰 or 一時的遅延（正常）
 `;
 }
