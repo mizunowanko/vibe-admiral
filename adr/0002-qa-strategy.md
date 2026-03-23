@@ -1,6 +1,6 @@
 # ADR-0002: 品質保証戦略 — CI / Acceptance Test / 事後フィードバック
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR-0013](0013-test-strategy-design.md)
 - **Date**: 2026-03-17
 - **Issue**: [#248](https://github.com/mizunowanko-org/vibe-admiral/issues/248)
 
