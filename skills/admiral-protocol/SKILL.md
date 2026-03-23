@@ -32,19 +32,15 @@ curl -s http://localhost:9721/api/sortie \
 - Multiple issues can be launched in a single call
 - Only sortie issues that are UNBLOCKED (open issues without `status/sortied` label)
 
-### 2. ship-status — Get Ship Status (DB Direct Query)
+### 2. ship-status — Get Ship Status
 
 ```bash
-sqlite3 -header -column "$VIBE_ADMIRAL_DB_PATH" \
-  "SELECT s.id, s.issue_number, s.issue_title, p.phase, s.created_at
-   FROM ships s
-   JOIN phases p ON s.id = p.ship_id
-   WHERE s.completed_at IS NULL
-   ORDER BY s.created_at DESC;"
+curl -s http://localhost:9721/api/ships | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
 ```
 
-Query fleet.db directly via `VIBE_ADMIRAL_DB_PATH` environment variable.
-DB uses WAL mode so concurrent reads are safe. This avoids Engine API round-trips.
+- Returns all Ships with current phase, processDead status, gate info, etc.
+- For a specific fleet: `curl -s "http://localhost:9721/api/ships?fleetId=..."`
+- Phase transition history: `curl -s "http://localhost:9721/api/ship/<shipId>/phase-transition-log?limit=10"`
 
 ### 3. ship-stop — Stop a Ship
 
@@ -178,9 +174,11 @@ FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship
 
 Flagship MUST follow these rules when dealing with Ship state information:
 
-1. **Always query the DB before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first run the `sqlite3` query above. Never rely on Ship information from your conversation history.
+1. **Always query via API before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first run `curl -s http://localhost:9721/api/ships`. Never rely on Ship information from your conversation history.
 
 2. **Context-cached Ship data is stale.** After context compaction or session resumption, Ship information in your history is outdated. Treat it as hints for planning, never as facts for reporting.
+
+> **Debug only**: `sqlite3 "$VIBE_ADMIRAL_DB_PATH" "SELECT ..."` is available for troubleshooting but should not be used for normal operations.
 
 ## Handling Results
 When the API returns results, **summarize** in natural language. Omit internal Ship UUIDs and gate metadata.
