@@ -5,7 +5,7 @@ import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
 import { isGatePhase, DEFAULT_GATE_TYPES, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
@@ -25,6 +25,7 @@ interface ApiDeps {
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
     shipRulePaths?: string[];
+    customInstructions?: CustomInstructions;
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
@@ -144,7 +145,10 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);
   const sharedRules = await deps.loadRules(fleet.sharedRulePaths ?? []);
   const shipRules = await deps.loadRules(fleet.shipRulePaths ?? []);
-  const shipExtraPrompt = [sharedRules, shipRules].filter(Boolean).join("\n\n") || undefined;
+  const ci = fleet.customInstructions;
+  const ciParts = [ci?.shared, ci?.ship].filter(Boolean);
+  const ciText = ciParts.length > 0 ? `## Custom Instructions\n\n${ciParts.join("\n\n")}` : undefined;
+  const shipExtraPrompt = [sharedRules, shipRules, ciText].filter(Boolean).join("\n\n") || undefined;
   return {
     fleetId: fleet.id,
     fleetRepos,
@@ -289,7 +293,19 @@ async function handleShipRoute(
       // Launch Escort if not already running
       const escortManager = deps.getEscortManager();
       if (!escortManager.isEscortRunning(shipId)) {
-        const escortId = escortManager.launchEscort(shipId, gatePhase, gateType);
+        // Build Escort custom instructions from fleet settings
+        let escortExtraPrompt: string | undefined;
+        const ship = db.getShipById(shipId);
+        if (ship) {
+          const fleets = await deps.loadFleets();
+          const fleet = fleets.find((f) => f.id === ship.fleetId);
+          const ci = fleet?.customInstructions;
+          const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
+          if (ciParts.length > 0) {
+            escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+          }
+        }
+        const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
         if (!escortId) {
           // Escort launch failed — revert via XState ESCORT_DIED
           const prevPhase = GATE_PREV_PHASE[gatePhase];

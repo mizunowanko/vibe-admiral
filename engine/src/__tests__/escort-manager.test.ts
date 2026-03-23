@@ -71,7 +71,7 @@ describe("EscortManager", () => {
       const escortId = escortManager.launchEscort("ship-001");
 
       expect(escortId).toBe("escort-001");
-      expect(mockShipManager.sortieEscort).toHaveBeenCalledWith(makeShip());
+      expect(mockShipManager.sortieEscort).toHaveBeenCalledWith(makeShip(), undefined);
     });
 
     it("prevents duplicate Escorts for the same parent Ship", () => {
