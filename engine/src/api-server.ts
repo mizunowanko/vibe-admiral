@@ -455,12 +455,31 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       // === Frontend API endpoints ===
 
       // GET /api/ships — Ship list as JSON array (for Frontend)
+      // Excludes escort records; attaches escort info to parent ships.
       if (route === "ships" && req.method === "GET") {
         const fleetId = url.searchParams.get("fleetId") ?? undefined;
         const shipManager = deps.getShipManager();
-        const ships = fleetId
+        const allShips = fleetId
           ? shipManager.getShipsByFleet(fleetId)
           : shipManager.getAllShips();
+
+        // Separate ships and escorts
+        const escorts = allShips.filter((s) => s.kind === "escort");
+        const ships = allShips
+          .filter((s) => s.kind !== "escort")
+          .map((s) => {
+            const childEscorts = escorts.filter((e) => e.parentShipId === s.id);
+            if (childEscorts.length === 0) return s;
+            return {
+              ...s,
+              escorts: childEscorts.map((e) => ({
+                id: e.id,
+                phase: e.phase,
+                processDead: e.processDead ?? false,
+              })),
+            };
+          });
+
         sendJson(res, 200, { ok: true, ships });
         return;
       }
