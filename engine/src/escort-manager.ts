@@ -105,6 +105,35 @@ export class EscortManager {
     return killed;
   }
 
+  /**
+   * Clean up the Escort when the parent Ship reaches "done".
+   * 1. Resolve Escort ID (in-memory map, then DB fallback)
+   * 2. Kill the Escort process
+   * 3. Mark the Escort's DB record as done (phase + completed_at)
+   */
+  cleanupForDoneShip(parentShipId: string): void {
+    // Resolve Escort ID: prefer in-memory map, fall back to DB
+    let escortId = this.escorts.get(parentShipId);
+    if (!escortId) {
+      const escort = this.shipManager.getEscortForShip(parentShipId);
+      if (escort) {
+        escortId = escort.id;
+      }
+    }
+    if (!escortId) return;
+
+    // Kill Escort process (idempotent if already dead)
+    this.processManager.kill(escortId);
+    this.escorts.delete(parentShipId);
+
+    // Mark Escort DB record as done
+    this.shipManager.updatePhase(escortId, "done");
+
+    console.log(
+      `[escort-manager] Cleaned up Escort ${escortId.slice(0, 8)}... for done Ship ${parentShipId.slice(0, 8)}...`,
+    );
+  }
+
   /** Check if a process ID belongs to an Escort Ship. */
   isEscortProcess(processId: string): boolean {
     return this.shipManager.isEscort(processId);

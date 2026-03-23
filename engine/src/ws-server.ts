@@ -78,6 +78,7 @@ export class EngineServer {
     this.shipManager.setActorManager(this.actorManager);
     this.escortManager.setActorManager(this.actorManager);
     this.stateSync.setActorManager(this.actorManager);
+    this.stateSync.setEscortManager(this.escortManager);
 
     // Configure Actor side effects
     this.actorManager.setSideEffects({
