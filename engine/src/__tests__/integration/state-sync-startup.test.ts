@@ -36,6 +36,10 @@ type MockShipManager = {
   purgeOrphanShips: ReturnType<typeof vi.fn>;
   restoreFromDisk: ReturnType<typeof vi.fn>;
   setIsCompacting: ReturnType<typeof vi.fn>;
+  getLastStartedAt: ReturnType<typeof vi.fn>;
+  incrementRapidDeathCount: ReturnType<typeof vi.fn>;
+  resetRapidDeathCount: ReturnType<typeof vi.fn>;
+  setPrUrl: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -100,6 +104,10 @@ describe("StateSync startup reconciliation (integration)", () => {
       purgeOrphanShips: vi.fn().mockReturnValue(0),
       restoreFromDisk: vi.fn().mockResolvedValue(0),
       setIsCompacting: vi.fn(),
+      getLastStartedAt: vi.fn().mockReturnValue(null),
+      incrementRapidDeathCount: vi.fn().mockReturnValue(1),
+      resetRapidDeathCount: vi.fn(),
+      setPrUrl: vi.fn(),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
