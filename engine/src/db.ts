@@ -81,6 +81,9 @@ export class FleetDatabase {
     if (version < 6) {
       this.applyV6();
     }
+    if (version < 7) {
+      this.applyV7();
+    }
   }
 
   private applyV1(): void {
@@ -327,6 +330,49 @@ export class FleetDatabase {
     }
   }
 
+  private applyV7(): void {
+    // V7: Add foreign key constraint to escorts.ship_id → ships(id).
+    // Rebuild escorts table with proper FK for referential integrity.
+
+    this.db.pragma("foreign_keys = OFF");
+
+    try {
+      this.db.exec(`
+        DROP TABLE IF EXISTS escorts_new;
+
+        BEGIN;
+
+        CREATE TABLE escorts_new (
+          id TEXT PRIMARY KEY,
+          ship_id TEXT NOT NULL REFERENCES ships(id),
+          session_id TEXT,
+          process_pid INTEGER,
+          phase TEXT NOT NULL DEFAULT 'planning',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT
+        );
+
+        INSERT INTO escorts_new (id, ship_id, session_id, process_pid, phase, created_at, completed_at)
+        SELECT e.id, e.ship_id, e.session_id, e.process_pid, e.phase, e.created_at, e.completed_at
+        FROM escorts e
+        WHERE e.ship_id IN (SELECT id FROM ships);
+
+        DROP TABLE escorts;
+
+        ALTER TABLE escorts_new RENAME TO escorts;
+
+        INSERT INTO schema_version (version) VALUES (7);
+
+        COMMIT;
+      `);
+    } catch (e) {
+      try { this.db.exec("ROLLBACK;"); } catch { /* already rolled back */ }
+      throw e;
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -407,8 +453,9 @@ export class FleetDatabase {
     );
   }
 
-  /** Delete a ship from the database. */
+  /** Delete a ship and its associated escorts from the database. */
   deleteShip(shipId: string): void {
+    this.db.prepare("DELETE FROM escorts WHERE ship_id = ?").run(shipId);
     this.db.prepare("DELETE FROM phase_transitions WHERE ship_id = ?").run(shipId);
     this.db.prepare("DELETE FROM phases WHERE ship_id = ?").run(shipId);
     this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
