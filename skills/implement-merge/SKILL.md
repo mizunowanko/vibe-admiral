@@ -18,17 +18,33 @@ user-invocable: false
 
 ### VIBE_ADMIRAL 設定時
 
-`qaRequired: true` の場合、acceptance-test-gate に遷移し Escort が Playwright テストを実施する（Step 15 参照）。
-受け入れテストの具体的な手順は Step 15 の Gate フローを参照。
+`qaRequired: true` の場合、Engine REST API で `acceptance-test-gate` に遷移し、Escort が Playwright テストを実施する:
+
+```bash
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+  -H 'Content-Type: application/json' \
+  -d '{"phase": "acceptance-test-gate", "metadata": {}}'
+```
+
+Engine が Escort プロセスを起動して Playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
+**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
+
+```bash
+TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
+```
+
+- `merging` に遷移済み → Escort が承認。Step 2 へ
+- `acceptance-test` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して修正:
+  ```bash
+  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
+  ```
+  フィードバックに基づいて修正 → commit & push → 再度 `acceptance-test-gate` に遷移 → Engine が Escort 再起動
 
 ### VIBE_ADMIRAL 未設定時
 
-1. 空きポートを取得してアプリを起動（`run_in_background: true`）
-2. dev server の listen 待機
-3. `open http://localhost:$PORT` でブラウザを開く
-4. AskUserQuestion で確認依頼
-5. OK → アプリ停止 → Step 2 へ
-6. NG → 修正 → commit & push → 2回目以降は E2E テスト追加 → 再確認ループ
+1. AskUserQuestion でユーザーに手動テスト確認を依頼する（アプリの起動・停止はユーザー責任）
+2. OK → Step 2 へ
+3. NG → 修正 → commit & push → 再確認ループ
 
 ## Step 2: CI パス確認
 
@@ -62,30 +78,7 @@ gh pr checks "$PR_NUM" --watch
 
 ## Step 4: マージ
 
-**`VIBE_ADMIRAL` 設定時**: Engine REST API で `acceptance-test-gate` に遷移し、`playwright` Gate を開始する:
-
-```bash
-curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
-  -H 'Content-Type: application/json' \
-  -d '{"phase": "acceptance-test-gate", "metadata": {}}'
-```
-
-Engine が Escort プロセスを起動して playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
-**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
-
-```bash
-TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in merging) echo "Gate approved"; break ;; acceptance-test) echo "Gate rejected"; break ;; acceptance-test-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
-```
-
-- `merging` に遷移済み → Escort が承認。マージを実行
-- `acceptance-test` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して修正:
-  ```bash
-  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
-  ```
-
-Gate 承認後（`merging` phase）、マージを実行:
-
-マージを実行:
+> **前提条件**: Step 1 の受け入れテストが完了していること（VIBE_ADMIRAL 設定時は `merging` phase に遷移済み）。
 
 ```bash
 gh pr merge "$PR_NUM" --squash
