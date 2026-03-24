@@ -16,9 +16,9 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
 
   useEffect(() => {
     if (!fleetId) {
-      setMessages([]);
-      setIsLoading(false);
-      historyLoadedRef.current = false;
+      // Don't clear messages when fleetId becomes null transiently
+      // (e.g. during WS reconnection). Preserve existing state so
+      // the UI doesn't flash and drafts survive the remount cycle.
       prevFleetRef.current = { fleetId, role };
       return;
     }
@@ -27,7 +27,7 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     // cross-role leakage. Skip clearing if the effect re-runs with the
     // same values (e.g. due to dependency identity changes from parent re-renders).
     const prev = prevFleetRef.current;
-    if (prev.fleetId !== fleetId || prev.role !== role) {
+    if ((prev.fleetId && prev.fleetId !== fleetId) || prev.role !== role) {
       setMessages([]);
       setIsLoading(false);
       historyLoadedRef.current = false;

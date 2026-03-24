@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Session, SessionType } from "@/types";
 
 interface SessionState {
@@ -60,48 +61,56 @@ export function createShipSession(
   };
 }
 
-export const useSessionStore = create<SessionState>((set, get) => ({
-  sessions: new Map(),
-  focusedSessionId: null,
-  inputDrafts: {},
+export const useSessionStore = create<SessionState>()(
+  persist(
+    (set, get) => ({
+      sessions: new Map(),
+      focusedSessionId: null,
+      inputDrafts: {},
 
-  registerSession: (session) => {
-    set((state) => {
-      const existing = state.sessions.get(session.id);
-      if (
-        existing &&
-        existing.type === session.type &&
-        existing.fleetId === session.fleetId &&
-        existing.label === session.label &&
-        existing.hasInput === session.hasInput &&
-        existing.shipId === session.shipId
-      ) {
-        return state; // No change — skip Map recreation
-      }
-      const sessions = new Map(state.sessions);
-      sessions.set(session.id, session);
-      return { sessions };
-    });
-  },
+      registerSession: (session) => {
+        set((state) => {
+          const existing = state.sessions.get(session.id);
+          if (
+            existing &&
+            existing.type === session.type &&
+            existing.fleetId === session.fleetId &&
+            existing.label === session.label &&
+            existing.hasInput === session.hasInput &&
+            existing.shipId === session.shipId
+          ) {
+            return state; // No change — skip Map recreation
+          }
+          const sessions = new Map(state.sessions);
+          sessions.set(session.id, session);
+          return { sessions };
+        });
+      },
 
-  unregisterSession: (id) => {
-    set((state) => {
-      const sessions = new Map(state.sessions);
-      sessions.delete(id);
-      const focusedSessionId =
-        state.focusedSessionId === id ? null : state.focusedSessionId;
-      return { sessions, focusedSessionId };
-    });
-  },
+      unregisterSession: (id) => {
+        set((state) => {
+          const sessions = new Map(state.sessions);
+          sessions.delete(id);
+          const focusedSessionId =
+            state.focusedSessionId === id ? null : state.focusedSessionId;
+          return { sessions, focusedSessionId };
+        });
+      },
 
-  setFocus: (sessionId) => set({ focusedSessionId: sessionId }),
+      setFocus: (sessionId) => set({ focusedSessionId: sessionId }),
 
-  setInputDraft: (sessionId, value) =>
-    set((s) => ({ inputDrafts: { ...s.inputDrafts, [sessionId]: value } })),
+      setInputDraft: (sessionId, value) =>
+        set((s) => ({ inputDrafts: { ...s.inputDrafts, [sessionId]: value } })),
 
-  getFocusedSession: () => {
-    const { sessions, focusedSessionId } = get();
-    if (!focusedSessionId) return null;
-    return sessions.get(focusedSessionId) ?? null;
-  },
-}));
+      getFocusedSession: () => {
+        const { sessions, focusedSessionId } = get();
+        if (!focusedSessionId) return null;
+        return sessions.get(focusedSessionId) ?? null;
+      },
+    }),
+    {
+      name: "admiral-session",
+      partialize: (state) => ({ inputDrafts: state.inputDrafts }),
+    },
+  ),
+);

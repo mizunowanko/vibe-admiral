@@ -42,6 +42,10 @@ type MockShipManager = {
   hasRunningProcess: ReturnType<typeof vi.fn>;
   getAllShips: ReturnType<typeof vi.fn>;
   setIsCompacting: ReturnType<typeof vi.fn>;
+  getLastStartedAt: ReturnType<typeof vi.fn>;
+  incrementRapidDeathCount: ReturnType<typeof vi.fn>;
+  resetRapidDeathCount: ReturnType<typeof vi.fn>;
+  setPrUrl: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -127,6 +131,10 @@ describe("StateSync", () => {
       hasRunningProcess: vi.fn().mockReturnValue(false),
       getAllShips: vi.fn().mockReturnValue([]),
       setIsCompacting: vi.fn(),
+      getLastStartedAt: vi.fn().mockReturnValue(null),
+      incrementRapidDeathCount: vi.fn().mockReturnValue(1),
+      resetRapidDeathCount: vi.fn(),
+      setPrUrl: vi.fn(),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
