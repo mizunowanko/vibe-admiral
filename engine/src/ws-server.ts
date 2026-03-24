@@ -1004,6 +1004,13 @@ export class EngineServer {
         return this.stateSync.reconcileOnStartup(allRepos);
       })
       .catch((err) => {
+        if (!this.fleetDb) {
+          // DB init failed — fatal, Engine cannot operate without a database
+          console.error("[engine] Database initialization failed, shutting down:", err);
+          this.shutdown();
+          process.exit(1);
+        }
+        // Non-DB errors (fleet loading, reconciliation) are non-fatal
         console.warn("[engine] Startup reconciliation failed:", err);
       });
   }
@@ -1022,7 +1029,8 @@ export class EngineServer {
 
       console.log("[engine] Fleet database initialized");
     } catch (err) {
-      console.warn("[engine] Failed to initialize fleet database:", err);
+      console.error("[engine] Failed to initialize fleet database:", err);
+      throw err;
     }
   }
 
