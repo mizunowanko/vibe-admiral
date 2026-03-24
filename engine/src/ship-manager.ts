@@ -115,11 +115,13 @@ export class ShipManager {
     extraPrompt?: string,
     skill?: string,
   ): Promise<ShipProcess> {
-    // Clean up previous ship for the same issue (allows re-sortie).
-    // Other completed ships are preserved for history.
+    // Collect re-sortie context from previous Ship BEFORE deleting it.
+    // This preserves phase history & workflow state for the new Ship.
+    let reSortieContext: string | null = null;
     if (this.fleetDb) {
       const existingShip = this.fleetDb.getShipByIssueAnyPhase(repo, issueNumber);
       if (existingShip && (existingShip.phase === "done" || existingShip.phase === "stopped")) {
+        reSortieContext = await this.collectReSortieContext(existingShip);
         this.runtime.delete(existingShip.id);
         this.fleetDb.deleteShip(existingShip.id);
       }
@@ -243,7 +245,7 @@ export class ShipManager {
     const prContext = existingPrUrl
       ? `\n\n[Prior Work Context] An existing PR was found for this branch: ${existingPrUrl}. The branch contains previous commits from a prior sortie. Check for existing work before starting from scratch. Run \`gh pr view --json number,url,body,reviews,comments\` to review the PR history.`
       : "";
-    const fullExtraPrompt = [issueContext, extraPrompt, prContext]
+    const fullExtraPrompt = [issueContext, extraPrompt, prContext, reSortieContext]
       .filter(Boolean)
       .join("\n\n") || undefined;
 
@@ -271,6 +273,105 @@ export class ShipManager {
     this.updatePhase(shipId, "planning");
     this.onShipCreated?.(shipId);
     return ship;
+  }
+
+  /**
+   * Collect context from a previous Ship's DB records and worktree state
+   * so the new Ship can resume from where the previous one left off.
+   * Called BEFORE the previous Ship record is deleted from DB.
+   */
+  private async collectReSortieContext(
+    previousShip: ShipProcess,
+  ): Promise<string | null> {
+    const parts: string[] = [];
+
+    // 1. Phase history from DB
+    let lastPhase: Phase | null = null;
+    let phaseHistory = "";
+    if (this.fleetDb) {
+      lastPhase = this.fleetDb.getPhaseBeforeStopped(previousShip.id) ?? (previousShip.phase as Phase);
+      const transitions = this.fleetDb.getPhaseTransitions(previousShip.id, 20);
+      if (transitions.length > 0) {
+        phaseHistory = transitions
+          .reverse()
+          .map((t) => `  ${t.fromPhase ?? "(init)"} → ${t.toPhase}`)
+          .join("\n");
+      }
+    }
+
+    // 2. Workflow state from worktree (read before stale file cleanup)
+    let workflowState: string | null = null;
+    try {
+      workflowState = await readFile(
+        join(previousShip.worktreePath, ".claude", "workflow-state.json"),
+        "utf-8",
+      );
+    } catch {
+      // No workflow state file — fresh or already cleaned
+    }
+
+    // 3. Git state from worktree
+    let gitLog = "";
+    let gitStatus = "";
+    try {
+      const { stdout: logOut } = await execFileAsync(
+        "git", ["log", "--oneline", "main..HEAD", "--max-count=20"],
+        { cwd: previousShip.worktreePath },
+      );
+      gitLog = logOut.trim();
+    } catch {
+      // Branch may not exist yet
+    }
+    try {
+      const { stdout: statusOut } = await execFileAsync(
+        "git", ["status", "--porcelain"],
+        { cwd: previousShip.worktreePath },
+      );
+      gitStatus = statusOut.trim();
+    } catch {
+      // Worktree may not exist
+    }
+
+    // 4. Map last phase to suggested /implement step
+    const phaseToStep: Record<string, number> = {
+      planning: 3,
+      "planning-gate": 3,
+      implementing: 5,
+      "implementing-gate": 5,
+      "acceptance-test": 11,
+      "acceptance-test-gate": 11,
+      merging: 15,
+    };
+    const suggestedStep = lastPhase ? phaseToStep[lastPhase] ?? 3 : 3;
+
+    // Build the context block
+    parts.push("[Re-sortie Context] This is a re-sortie. A previous Ship worked on this issue but did not complete.");
+    parts.push(`Previous Ship reached phase: ${lastPhase ?? previousShip.phase}`);
+    parts.push(`Suggested /implement start step: ${suggestedStep}`);
+
+    if (phaseHistory) {
+      parts.push(`\nPhase transition history:\n${phaseHistory}`);
+    }
+
+    if (workflowState) {
+      parts.push(`\nPrevious workflow-state.json:\n${workflowState}`);
+    }
+
+    if (gitLog) {
+      parts.push(`\nExisting commits on branch (main..HEAD):\n${gitLog}`);
+    }
+
+    if (gitStatus) {
+      parts.push(`\nUncommitted changes in worktree:\n${gitStatus}`);
+    } else if (gitLog) {
+      parts.push("\nNo uncommitted changes in worktree.");
+    }
+
+    parts.push("\nUse the previous work. Do not start from scratch. If workflow-state.json was provided, use its currentStep to resume. Otherwise use the suggested start step.");
+
+    const context = parts.join("\n");
+    console.log(`[ship-manager] Re-sortie context collected for issue #${previousShip.issueNumber} (prev phase: ${lastPhase ?? previousShip.phase}, step: ${suggestedStep})`);
+    return context;
   }
 
   /**
