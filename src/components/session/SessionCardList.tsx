@@ -31,7 +31,7 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
   });
   const allFleetShips = useShipStore((s) => {
     const filtered = Array.from(s.ships.values()).filter(
-      (ship) => ship.fleetId === fleetId && ship.kind !== "escort",
+      (ship) => ship.fleetId === fleetId,
     );
     const fingerprint = buildFleetShipFingerprint(filtered);
     if (fingerprint === prevRef.current.fingerprint) {

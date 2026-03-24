@@ -198,8 +198,6 @@ export const useShipStore = create<ShipState>((set) => ({
     set((state) => {
       const ships = new Map(state.ships);
       for (const s of shipList) {
-        // Skip escort records — they should not appear as standalone cards.
-        if (s.kind === "escort") continue;
         // Server is the source of truth — always prefer server state.
         ships.set(s.id, s);
       }

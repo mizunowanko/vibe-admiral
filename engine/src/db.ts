@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ShipProcess, Phase, ShipKind } from "./types.js";
+import type { ShipProcess, Phase, EscortProcess } from "./types.js";
 
 /** Persisted ship row stored in SQLite. */
 export interface ShipRow {
@@ -20,8 +20,17 @@ export interface ShipRow {
   phase: string;
   created_at: string;
   completed_at: string | null;
-  kind: string | null;
-  parent_ship_id: string | null;
+}
+
+/** Persisted escort row stored in SQLite. */
+export interface EscortRow {
+  id: string;
+  ship_id: string;
+  session_id: string | null;
+  process_pid: number | null;
+  phase: string;
+  created_at: string;
+  completed_at: string | null;
 }
 
 /** Row returned by the ships+repos join query. */
@@ -68,6 +77,9 @@ export class FleetDatabase {
     }
     if (version < 5) {
       this.applyV5();
+    }
+    if (version < 6) {
+      this.applyV6();
     }
   }
 
@@ -226,6 +238,95 @@ export class FleetDatabase {
     }
   }
 
+  private applyV6(): void {
+    // V6: Separate escorts from ships table into dedicated escorts table.
+    // 1. Create escorts table
+    // 2. Migrate existing escort rows from ships to escorts
+    // 3. Remove escort rows from ships
+    // 4. Rebuild ships table without kind/parent_ship_id columns
+    // 5. Restore UNIQUE(repo_id, issue_number) constraint
+
+    this.db.pragma("foreign_keys = OFF");
+
+    try {
+      this.db.exec(`
+        DROP TABLE IF EXISTS ships_new;
+        DROP TABLE IF EXISTS escorts;
+
+        BEGIN;
+
+        -- Create escorts table
+        CREATE TABLE escorts (
+          id TEXT PRIMARY KEY,
+          ship_id TEXT NOT NULL,
+          session_id TEXT,
+          process_pid INTEGER,
+          phase TEXT NOT NULL DEFAULT 'planning',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT
+        );
+
+        -- Migrate existing escort data from ships
+        INSERT INTO escorts (id, ship_id, session_id, process_pid, phase, created_at, completed_at)
+        SELECT id, parent_ship_id, session_id, process_pid, phase, created_at, completed_at
+        FROM ships WHERE kind = 'escort' AND parent_ship_id IS NOT NULL;
+
+        -- Delete escort phase_transitions and phases before removing escort ships
+        DELETE FROM phase_transitions WHERE ship_id IN (
+          SELECT id FROM ships WHERE kind = 'escort'
+        );
+        DELETE FROM phases WHERE ship_id IN (
+          SELECT id FROM ships WHERE kind = 'escort'
+        );
+
+        -- Delete escort rows from ships
+        DELETE FROM ships WHERE kind = 'escort';
+
+        -- Rebuild ships table without kind/parent_ship_id
+        CREATE TABLE ships_new (
+          id TEXT PRIMARY KEY,
+          repo_id INTEGER NOT NULL REFERENCES repos(id),
+          issue_number INTEGER NOT NULL,
+          issue_title TEXT,
+          worktree_path TEXT,
+          branch_name TEXT,
+          session_id TEXT,
+          pr_url TEXT,
+          pr_number INTEGER,
+          qa_required BOOLEAN,
+          process_pid INTEGER,
+          fleet_id TEXT,
+          phase TEXT NOT NULL DEFAULT 'planning',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT
+        );
+
+        INSERT INTO ships_new (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, process_pid, fleet_id, phase, created_at, completed_at)
+        SELECT id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, process_pid, fleet_id, phase, created_at, completed_at
+        FROM ships;
+
+        DROP TABLE ships;
+
+        ALTER TABLE ships_new RENAME TO ships;
+
+        -- Restore original unique constraint (no kind column needed)
+        CREATE UNIQUE INDEX idx_ships_repo_issue ON ships (repo_id, issue_number);
+
+        -- Drop old kind-based index (already removed with table)
+        -- No-op since we dropped and recreated the table
+
+        INSERT INTO schema_version (version) VALUES (6);
+
+        COMMIT;
+      `);
+    } catch (e) {
+      try { this.db.exec("ROLLBACK;"); } catch { /* already rolled back */ }
+      throw e;
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -246,19 +347,18 @@ export class FleetDatabase {
 
     const repoId = this.ensureRepo(owner, name);
 
-    // Delete any existing row with the same repo+issue+kind to avoid UNIQUE constraint conflict.
+    // Delete any existing row with the same repo+issue to avoid UNIQUE constraint conflict.
     // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
-    const kind = ship.kind ?? "ship";
     const existingShip = this.db.prepare(
-      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ? AND kind = ?",
-    ).get(repoId, ship.issueNumber, kind) as { id: string } | undefined;
-    if (existingShip) {
+      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ?",
+    ).get(repoId, ship.issueNumber) as { id: string } | undefined;
+    if (existingShip && existingShip.id !== ship.id) {
       this.deleteShip(existingShip.id);
     }
 
     this.db.prepare(`
-      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at, kind, parent_ship_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         issue_title = excluded.issue_title,
         worktree_path = excluded.worktree_path,
@@ -269,9 +369,7 @@ export class FleetDatabase {
         qa_required = excluded.qa_required,
         fleet_id = excluded.fleet_id,
         phase = excluded.phase,
-        completed_at = excluded.completed_at,
-        kind = excluded.kind,
-        parent_ship_id = excluded.parent_ship_id
+        completed_at = excluded.completed_at
     `).run(
       ship.id,
       repoId,
@@ -287,8 +385,6 @@ export class FleetDatabase {
       ship.phase,
       ship.createdAt,
       ship.completedAt ? new Date(ship.completedAt).toISOString() : null,
-      kind,
-      ship.parentShipId,
     );
   }
 
@@ -579,6 +675,76 @@ export class FleetDatabase {
     return this.db.name;
   }
 
+  // === Escort DB methods ===
+
+  /** Insert or update an escort record. */
+  upsertEscort(escort: EscortProcess): void {
+    this.db.prepare(`
+      INSERT INTO escorts (id, ship_id, session_id, process_pid, phase, created_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        session_id = excluded.session_id,
+        process_pid = excluded.process_pid,
+        phase = excluded.phase,
+        completed_at = excluded.completed_at
+    `).run(
+      escort.id,
+      escort.shipId,
+      escort.sessionId,
+      escort.processPid,
+      escort.phase,
+      escort.createdAt,
+      escort.completedAt,
+    );
+  }
+
+  /** Get an escort by ID. */
+  getEscortById(id: string): EscortProcess | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM escorts WHERE id = ?",
+    ).get(id) as EscortRow | undefined;
+    return row ? this.rowToEscortProcess(row) : undefined;
+  }
+
+  /** Get the active escort for a parent Ship (phase != 'done'). */
+  getEscortByShipId(shipId: string): EscortProcess | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM escorts WHERE ship_id = ? AND phase != 'done' ORDER BY created_at DESC LIMIT 1",
+    ).get(shipId) as EscortRow | undefined;
+    return row ? this.rowToEscortProcess(row) : undefined;
+  }
+
+  /** Update escort phase and optionally completed_at. */
+  updateEscortPhase(id: string, phase: string, completedAt?: string): void {
+    this.db.prepare(
+      "UPDATE escorts SET phase = ?, completed_at = ? WHERE id = ?",
+    ).run(phase, completedAt ?? null, id);
+  }
+
+  /** Update escort session ID. */
+  updateEscortSessionId(id: string, sessionId: string | null): void {
+    this.db.prepare(
+      "UPDATE escorts SET session_id = ? WHERE id = ?",
+    ).run(sessionId, id);
+  }
+
+  /** Delete an escort from the database. */
+  deleteEscort(id: string): void {
+    this.db.prepare("DELETE FROM escorts WHERE id = ?").run(id);
+  }
+
+  private rowToEscortProcess(row: EscortRow): EscortProcess {
+    return {
+      id: row.id,
+      shipId: row.ship_id,
+      sessionId: row.session_id,
+      processPid: row.process_pid,
+      phase: row.phase,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+    };
+  }
+
   private rowToShipProcess(row: ShipJoinRow): ShipProcess {
     return {
       id: row.id,
@@ -599,8 +765,6 @@ export class FleetDatabase {
       createdAt: row.created_at,
       completedAt: row.completed_at ? new Date(row.completed_at).getTime() : undefined,
       lastOutputAt: null,
-      kind: (row.kind as ShipKind) ?? "ship",
-      parentShipId: row.parent_ship_id,
     };
   }
 }
