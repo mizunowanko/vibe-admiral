@@ -89,31 +89,21 @@ QA_REQUIRED="${VIBE_ADMIRAL_QA_REQUIRED:-true}"
    npx playwright install --with-deps chromium
    ```
 
-5. アプリをビルド & 起動:
-   ```bash
-   npm run build 2>&1 | tail -20
-   npm run preview &
-   APP_PID=$!
-   sleep 5
-   ```
+5. Playwright E2E テストを実行:
 
-6. Playwright E2E テストを実行:
+   `globalSetup`/`globalTeardown`（`e2e/global-setup.ts`, `e2e/global-teardown.ts`）がアプリ（Engine + Vite dev server）の起動・停止を自動管理する（ADR-0005 準拠）。Escort が手動でアプリを起動・停止する必要はない。
+
    ```bash
-   npx playwright test 2>&1
+   npx playwright test --config playwright.e2e.config.ts 2>&1
    TEST_EXIT=$?
    ```
 
-7. アプリを停止:
-   ```bash
-   kill $APP_PID 2>/dev/null
-   ```
-
-8. テスト結果を判定:
+6. テスト結果を判定:
    - `TEST_EXIT=0` → 全テスト合格
    - `TEST_EXIT≠0` → テスト失敗あり
    - Issue の受け入れ基準の各項目について、Playwright テスト結果と diff の内容から充足度を評価する
 
-9. **結果を PR コメントとして書き込む**:
+7. **結果を PR コメントとして書き込む**:
 
    以下のフォーマットで PR コメントを投稿する:
    ```bash
@@ -150,7 +140,7 @@ QA_REQUIRED="${VIBE_ADMIRAL_QA_REQUIRED:-true}"
    > **重要**: ヘッダーの `✅ PASS` / `❌ FAIL` は全テスト項目の結果に基づいて決定する。
    > 1 つでも fail があれば `❌ FAIL` とする。
 
-10. Engine REST API で gate verdict を送信:
+8. Engine REST API で gate verdict を送信:
 
     承認の場合（全テスト項目 pass）:
     ```bash

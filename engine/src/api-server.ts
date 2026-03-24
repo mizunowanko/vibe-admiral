@@ -341,6 +341,7 @@ async function handleShipRoute(
           shipManager.syncPhaseFromDb(shipId);
         }
         shipManager.clearGateCheck(shipId);
+        escortManager.notifyLaunchFailure(shipId, gatePhase, "Escort launch returned null — reverting to pre-gate phase for retry");
         sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
         return;
       }

@@ -314,6 +314,39 @@ describe("EscortManager", () => {
     });
   });
 
+  describe("notifyLaunchFailure", () => {
+    it("sends notification via onEscortDeathCallback", () => {
+      const deathHandler = vi.fn();
+      escortManager.setEscortDeathHandler(deathHandler);
+
+      escortManager.notifyLaunchFailure("ship-001", "planning-gate", "test reason");
+
+      expect(deathHandler).toHaveBeenCalledWith(
+        "ship-001",
+        expect.stringContaining("Escort launch failed"),
+      );
+      expect(deathHandler).toHaveBeenCalledWith(
+        "ship-001",
+        expect.stringContaining("test reason"),
+      );
+    });
+
+    it("is a no-op when parent Ship not found", () => {
+      const deathHandler = vi.fn();
+      escortManager.setEscortDeathHandler(deathHandler);
+      mockShipManager.getShip.mockReturnValue(undefined);
+
+      escortManager.notifyLaunchFailure("non-existent", "planning-gate", "reason");
+
+      expect(deathHandler).not.toHaveBeenCalled();
+    });
+
+    it("is a no-op when no handler is set", () => {
+      // No handler set — should not throw
+      escortManager.notifyLaunchFailure("ship-001", "planning-gate", "reason");
+    });
+  });
+
   describe("cleanupForDoneShip", () => {
     it("kills Escort process and marks DB record as done", () => {
       escortManager.launchEscort("ship-001");
