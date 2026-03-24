@@ -286,7 +286,7 @@ export class ShipManager {
    * Reuses the parent Ship's worktree, branch, and repo — skips worktree
    * creation, skill deployment, npm install, issue label changes, and PR detection.
    */
-  sortieEscort(parentShip: ShipProcess, gatePhase?: GatePhase, extraPrompt?: string): ShipProcess {
+  sortieEscort(parentShip: ShipProcess, gatePhase?: GatePhase, extraPrompt?: string, extraEnv?: Record<string, string>): ShipProcess {
     const escortId = randomUUID();
 
     const escort: ShipProcess = {
@@ -350,6 +350,7 @@ export class ShipManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+      ...extraEnv,
     };
 
     const gateContext = gatePhase
@@ -380,6 +381,7 @@ export class ShipManager {
   resumeEscort(
     existingEscort: ShipProcess,
     gatePhase: GatePhase,
+    extraEnv?: Record<string, string>,
   ): ShipProcess {
     if (!existingEscort.sessionId) {
       throw new Error(`Cannot resume Escort ${existingEscort.id.slice(0, 8)}... — no sessionId`);
@@ -400,6 +402,7 @@ export class ShipManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: existingEscort.parentShipId!,
+      ...extraEnv,
     };
 
     // Resume with gate context message

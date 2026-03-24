@@ -75,6 +75,23 @@ export class EscortManager {
     }
 
     try {
+      // Build extra environment variables for the Escort process
+      const extraEnv: Record<string, string> = {};
+
+      // For acceptance-test-gate, read qaRequired from the planning-gate transition metadata
+      if (gatePhase === "acceptance-test-gate") {
+        const db = this.getDatabase();
+        if (db) {
+          const transitions = db.getPhaseTransitions(parentShipId, 50);
+          const planningGateTransition = transitions.find(
+            (t) => t.toPhase === "planning-gate",
+          );
+          const metadata = planningGateTransition?.metadata as Record<string, unknown> | null;
+          const qaRequired = metadata?.qaRequired ?? true; // default true (conservative)
+          extraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(qaRequired);
+        }
+      }
+
       // Check for an existing Escort Ship (from a previous gate) with a sessionId
       const existingEscort = this.shipManager.getEscortForShip(parentShipId);
 
@@ -83,6 +100,7 @@ export class EscortManager {
         const escort = this.shipManager.resumeEscort(
           existingEscort,
           gatePhase ?? "planning-gate",
+          extraEnv,
         );
         this.escorts.set(parentShipId, escort.id);
 
@@ -94,7 +112,7 @@ export class EscortManager {
       }
 
       // First gate or no sessionId — launch a fresh Escort
-      const escort = this.shipManager.sortieEscort(parentShip, gatePhase, extraPrompt);
+      const escort = this.shipManager.sortieEscort(parentShip, gatePhase, extraPrompt, extraEnv);
       this.escorts.set(parentShipId, escort.id);
 
       console.log(
