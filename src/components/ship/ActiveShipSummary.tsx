@@ -2,7 +2,7 @@ import { memo, useMemo, useRef } from "react";
 import { useShipStore } from "@/stores/shipStore";
 import { useSessionStore, shipSessionId } from "@/stores/sessionStore";
 import { cn } from "@/lib/utils";
-import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { STATUS_CONFIG } from "@/lib/ship-status";
 import { PHASE_ORDER } from "@/types";
 import type { Ship, Phase } from "@/types";
 
@@ -41,15 +41,6 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
     );
   }, [fleetShips]);
 
-  const errorShips = useMemo(() => {
-    return fleetShips.filter(
-      (s) =>
-        s.processDead &&
-        s.phase !== "done" &&
-        s.phase !== "stopped",
-    );
-  }, [fleetShips]);
-
   const phaseCounts = useMemo(() => {
     const counts = new Map<Phase, Ship[]>();
     for (const ship of activeShips) {
@@ -60,7 +51,7 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
     return counts;
   }, [activeShips]);
 
-  if (activeShips.length === 0 && errorShips.length === 0) return null;
+  if (activeShips.length === 0) return null;
 
   return (
     <div className="flex items-center gap-1 flex-wrap">
@@ -90,20 +81,6 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
           </div>
         );
       })}
-      {errorShips.map((ship) => (
-        <button
-          key={ship.id}
-          onClick={() => setFocus(shipSessionId(ship.id))}
-          className={cn(
-            "inline-flex items-center gap-0.5 rounded-md px-1 py-0 text-[10px] transition-colors",
-            "hover:ring-1 hover:ring-primary/50 cursor-pointer",
-            PROCESS_DEAD_CONFIG.color,
-          )}
-          title={`#${ship.issueNumber}: ${ship.issueTitle} (Error)`}
-        >
-          #{ship.issueNumber}
-        </button>
-      ))}
     </div>
   );
 });
