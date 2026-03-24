@@ -56,6 +56,10 @@ interface ShipRuntime {
   gateCheck: GateCheckState | null;
   prReviewStatus: PRReviewStatus | null;
   retryCount: number;
+  /** Timestamp (ms epoch) when the Ship process was last started/resumed. */
+  lastStartedAt: number | null;
+  /** Count of consecutive rapid deaths (process exiting shortly after start). */
+  rapidDeathCount: number;
 }
 
 export class ShipManager {
@@ -210,8 +214,6 @@ export class ShipManager {
       retryCount: 0,
       createdAt: new Date().toISOString(),
       lastOutputAt: null,
-      kind: "ship",
-      parentShipId: null,
     };
 
     // Persist to DB first — DB record is a precondition for process spawn.
@@ -233,6 +235,8 @@ export class ShipManager {
       gateCheck: null,
       prReviewStatus: existingPrReviewStatus,
       retryCount: 0,
+      lastStartedAt: Date.now(),
+      rapidDeathCount: 0,
     });
 
     // 9. Build extra context for Ship
@@ -422,6 +426,8 @@ export class ShipManager {
       gateCheck: null,
       prReviewStatus: null,
       retryCount: 0,
+      lastStartedAt: Date.now(),
+      rapidDeathCount: 0,
     });
 
     // Create XState Actor
@@ -767,6 +773,30 @@ export class ShipManager {
     if (rt) rt.gateCheck = null;
   }
 
+  /** Get the timestamp when the Ship process was last started/resumed. */
+  getLastStartedAt(shipId: string): number | null {
+    return this.runtime.get(shipId)?.lastStartedAt ?? null;
+  }
+
+  /** Get the current rapid death count for a Ship. */
+  getRapidDeathCount(shipId: string): number {
+    return this.runtime.get(shipId)?.rapidDeathCount ?? 0;
+  }
+
+  /** Increment the rapid death counter and return the new value. */
+  incrementRapidDeathCount(shipId: string): number {
+    const rt = this.ensureRuntime(shipId);
+    if (!rt) return 0;
+    rt.rapidDeathCount++;
+    return rt.rapidDeathCount;
+  }
+
+  /** Reset the rapid death counter (called when process produces meaningful output). */
+  resetRapidDeathCount(shipId: string): void {
+    const rt = this.runtime.get(shipId);
+    if (rt) rt.rapidDeathCount = 0;
+  }
+
   /**
    * Check whether a file exists (non-throwing).
    */
@@ -991,6 +1021,7 @@ export class ShipManager {
     if (rt) {
       rt.retryCount++;
       rt.processDead = false;
+      rt.lastStartedAt = Date.now();
     }
 
     // Build extra env vars for the Ship process
@@ -1140,6 +1171,8 @@ export class ShipManager {
           gateCheck: null,
           prReviewStatus: null,
           retryCount: 0,
+          lastStartedAt: null,
+          rapidDeathCount: 0,
         });
 
         // Restore XState Actor for this Ship
@@ -1194,6 +1227,8 @@ export class ShipManager {
         gateCheck: null,
         prReviewStatus: null,
         retryCount: 0,
+        lastStartedAt: null,
+        rapidDeathCount: 0,
       };
       this.runtime.set(shipId, rt);
     }

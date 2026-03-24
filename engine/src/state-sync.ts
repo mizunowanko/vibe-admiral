@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { ShipManager } from "./ship-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { EscortManager } from "./escort-manager.js";
@@ -5,10 +7,18 @@ import type { StatusManager } from "./status-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
+const execFileAsync = promisify(execFile);
+
 /** The only active status label is "status/sortied". */
 export const ACTIVE_STATUS_LABELS = new Set([
   "status/sortied",
 ]);
+
+/** Process exiting within this window (ms) after start is considered a "rapid death". */
+const RAPID_DEATH_THRESHOLD_MS = 120_000;
+
+/** Maximum consecutive rapid deaths before auto-stopping the Ship. */
+const MAX_RAPID_DEATHS = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -124,13 +134,6 @@ export class StateSync {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
-    // Escort-Ships: skip worktree cleanup, label rollback, and issue closure.
-    // Their lifecycle is tied to the parent Ship, not the issue.
-    if (ship.kind === "escort") {
-      this.shipManager.setIsCompacting(shipId, false);
-      return;
-    }
-
     // Clear compacting flag — process is gone, no more compact events
     this.shipManager.setIsCompacting(shipId, false);
 
@@ -184,8 +187,47 @@ export class StateSync {
       // Process died without declaring done.
       // With the new model, we do NOT set an "error" phase — the ship stays
       // in its current phase. The UI derives "process dead" from phase ≠ done && no process.
+
+      // --- Rapid death detection ---
+      // If the process exited shortly after starting, it may be stuck in a
+      // resume → instant death loop (Issue #618). Track consecutive rapid deaths
+      // and auto-stop the Ship after MAX_RAPID_DEATHS.
+      const lastStartedAt = this.shipManager.getLastStartedAt(shipId);
+      const isRapidDeath = lastStartedAt !== null
+        && (Date.now() - lastStartedAt) < RAPID_DEATH_THRESHOLD_MS;
+
+      if (isRapidDeath) {
+        const count = this.shipManager.incrementRapidDeathCount(shipId);
+        console.warn(
+          `[state-sync] Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...) rapid death detected ` +
+          `(${count}/${MAX_RAPID_DEATHS}, died ${Math.round((Date.now() - lastStartedAt!) / 1000)}s after start)`,
+        );
+        if (count >= MAX_RAPID_DEATHS) {
+          console.error(
+            `[state-sync] Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...) hit rapid death limit ` +
+            `(${MAX_RAPID_DEATHS} consecutive rapid deaths) — auto-stopping to prevent infinite loop`,
+          );
+          this.actorManager?.send(shipId, { type: "STOP" });
+          this.actorManager?.send(shipId, { type: "RAPID_DEATH_LIMIT" });
+          this.shipManager.updatePhase(shipId, "stopped", `Auto-stopped: ${MAX_RAPID_DEATHS} consecutive rapid deaths`);
+          return;
+        }
+      } else {
+        // Not a rapid death — reset the counter
+        this.shipManager.resetRapidDeathCount(shipId);
+      }
+
       // Notify the status change handler so Bridge gets notified.
       this.shipManager.notifyProcessDead(shipId);
+
+      // --- PR existence fallback ---
+      // If the Ship is in "implementing" phase and a PR exists for the branch,
+      // the Ship likely created a PR but died before calling the phase-transition API.
+      // Auto-transition to implementing-gate so the Escort can review the PR.
+      if (ship.phase === "implementing") {
+        const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
+        if (prFallbackApplied) return;
+      }
 
       // Check if the issue was already closed (PR merged) on GitHub.
       const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
@@ -213,6 +255,50 @@ export class StateSync {
         // Genuinely failed: rollback sortied→ready (removes status/sortied label)
         await this.rollbackLabel(ship.repo, ship.issueNumber);
       }
+    }
+  }
+
+  /**
+   * PR existence fallback: if a Ship died in "implementing" phase but a PR
+   * already exists for the branch, auto-transition to implementing-gate
+   * so the Escort can review the PR.
+   * Returns true if the fallback was applied.
+   */
+  private async rescueWithPRFallback(
+    shipId: string,
+    repo: string,
+    branchName: string,
+    issueNumber: number,
+  ): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync("gh", [
+        "pr", "list",
+        "--head", branchName,
+        "--repo", repo,
+        "--state", "open",
+        "--json", "number,url",
+        "--jq", ".[0]",
+      ]);
+      const trimmed = stdout.trim();
+      if (!trimmed) return false;
+
+      const pr = JSON.parse(trimmed) as { number: number; url: string };
+      console.log(
+        `[state-sync] Ship #${issueNumber} (${shipId.slice(0, 8)}...) died in implementing phase ` +
+        `but PR #${pr.number} exists — auto-transitioning to implementing-gate`,
+      );
+
+      // Transition: implementing → implementing-gate via XState GATE_ENTER event
+      this.actorManager?.send(shipId, { type: "GATE_ENTER" });
+      this.shipManager.updatePhase(shipId, "implementing-gate", `PR fallback: PR #${pr.number} found`);
+
+      // Store PR URL so the Escort can find it
+      this.shipManager.setPrUrl(shipId, pr.url);
+
+      return true;
+    } catch {
+      // gh CLI failed or no PR found — not a fallback scenario
+      return false;
     }
   }
 

@@ -31,8 +31,6 @@ function createMockShipProcess(overrides?: Partial<ShipProcess>): ShipProcess {
     retryCount: 0,
     createdAt: "2026-01-01T00:00:00Z",
     lastOutputAt: null,
-    kind: "ship",
-    parentShipId: null,
     ...overrides,
   };
 }

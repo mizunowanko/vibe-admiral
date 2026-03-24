@@ -62,7 +62,7 @@ function CommanderCard({
       className={cn(
         "w-full rounded-md border px-3 py-2 text-left text-xs transition-colors",
         isFocused
-          ? "border-primary bg-primary/5 text-foreground"
+          ? "border-primary bg-primary/10 text-foreground"
           : "border-border bg-card hover:border-primary/50 text-muted-foreground hover:text-foreground",
       )}
     >
@@ -98,10 +98,7 @@ function ShipSessionCard({
       onClick={onFocus}
       className={cn(
         "cursor-pointer rounded-md border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50",
-        isFocused && "border-primary bg-primary/5",
-        ship.gateCheck?.status === "pending" &&
-          !isFocused &&
-          "border-sky-500/50 ring-1 ring-sky-500/20",
+        isFocused && "border-primary bg-primary/10",
       )}
     >
       <div className="flex items-center justify-between gap-2 mb-1">

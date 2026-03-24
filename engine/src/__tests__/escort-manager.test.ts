@@ -4,17 +4,24 @@ import { EscortManager } from "../escort-manager.js";
 type MockProcessManager = {
   isRunning: ReturnType<typeof vi.fn>;
   kill: ReturnType<typeof vi.fn>;
+  sortie: ReturnType<typeof vi.fn>;
+  resumeSession: ReturnType<typeof vi.fn>;
 };
 
 type MockShipManager = {
   getShip: ReturnType<typeof vi.fn>;
-  getDbPath: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
   syncPhaseFromDb: ReturnType<typeof vi.fn>;
-  sortieEscort: ReturnType<typeof vi.fn>;
-  isEscort: ReturnType<typeof vi.fn>;
-  getEscortForShip: ReturnType<typeof vi.fn>;
-  updatePhase: ReturnType<typeof vi.fn>;
+};
+
+type MockFleetDatabase = {
+  getEscortByShipId: ReturnType<typeof vi.fn>;
+  getEscortById: ReturnType<typeof vi.fn>;
+  upsertEscort: ReturnType<typeof vi.fn>;
+  updateEscortPhase: ReturnType<typeof vi.fn>;
+  updateEscortSessionId: ReturnType<typeof vi.fn>;
+  getShipById: ReturnType<typeof vi.fn>;
+  persistPhaseTransition: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Record<string, unknown> = {}) {
@@ -23,20 +30,6 @@ function makeShip(overrides: Record<string, unknown> = {}) {
     repo: "owner/repo",
     issueNumber: 42,
     worktreePath: "/repo/.worktrees/feature/42-test",
-    kind: "ship",
-    parentShipId: null,
-    ...overrides,
-  };
-}
-
-function makeEscortShip(parentShipId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id: "escort-001",
-    repo: "owner/repo",
-    issueNumber: 42,
-    worktreePath: "/repo/.worktrees/feature/42-test",
-    kind: "escort",
-    parentShipId,
     ...overrides,
   };
 }
@@ -45,73 +38,104 @@ describe("EscortManager", () => {
   let escortManager: EscortManager;
   let mockProcessManager: MockProcessManager;
   let mockShipManager: MockShipManager;
+  let mockDb: MockFleetDatabase;
 
   beforeEach(() => {
     mockProcessManager = {
       isRunning: vi.fn().mockReturnValue(false),
       kill: vi.fn().mockReturnValue(true),
+      sortie: vi.fn(),
+      resumeSession: vi.fn(),
     };
     mockShipManager = {
       getShip: vi.fn().mockReturnValue(makeShip()),
-      getDbPath: vi.fn().mockReturnValue("/tmp/fleet.db"),
       clearGateCheck: vi.fn(),
       syncPhaseFromDb: vi.fn(),
-      sortieEscort: vi.fn().mockReturnValue(makeEscortShip("ship-001")),
-      isEscort: vi.fn().mockReturnValue(false),
-      getEscortForShip: vi.fn().mockReturnValue(undefined),
-      updatePhase: vi.fn(),
+    };
+    mockDb = {
+      getEscortByShipId: vi.fn().mockReturnValue(undefined),
+      getEscortById: vi.fn().mockReturnValue(undefined),
+      upsertEscort: vi.fn(),
+      updateEscortPhase: vi.fn(),
+      updateEscortSessionId: vi.fn(),
+      getShipById: vi.fn(),
+      persistPhaseTransition: vi.fn(),
     };
     escortManager = new EscortManager(
       mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
       mockShipManager as unknown as ConstructorParameters<typeof EscortManager>[1],
-      () => null,
+      () => mockDb as unknown as ConstructorParameters<typeof EscortManager>[2] extends () => infer R ? R : never,
     );
   });
 
   describe("launchEscort", () => {
-    it("launches a persistent Escort via ShipManager.sortieEscort", () => {
-      const escortId = escortManager.launchEscort("ship-001");
+    it("launches a new Escort via processManager.sortie for first gate", () => {
+      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+
+      expect(escortId).not.toBeNull();
+      expect(mockDb.upsertEscort).toHaveBeenCalled();
+      expect(mockProcessManager.sortie).toHaveBeenCalled();
+    });
+
+    it("resumes existing Escort with sessionId for subsequent gates", () => {
+      mockDb.getEscortByShipId.mockReturnValue({
+        id: "escort-001",
+        shipId: "ship-001",
+        sessionId: "session-abc",
+        processPid: null,
+        phase: "planning",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      });
+
+      const escortId = escortManager.launchEscort("ship-001", "implementing-gate");
 
       expect(escortId).toBe("escort-001");
-      expect(mockShipManager.sortieEscort).toHaveBeenCalledWith(makeShip(), undefined, undefined);
+      expect(mockProcessManager.resumeSession).toHaveBeenCalledWith(
+        "escort-001",
+        "session-abc",
+        expect.stringContaining("implementing-gate"),
+        "/repo/.worktrees/feature/42-test",
+        expect.any(Object),
+      );
     });
 
     it("prevents duplicate Escorts for the same parent Ship", () => {
       // First launch succeeds
-      const first = escortManager.launchEscort("ship-001");
+      const first = escortManager.launchEscort("ship-001", "planning-gate");
       expect(first).not.toBeNull();
 
       // Second launch is blocked because the Escort process is running
       mockProcessManager.isRunning.mockReturnValue(true);
-      const second = escortManager.launchEscort("ship-001");
+      const second = escortManager.launchEscort("ship-001", "planning-gate");
       expect(second).toBeNull();
     });
 
     it("allows re-launch after previous Escort has exited", () => {
       // First launch
-      escortManager.launchEscort("ship-001");
+      const firstId = escortManager.launchEscort("ship-001", "planning-gate");
+      expect(firstId).not.toBeNull();
 
       // Escort exits
       mockProcessManager.isRunning.mockReturnValue(false);
-      escortManager.onEscortExit("escort-001", 0);
+      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "implementing" });
+      escortManager.onEscortExit(firstId!, 0);
 
       // Re-launch should succeed
-      const newEscort = makeEscortShip("ship-001", { id: "escort-002" });
-      mockShipManager.sortieEscort.mockReturnValue(newEscort);
-      const escortId = escortManager.launchEscort("ship-001");
-      expect(escortId).toBe("escort-002");
+      const secondId = escortManager.launchEscort("ship-001", "implementing-gate");
+      expect(secondId).not.toBeNull();
     });
 
     it("returns null if parent Ship not found", () => {
       mockShipManager.getShip.mockReturnValue(undefined);
-      const result = escortManager.launchEscort("non-existent");
+      const result = escortManager.launchEscort("non-existent", "planning-gate");
       expect(result).toBeNull();
     });
   });
 
   describe("isEscortRunning", () => {
     it("returns true when Escort process is running", () => {
-      escortManager.launchEscort("ship-001");
+      escortManager.launchEscort("ship-001", "planning-gate");
       mockProcessManager.isRunning.mockReturnValue(true);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(true);
@@ -122,29 +146,37 @@ describe("EscortManager", () => {
     });
 
     it("returns false when Escort process has died", () => {
-      escortManager.launchEscort("ship-001");
+      escortManager.launchEscort("ship-001", "planning-gate");
       mockProcessManager.isRunning.mockReturnValue(false);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(false);
     });
 
     it("checks DB for restored Escort when not in memory", () => {
-      const escort = makeEscortShip("ship-001", { id: "restored-escort" });
-      mockShipManager.getEscortForShip.mockReturnValue(escort);
+      mockDb.getEscortByShipId.mockReturnValue({
+        id: "restored-escort",
+        shipId: "ship-001",
+        sessionId: null,
+        processPid: null,
+        phase: "planning",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      });
       mockProcessManager.isRunning.mockReturnValue(true);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(true);
-      expect(mockShipManager.getEscortForShip).toHaveBeenCalledWith("ship-001");
+      expect(mockDb.getEscortByShipId).toHaveBeenCalledWith("ship-001");
     });
   });
 
   describe("killEscort", () => {
     it("kills the running Escort and removes tracking", () => {
-      escortManager.launchEscort("ship-001");
+      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+
       const killed = escortManager.killEscort("ship-001");
 
       expect(killed).toBe(true);
-      expect(mockProcessManager.kill).toHaveBeenCalledWith("escort-001");
+      expect(mockProcessManager.kill).toHaveBeenCalledWith(escortId);
     });
 
     it("returns false for Ship without Escort", () => {
@@ -153,49 +185,73 @@ describe("EscortManager", () => {
   });
 
   describe("isEscortProcess", () => {
-    it("delegates to shipManager.isEscort", () => {
-      mockShipManager.isEscort.mockReturnValue(true);
-      expect(escortManager.isEscortProcess("some-id")).toBe(true);
-      expect(mockShipManager.isEscort).toHaveBeenCalledWith("some-id");
+    it("returns true for active Escort in memory", () => {
+      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+      expect(escortManager.isEscortProcess(escortId!)).toBe(true);
     });
 
-    it("returns false for non-escort ships", () => {
-      mockShipManager.isEscort.mockReturnValue(false);
+    it("returns true for Escort found in DB", () => {
+      mockDb.getEscortById.mockReturnValue({
+        id: "db-escort",
+        shipId: "ship-001",
+        sessionId: null,
+        processPid: null,
+        phase: "planning",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      });
+      expect(escortManager.isEscortProcess("db-escort")).toBe(true);
+    });
+
+    it("returns false for non-escort process IDs", () => {
       expect(escortManager.isEscortProcess("ship-001")).toBe(false);
     });
   });
 
   describe("findShipIdByEscortId", () => {
     it("finds the parent Ship ID for an active Escort", () => {
-      escortManager.launchEscort("ship-001");
-      const shipId = escortManager.findShipIdByEscortId("escort-001");
+      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+      const shipId = escortManager.findShipIdByEscortId(escortId!);
       expect(shipId).toBe("ship-001");
     });
 
     it("falls back to DB lookup for unknown Escort ID", () => {
-      mockShipManager.getShip.mockReturnValue(
-        makeEscortShip("ship-001", { id: "db-escort" }),
-      );
+      mockDb.getEscortById.mockReturnValue({
+        id: "db-escort",
+        shipId: "ship-001",
+        sessionId: null,
+        processPid: null,
+        phase: "planning",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      });
       const shipId = escortManager.findShipIdByEscortId("db-escort");
       expect(shipId).toBe("ship-001");
     });
 
     it("returns undefined for unknown Escort ID with no DB match", () => {
-      mockShipManager.getShip.mockReturnValue(undefined);
       expect(escortManager.findShipIdByEscortId("unknown")).toBeUndefined();
+    });
+  });
+
+  describe("setEscortSessionId", () => {
+    it("persists session ID to escorts table", () => {
+      escortManager.setEscortSessionId("escort-001", "session-abc");
+      expect(mockDb.updateEscortSessionId).toHaveBeenCalledWith("escort-001", "session-abc");
     });
   });
 
   describe("onEscortExit", () => {
     it("cleans up tracking state on exit", () => {
-      escortManager.launchEscort("ship-001");
-      escortManager.onEscortExit("escort-001", 0);
+      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+
+      // Parent already moved past gate (verdict submitted)
+      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "implementing" });
+      escortManager.onEscortExit(escortId!, 0);
 
       // Should allow re-launch
-      const newEscort = makeEscortShip("ship-001", { id: "escort-002" });
-      mockShipManager.sortieEscort.mockReturnValue(newEscort);
-      const escortId = escortManager.launchEscort("ship-001");
-      expect(escortId).toBe("escort-002");
+      const newEscortId = escortManager.launchEscort("ship-001", "implementing-gate");
+      expect(newEscortId).not.toBeNull();
     });
 
     it("is a no-op for unknown Escort IDs", () => {
@@ -204,40 +260,25 @@ describe("EscortManager", () => {
     });
 
     describe("gate phase revert via XState (ESCORT_DIED)", () => {
-      let mockDb: {
-        getShipById: ReturnType<typeof vi.fn>;
-        persistPhaseTransition: ReturnType<typeof vi.fn>;
-      };
       let mockActorManager: {
         send: ReturnType<typeof vi.fn>;
         requestTransition: ReturnType<typeof vi.fn>;
       };
-      let deathHandler: (shipId: string, message: string) => void;
+      let deathHandler: ReturnType<typeof vi.fn>;
 
       beforeEach(() => {
-        mockDb = {
-          getShipById: vi.fn(),
-          persistPhaseTransition: vi.fn().mockReturnValue(true),
-        };
         mockActorManager = {
           send: vi.fn().mockReturnValue(true),
           requestTransition: vi.fn(),
         };
         deathHandler = vi.fn();
 
-        // Recreate EscortManager with DB and ActorManager
-        escortManager = new EscortManager(
-          mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
-          mockShipManager as unknown as ConstructorParameters<typeof EscortManager>[1],
-          () => mockDb as unknown as ConstructorParameters<typeof EscortManager>[2] extends () => infer R ? R : never,
-        );
         escortManager.setActorManager(mockActorManager as unknown as Parameters<EscortManager["setActorManager"]>[0]);
-        escortManager.setEscortDeathHandler(deathHandler);
+        escortManager.setEscortDeathHandler(deathHandler as unknown as Parameters<EscortManager["setEscortDeathHandler"]>[0]);
       });
 
       it("reverts gate phase via XState requestTransition and persists to DB", () => {
-        // Launch escort to set up mapping
-        escortManager.launchEscort("ship-001");
+        const escortId = escortManager.launchEscort("ship-001", "planning-gate");
 
         // Parent ship is in gate phase
         mockDb.getShipById.mockReturnValue({
@@ -251,16 +292,14 @@ describe("EscortManager", () => {
           toPhase: "planning",
         });
 
-        escortManager.onEscortExit("escort-001", 1);
+        escortManager.onEscortExit(escortId!, 1);
 
-        // XState should be consulted via requestTransition (not send)
         expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
           type: "ESCORT_DIED",
           exitCode: 1,
           feedback: expect.stringContaining("exited unexpectedly"),
         });
 
-        // DB should be persisted after XState approved
         expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
           "ship-001",
           "planning-gate",
@@ -275,7 +314,7 @@ describe("EscortManager", () => {
       });
 
       it("does not persist to DB when XState rejects ESCORT_DIED", () => {
-        escortManager.launchEscort("ship-001");
+        const escortId = escortManager.launchEscort("ship-001", "planning-gate");
 
         mockDb.getShipById.mockReturnValue({
           ...makeShip(),
@@ -287,14 +326,14 @@ describe("EscortManager", () => {
           currentPhase: "implementing",
         });
 
-        escortManager.onEscortExit("escort-001", 1);
+        escortManager.onEscortExit(escortId!, 1);
 
         expect(mockActorManager.requestTransition).toHaveBeenCalled();
         expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
       });
 
       it("skips XState when parent is no longer in gate phase", () => {
-        escortManager.launchEscort("ship-001");
+        const escortId = escortManager.launchEscort("ship-001", "planning-gate");
 
         // Parent already moved past gate (verdict was submitted)
         mockDb.getShipById.mockReturnValue({
@@ -302,44 +341,89 @@ describe("EscortManager", () => {
           phase: "implementing",
         });
 
-        escortManager.onEscortExit("escort-001", 0);
+        escortManager.onEscortExit(escortId!, 0);
 
-        // Neither XState nor DB should be called for phase revert
         expect(mockActorManager.requestTransition).not.toHaveBeenCalled();
         expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
-
-        // But gate check should still be cleared
         expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
       });
     });
   });
 
+  describe("notifyLaunchFailure", () => {
+    it("sends notification via onEscortDeathCallback", () => {
+      const deathHandler = vi.fn();
+      escortManager.setEscortDeathHandler(deathHandler);
+
+      escortManager.notifyLaunchFailure("ship-001", "planning-gate", "test reason");
+
+      expect(deathHandler).toHaveBeenCalledWith(
+        "ship-001",
+        expect.stringContaining("Escort launch failed"),
+      );
+      expect(deathHandler).toHaveBeenCalledWith(
+        "ship-001",
+        expect.stringContaining("test reason"),
+      );
+    });
+
+    it("is a no-op when parent Ship not found", () => {
+      const deathHandler = vi.fn();
+      escortManager.setEscortDeathHandler(deathHandler);
+      mockShipManager.getShip.mockReturnValue(undefined);
+
+      escortManager.notifyLaunchFailure("non-existent", "planning-gate", "reason");
+
+      expect(deathHandler).not.toHaveBeenCalled();
+    });
+
+    it("is a no-op when no handler is set", () => {
+      // No handler set — should not throw
+      escortManager.notifyLaunchFailure("ship-001", "planning-gate", "reason");
+    });
+  });
+
   describe("cleanupForDoneShip", () => {
     it("kills Escort process and marks DB record as done", () => {
-      escortManager.launchEscort("ship-001");
+      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
 
       escortManager.cleanupForDoneShip("ship-001");
 
-      expect(mockProcessManager.kill).toHaveBeenCalledWith("escort-001");
-      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("escort-001", "done");
+      expect(mockProcessManager.kill).toHaveBeenCalledWith(escortId);
+      expect(mockDb.updateEscortPhase).toHaveBeenCalledWith(
+        escortId,
+        "done",
+        expect.any(String),
+      );
     });
 
     it("falls back to DB lookup when Escort not in memory", () => {
-      const escort = makeEscortShip("ship-001", { id: "db-escort" });
-      mockShipManager.getEscortForShip.mockReturnValue(escort);
+      mockDb.getEscortByShipId.mockReturnValue({
+        id: "db-escort",
+        shipId: "ship-001",
+        sessionId: null,
+        processPid: null,
+        phase: "planning",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      });
 
       escortManager.cleanupForDoneShip("ship-001");
 
-      expect(mockShipManager.getEscortForShip).toHaveBeenCalledWith("ship-001");
+      expect(mockDb.getEscortByShipId).toHaveBeenCalledWith("ship-001");
       expect(mockProcessManager.kill).toHaveBeenCalledWith("db-escort");
-      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("db-escort", "done");
+      expect(mockDb.updateEscortPhase).toHaveBeenCalledWith(
+        "db-escort",
+        "done",
+        expect.any(String),
+      );
     });
 
     it("is a no-op when no Escort exists for the parent Ship", () => {
       escortManager.cleanupForDoneShip("ship-without-escort");
 
       expect(mockProcessManager.kill).not.toHaveBeenCalled();
-      expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
+      expect(mockDb.updateEscortPhase).not.toHaveBeenCalled();
     });
   });
 
@@ -349,12 +433,9 @@ describe("EscortManager", () => {
       mockShipManager.getShip
         .mockReturnValueOnce(makeShip({ id: "ship-001" }))
         .mockReturnValueOnce(makeShip({ id: "ship-002", issueNumber: 43 }));
-      mockShipManager.sortieEscort
-        .mockReturnValueOnce(makeEscortShip("ship-001", { id: "escort-a" }))
-        .mockReturnValueOnce(makeEscortShip("ship-002", { id: "escort-b" }));
 
-      escortManager.launchEscort("ship-001");
-      escortManager.launchEscort("ship-002");
+      escortManager.launchEscort("ship-001", "planning-gate");
+      escortManager.launchEscort("ship-002", "planning-gate");
 
       escortManager.killAll();
 

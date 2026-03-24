@@ -35,6 +35,10 @@ export interface ShipMachineContext {
   phaseBeforeStopped: Phase | null;
   /** Whether QA (acceptance-test-gate) is required. Determined during planning. */
   qaRequired: boolean;
+  /** Timestamp (ms epoch) when the Ship process was last started/resumed. Used for rapid death detection. */
+  lastStartedAt: number | null;
+  /** Count of consecutive rapid deaths (process exiting within RAPID_DEATH_THRESHOLD_MS of start). */
+  rapidDeathCount: number;
 }
 
 // === Events ===
@@ -57,7 +61,8 @@ export type ShipMachineEvent =
   | { type: "SET_PR_URL"; prUrl: string }
   | { type: "SET_QA_REQUIRED"; qaRequired: boolean }
   | { type: "SET_PR_REVIEW_STATUS"; status: PRReviewStatus }
-  | { type: "SET_PHASE_BEFORE_STOPPED"; phase: Phase };
+  | { type: "SET_PHASE_BEFORE_STOPPED"; phase: Phase }
+  | { type: "RAPID_DEATH_LIMIT" };
 
 // === Input (for actor creation) ===
 
@@ -125,6 +130,8 @@ export const shipMachine = setup({
     processDead: false,
     phaseBeforeStopped: input.phaseBeforeStopped ?? null,
     qaRequired: input.qaRequired ?? true,
+    lastStartedAt: null,
+    rapidDeathCount: 0,
   }),
   initial: "planning",
   // Global events available in all states
@@ -133,6 +140,7 @@ export const shipMachine = setup({
       actions: assign({
         lastOutputAt: ({ event }) => event.timestamp,
         processDead: () => false,
+        rapidDeathCount: () => 0,
       }),
     },
     COMPACT_START: {
@@ -311,6 +319,9 @@ export const shipMachine = setup({
         ABANDON: {
           target: "done",
         },
+        RAPID_DEATH_LIMIT: {
+          // Auto-stop: too many rapid deaths detected by Engine
+        },
         RESUME: [
           {
             target: "planning",
@@ -318,6 +329,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -326,6 +338,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -334,6 +347,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -342,6 +356,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -350,6 +365,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -358,6 +374,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -366,6 +383,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
           {
@@ -374,6 +392,7 @@ export const shipMachine = setup({
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
+              lastStartedAt: () => Date.now(),
             }),
           },
         ],

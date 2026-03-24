@@ -341,6 +341,7 @@ async function handleShipRoute(
           shipManager.syncPhaseFromDb(shipId);
         }
         shipManager.clearGateCheck(shipId);
+        escortManager.notifyLaunchFailure(shipId, gatePhase, "Escort launch returned null — reverting to pre-gate phase for retry");
         sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
         return;
       }
@@ -482,32 +483,26 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       // === Frontend API endpoints ===
 
       // GET /api/ships — Ship list as JSON array (for Frontend)
-      // Excludes escort records; attaches escort info to parent ships.
+      // Escorts are in a separate table; attach escort info to parent ships.
       if (route === "ships" && req.method === "GET") {
         const fleetId = url.searchParams.get("fleetId") ?? undefined;
         const shipManager = deps.getShipManager();
-        const allShips = fleetId
+        const escortManager = deps.getEscortManager();
+        const ships = fleetId
           ? shipManager.getShipsByFleet(fleetId)
           : shipManager.getAllShips();
 
-        // Separate ships and escorts
-        const escorts = allShips.filter((s) => s.kind === "escort");
-        const ships = allShips
-          .filter((s) => s.kind !== "escort")
-          .map((s) => {
-            const childEscorts = escorts.filter((e) => e.parentShipId === s.id);
-            if (childEscorts.length === 0) return s;
-            return {
-              ...s,
-              escorts: childEscorts.map((e) => ({
-                id: e.id,
-                phase: e.phase,
-                processDead: e.processDead ?? false,
-              })),
-            };
-          });
+        // Attach escort info from escorts table
+        const enriched = ships.map((s) => {
+          const isRunning = escortManager.isEscortRunning(s.id);
+          if (!isRunning) return s;
+          return {
+            ...s,
+            escorts: [{ id: "escort", phase: "reviewing" as const, processDead: false }],
+          };
+        });
 
-        sendJson(res, 200, { ok: true, ships });
+        sendJson(res, 200, { ok: true, ships: enriched });
         return;
       }
 

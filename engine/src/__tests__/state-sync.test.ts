@@ -42,6 +42,10 @@ type MockShipManager = {
   hasRunningProcess: ReturnType<typeof vi.fn>;
   getAllShips: ReturnType<typeof vi.fn>;
   setIsCompacting: ReturnType<typeof vi.fn>;
+  getLastStartedAt: ReturnType<typeof vi.fn>;
+  incrementRapidDeathCount: ReturnType<typeof vi.fn>;
+  resetRapidDeathCount: ReturnType<typeof vi.fn>;
+  setPrUrl: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -86,8 +90,6 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     retryCount: 0,
     createdAt: new Date().toISOString(),
     lastOutputAt: null,
-    kind: "ship",
-    parentShipId: null,
     ...overrides,
   };
 }
@@ -127,6 +129,10 @@ describe("StateSync", () => {
       hasRunningProcess: vi.fn().mockReturnValue(false),
       getAllShips: vi.fn().mockReturnValue([]),
       setIsCompacting: vi.fn(),
+      getLastStartedAt: vi.fn().mockReturnValue(null),
+      incrementRapidDeathCount: vi.fn().mockReturnValue(1),
+      resetRapidDeathCount: vi.fn(),
+      setPrUrl: vi.fn(),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
@@ -319,15 +325,6 @@ describe("StateSync", () => {
       await stateSync.onProcessExit("ship-1", false);
 
       expect(mockEscortManager.cleanupForDoneShip).toHaveBeenCalledWith("ship-1");
-    });
-
-    it("does not clean up Escort for Escort-Ships", async () => {
-      const escort = makeShip({ kind: "escort", parentShipId: "parent-1" });
-      mockShipManager.getShip.mockReturnValue(escort);
-
-      await stateSync.onProcessExit("escort-1", true);
-
-      expect(mockEscortManager.cleanupForDoneShip).not.toHaveBeenCalled();
     });
 
     it("does not clean up Escort on genuine failure", async () => {
