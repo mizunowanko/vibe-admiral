@@ -64,6 +64,8 @@ Output a clear summary. Do NOT create issues or make any changes.
 
 ## Ship Error Diagnosis Template
 
+> **ログ確認が最優先**: DB の phase 遷移やフロントエンド通知は補助情報。実際に何が起きているかはログにしかない。推測で行動する前に必ずログを読むこと。
+
 ```
 Task(description="Dispatch: diagnose Ship error", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent diagnosing a Ship error.
@@ -73,13 +75,18 @@ Ship issue: #<issue-number>
 Error context: <error details from Ship status>
 Ship log: <worktree>/.claude/ship-log.jsonl
 
+IMPORTANT: Always read logs FIRST before any other investigation.
+DB phase history and frontend notifications are supplementary — the log is the source of truth.
+
 Steps:
-1. Read the Ship's CLI log for last actions:
+1. **[MUST] Read the Ship's CLI log first** — this is the highest priority:
    Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30
-2. Check for error messages:
+2. Check for error messages in the log:
    Run: tail -n 100 <worktree>/.claude/ship-log.jsonl | grep -i '"type":"result"'
-3. Read work context (PR diff, commits) if available
-4. Identify what went wrong and why
+3. If Escort is involved, read Escort logs as well:
+   Run: find <worktree>/.. -name 'ship-log.jsonl' -path '*escort*' 2>/dev/null
+4. Read work context (PR diff, commits) if available
+5. Identify what went wrong and why
 
 OUTPUT FORMAT CONSTRAINT — keep your response concise (max 12 lines):
 - **Error**: <1 sentence>
@@ -113,8 +120,11 @@ When a Ship's process dies (processDead), Bridge receives a system message with 
 ## Investigation Flow
 
 1. Identify that investigation is needed
-2. Launch Dispatch with appropriate template (`run_in_background=true`)
-3. Continue normal duties while Dispatch runs
-4. When Dispatch completes, review findings
-5. Take action: create issues (`gh issue create`), report to user, or plan next steps
-6. **Bridge always makes final decisions and creates issues** — Dispatch only provides information
+2. **Read Ship/Escort logs first** — launch Dispatch with the Ship Error Diagnosis template to read logs before any other action
+3. Launch additional Dispatch agents with appropriate templates if needed (`run_in_background=true`)
+4. Continue normal duties while Dispatch runs
+5. When Dispatch completes, review findings
+6. Take action: create issues (`gh issue create`), report to user, or plan next steps
+7. **Bridge always makes final decisions and creates issues** — Dispatch only provides information
+
+> **ログ最優先**: Ship 異常の調査では、DB phase 遷移やフロントエンド通知だけで判断せず、必ずログを最初に確認すること。

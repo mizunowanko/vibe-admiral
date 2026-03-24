@@ -31,7 +31,7 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
   });
   const allFleetShips = useShipStore((s) => {
     const filtered = Array.from(s.ships.values()).filter(
-      (ship) => ship.fleetId === fleetId,
+      (ship) => ship.fleetId === fleetId && ship.kind !== "escort",
     );
     const fingerprint = buildFleetShipFingerprint(filtered);
     if (fingerprint === prevRef.current.fingerprint) {
@@ -57,9 +57,12 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
   return (
     <div className="px-3 py-2">
       <div className="flex items-center justify-between mb-1.5">
-        <h3 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-          Ships
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Ships
+          </h3>
+          <ActiveShipSummary fleetId={fleetId} />
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">
             {fleetShips.length} ship{fleetShips.length !== 1 ? "s" : ""}
@@ -116,9 +119,6 @@ export const SessionCardList = memo(function SessionCardList({
 
   return (
     <div className="w-[420px] shrink-0 border-l border-border bg-background/50 flex flex-col min-h-0">
-      {/* Active Ship Summary — always visible */}
-      <ActiveShipSummary fleetId={fleetId} />
-
       {/* Scrollable sections: Commander cards → Ships */}
       <ScrollArea className="flex-1">
         <div className="divide-y divide-border">

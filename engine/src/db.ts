@@ -1,8 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ShipProcess, Phase } from "./types.js";
-import { PHASE_ORDER } from "./types.js";
+import type { ShipProcess, Phase, ShipKind } from "./types.js";
 
 /** Persisted ship row stored in SQLite. */
 export interface ShipRow {
@@ -21,6 +20,8 @@ export interface ShipRow {
   phase: string;
   created_at: string;
   completed_at: string | null;
+  kind: string | null;
+  parent_ship_id: string | null;
 }
 
 /** Row returned by the ships+repos join query. */
@@ -61,6 +62,12 @@ export class FleetDatabase {
     }
     if (version < 3) {
       this.applyV3();
+    }
+    if (version < 4) {
+      this.applyV4();
+    }
+    if (version < 5) {
+      this.applyV5();
     }
   }
 
@@ -148,6 +155,77 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV4(): void {
+    // V4: Add kind + parent_ship_id columns for persistent Escort-as-Ship model.
+    // Relax UNIQUE(repo_id, issue_number) to UNIQUE(repo_id, issue_number, kind)
+    // so both a Ship and its Escort can coexist for the same issue.
+    this.db.exec(`
+      ALTER TABLE ships ADD COLUMN kind TEXT NOT NULL DEFAULT 'ship';
+      ALTER TABLE ships ADD COLUMN parent_ship_id TEXT;
+
+      -- Recreate unique index to include kind
+      DROP INDEX IF EXISTS idx_ships_repo_issue;
+      CREATE UNIQUE INDEX idx_ships_repo_issue_kind ON ships (repo_id, issue_number, kind);
+
+      INSERT INTO schema_version (version) VALUES (4);
+    `);
+  }
+
+  private applyV5(): void {
+    // V5: Remove stale UNIQUE(repo_id, issue_number) inline constraint.
+    // foreign_keys=ON blocks DROP TABLE when other tables reference it.
+    // PRAGMA foreign_keys cannot be changed inside a transaction,
+    // so we toggle it outside, then use a transaction for the DDL.
+
+    this.db.pragma("foreign_keys = OFF");
+
+    try {
+      this.db.exec(`
+        DROP TABLE IF EXISTS ships_new;
+
+        BEGIN;
+
+        CREATE TABLE ships_new (
+          id TEXT PRIMARY KEY,
+          repo_id INTEGER NOT NULL REFERENCES repos(id),
+          issue_number INTEGER NOT NULL,
+          issue_title TEXT,
+          worktree_path TEXT,
+          branch_name TEXT,
+          session_id TEXT,
+          pr_url TEXT,
+          pr_number INTEGER,
+          qa_required BOOLEAN,
+          process_pid INTEGER,
+          fleet_id TEXT,
+          phase TEXT NOT NULL DEFAULT 'planning',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT,
+          kind TEXT NOT NULL DEFAULT 'ship',
+          parent_ship_id TEXT
+        );
+
+        INSERT INTO ships_new SELECT * FROM ships;
+
+        DROP TABLE ships;
+
+        ALTER TABLE ships_new RENAME TO ships;
+
+        CREATE UNIQUE INDEX idx_ships_repo_issue_kind
+          ON ships (repo_id, issue_number, kind);
+
+        INSERT INTO schema_version (version) VALUES (5);
+
+        COMMIT;
+      `);
+    } catch (e) {
+      try { this.db.exec("ROLLBACK;"); } catch { /* already rolled back */ }
+      throw e;
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -168,18 +246,19 @@ export class FleetDatabase {
 
     const repoId = this.ensureRepo(owner, name);
 
-    // Delete any existing row with the same repo+issue to avoid UNIQUE(repo_id, issue_number) conflict.
+    // Delete any existing row with the same repo+issue+kind to avoid UNIQUE constraint conflict.
     // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
+    const kind = ship.kind ?? "ship";
     const existingShip = this.db.prepare(
-      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ?",
-    ).get(repoId, ship.issueNumber) as { id: string } | undefined;
+      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ? AND kind = ?",
+    ).get(repoId, ship.issueNumber, kind) as { id: string } | undefined;
     if (existingShip) {
       this.deleteShip(existingShip.id);
     }
 
     this.db.prepare(`
-      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at, kind, parent_ship_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         issue_title = excluded.issue_title,
         worktree_path = excluded.worktree_path,
@@ -190,7 +269,9 @@ export class FleetDatabase {
         qa_required = excluded.qa_required,
         fleet_id = excluded.fleet_id,
         phase = excluded.phase,
-        completed_at = excluded.completed_at
+        completed_at = excluded.completed_at,
+        kind = excluded.kind,
+        parent_ship_id = excluded.parent_ship_id
     `).run(
       ship.id,
       repoId,
@@ -206,6 +287,8 @@ export class FleetDatabase {
       ship.phase,
       ship.createdAt,
       ship.completedAt ? new Date(ship.completedAt).toISOString() : null,
+      kind,
+      ship.parentShipId,
     );
   }
 
@@ -331,16 +414,20 @@ export class FleetDatabase {
   }
 
   /**
-   * Transactional phase transition.
-   * 1. Verify current phase matches expected
-   * 2. Insert phase_transition audit log
-   * 3. Update phases table
-   * 4. Update ships.phase
+   * Persist a phase transition that was already validated by XState.
+   * DB is responsible only for:
+   * 1. Optimistic lock (verify current DB phase matches expectedPhase)
+   * 2. Audit log recording
+   * 3. Phase persistence (phases + ships tables)
    *
    * Idempotent: if the same transition was recorded within the last 5 seconds, no-op.
    * Returns true if the transition was applied, false if no-op.
+   *
+   * IMPORTANT: This method must only be called from XState side-effect callbacks
+   * or after XState has validated the transition. Direct calls from API handlers
+   * are prohibited — use ShipActorManager.requestTransition() instead.
    */
-  transitionPhase(
+  persistPhaseTransition(
     shipId: string,
     expectedPhase: Phase,
     newPhase: Phase,
@@ -348,7 +435,7 @@ export class FleetDatabase {
     metadata?: Record<string, unknown>,
   ): boolean {
     const txn = this.db.transaction(() => {
-      // Check current phase
+      // Optimistic lock: verify current phase matches expected
       const current = this.db.prepare(
         "SELECT phase FROM ships WHERE id = ?",
       ).get(shipId) as { phase: string } | undefined;
@@ -358,20 +445,6 @@ export class FleetDatabase {
       }
       if (current.phase !== expectedPhase) {
         throw new Error(`Phase mismatch: expected ${expectedPhase}, got ${current.phase}`);
-      }
-
-      // Validate forward-only (with gate-reject exception)
-      const currentIdx = PHASE_ORDER.indexOf(expectedPhase as Phase);
-      const newIdx = PHASE_ORDER.indexOf(newPhase);
-      if (newIdx <= currentIdx) {
-        // Allow gate rejection: gate-phase → preceding work phase
-        const isGateReject =
-          (expectedPhase === "planning-gate" && newPhase === "planning") ||
-          (expectedPhase === "implementing-gate" && newPhase === "implementing") ||
-          (expectedPhase === "acceptance-test-gate" && newPhase === "acceptance-test");
-        if (!isGateReject) {
-          throw new Error(`Cannot go backward: ${expectedPhase} → ${newPhase}`);
-        }
       }
 
       // Idempotency: check if same transition was recorded in last 5 seconds
@@ -526,6 +599,8 @@ export class FleetDatabase {
       createdAt: row.created_at,
       completedAt: row.completed_at ? new Date(row.completed_at).getTime() : undefined,
       lastOutputAt: null,
+      kind: (row.kind as ShipKind) ?? "ship",
+      parentShipId: row.parent_ship_id,
     };
   }
 }

@@ -287,7 +287,12 @@ export const ChatMessage = memo(function ChatMessage({ message, repeatCount, con
     return null;
   }
 
-  const content = message.content ?? "";
+  // Guard: skip messages with no displayable content (e.g. raw user/tool_result from log replay)
+  if (!message.content) {
+    return null;
+  }
+
+  const content = message.content;
   // In Ship context, assistant messages are right-aligned (LINE-style: Ship speaks on the right)
   const isShipAssistant = context === "ship" && message.type === "assistant";
   const isRightAligned = isUser || isShipAssistant;

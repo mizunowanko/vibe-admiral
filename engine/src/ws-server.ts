@@ -31,7 +31,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -74,16 +74,17 @@ export class EngineServer {
     this.actorManager = new ShipActorManager();
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
 
-    // Wire up ShipActorManager to ShipManager and EscortManager
+    // Wire up ShipActorManager to ShipManager, EscortManager, and StateSync
     this.shipManager.setActorManager(this.actorManager);
     this.escortManager.setActorManager(this.actorManager);
+    this.stateSync.setActorManager(this.actorManager);
+    this.stateSync.setEscortManager(this.escortManager);
 
     // Configure Actor side effects
     this.actorManager.setSideEffects({
       onPhaseChange: (shipId, phase, detail) => {
         // Actor-driven phase changes are informational — DB updates are
-        // still handled by the existing flow (ship-manager.updatePhase / db.transitionPhase).
-        // The Actor tracks state in parallel to validate transitions.
+        // handled after XState validates (db.persistPhaseTransition / ship-manager.updatePhase).
         console.log(`[actor] Ship ${shipId.slice(0, 8)}... phase: ${phase}${detail ? ` (${detail})` : ""}`);
       },
       onRecordTransition: (shipId, fromPhase, toPhase, triggeredBy, _metadata) => {
@@ -134,6 +135,7 @@ export class EngineServer {
     this.setupWSS();
     this.setupProcessEvents();
     this.setupShipStatusHandler();
+    this.setupShipCreatedHandler();
     this.runStartupReconciliation();
     this.startQuestionTimeoutScanner();
     this.setupLookout();
@@ -184,12 +186,25 @@ export class EngineServer {
 
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
-      // Route Escort stream data to frontend (separate from Ship stream)
+      // Route Escort-Ship stream data to frontend (separate from Ship stream)
       if (this.escortManager.isEscortProcess(id)) {
-        const shipId = this.escortManager.findShipIdByEscortId(id);
-        if (shipId) {
-          const ship = this.shipManager.getShip(shipId);
+        const parentShipId = this.escortManager.findShipIdByEscortId(id);
+        if (parentShipId) {
+          const parentShip = this.shipManager.getShip(parentShipId);
           const parsed = parseStreamMessage(msg);
+
+          // Update Escort-Ship's lastOutputAt for Lookout
+          this.shipManager.setLastOutputAt(id, Date.now());
+
+          // Extract sessionId from Escort init messages
+          const sessionId = extractSessionId(msg);
+          if (sessionId) {
+            const escort = this.shipManager.getShip(id);
+            if (escort && !escort.sessionId) {
+              this.shipManager.setSessionId(id, sessionId);
+            }
+          }
+
           if (parsed && parsed.type !== "result") {
             // Mark assistant messages with escort-log metadata for visual distinction
             if (parsed.type === "assistant") {
@@ -201,10 +216,10 @@ export class EngineServer {
             this.broadcast({
               type: "escort:stream",
               data: {
-                id: shipId,
+                id: parentShipId,
                 escortId: id,
-                fleetId: ship?.fleetId,
-                issueNumber: ship?.issueNumber,
+                fleetId: parentShip?.fleetId,
+                issueNumber: parentShip?.issueNumber,
                 message: parsed,
               },
             });
@@ -317,40 +332,40 @@ export class EngineServer {
     });
 
     this.processManager.on("exit", (id: string, code: number | null) => {
-      // Handle Escort process exit
+      // Handle Escort-Ship process exit
       if (this.escortManager.isEscortProcess(id)) {
-        const shipId = this.escortManager.findShipIdByEscortId(id);
+        const parentShipId = this.escortManager.findShipIdByEscortId(id);
         this.escortManager.onEscortExit(id, code);
-        if (shipId) {
-          const ship = this.shipManager.getShip(shipId);
+        if (parentShipId) {
+          const parentShip = this.shipManager.getShip(parentShipId);
           this.broadcast({
             type: "escort:completed",
             data: {
-              id: shipId,
+              id: parentShipId,
               escortId: id,
               exitCode: code,
-              fleetId: ship?.fleetId,
-              issueNumber: ship?.issueNumber,
+              fleetId: parentShip?.fleetId,
+              issueNumber: parentShip?.issueNumber,
             },
           });
 
           // Inject notification into Flagship chat
-          if (ship) {
+          if (parentShip) {
             const escortMsg = {
               type: "system" as const,
               subtype: "ship-status" as const,
-              content: `Ship #${ship.issueNumber} (${ship.issueTitle}): Escort review completed (exit ${code})`,
+              content: `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}): Escort review completed (exit ${code})`,
               meta: {
                 category: "ship-status" as const,
-                issueNumber: ship.issueNumber,
-                issueTitle: ship.issueTitle,
+                issueNumber: parentShip.issueNumber,
+                issueTitle: parentShip.issueTitle,
               },
               timestamp: Date.now(),
             };
-            this.flagshipManager.addToHistory(ship.fleetId, escortMsg);
+            this.flagshipManager.addToHistory(parentShip.fleetId, escortMsg);
             this.broadcast({
               type: "flagship:stream",
-              data: { fleetId: ship.fleetId, message: escortMsg },
+              data: { fleetId: parentShip.fleetId, message: escortMsg },
             });
           }
         }
@@ -441,18 +456,12 @@ export class EngineServer {
     this.shipManager.setPhaseChangeHandler((id, phase, detail) => {
       const ship = this.shipManager.getShip(id);
 
-      this.broadcast({
-        type: "ship:status",
-        data: {
-          id,
-          phase: phase,
-          detail,
-          fleetId: ship?.fleetId,
-          repo: ship?.repo,
-          issueNumber: ship?.issueNumber,
-          issueTitle: ship?.issueTitle,
-        },
-      });
+      // Event Notification pattern: send minimal notification, Frontend fetches via REST API
+      if (phase === "done") {
+        this.broadcast({ type: "ship:done", data: { shipId: id } });
+      } else {
+        this.broadcast({ type: "ship:updated", data: { shipId: id } });
+      }
 
       // Inject Ship status into Flagship chat (Ship management is Flagship's domain)
       if (ship) {
@@ -485,6 +494,12 @@ export class EngineServer {
           );
         }
       }
+    });
+  }
+
+  private setupShipCreatedHandler(): void {
+    this.shipManager.setShipCreatedHandler((id) => {
+      this.broadcast({ type: "ship:created", data: { shipId: id } });
     });
   }
 
@@ -815,6 +830,7 @@ export class EngineServer {
     if (updates.flagshipRulePaths !== undefined) fleet.flagshipRulePaths = updates.flagshipRulePaths as string[];
     if (updates.dockRulePaths !== undefined) fleet.dockRulePaths = updates.dockRulePaths as string[];
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
+    if (updates.customInstructions !== undefined) fleet.customInstructions = updates.customInstructions as CustomInstructions;
     if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
     if (updates.maxConcurrentSorties !== undefined) fleet.maxConcurrentSorties = updates.maxConcurrentSorties as number;
     await this.saveFleets(fleets);
@@ -908,6 +924,12 @@ export class EngineServer {
         const rulesSuffix = [sharedRules, roleRules].filter(Boolean).join("\n\n");
         if (rulesSuffix) {
           prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
+        }
+
+        const ci = fleet.customInstructions;
+        const ciParts = [ci?.shared, role === "flagship" ? ci?.flagship : ci?.dock].filter(Boolean);
+        if (ciParts.length > 0) {
+          prompt = `${prompt}\n\n## Custom Instructions\n\n${ciParts.join("\n\n")}`;
         }
 
         await manager.launch(
@@ -1052,19 +1074,8 @@ export class EngineServer {
     // Store PR URL on ship (DB + runtime)
     this.shipManager.setPrUrl(id, prUrl);
 
-    // Broadcast PR creation to frontend
-    this.broadcast({
-      type: "ship:status",
-      data: {
-        id,
-        phase: ship.phase,
-        detail: `PR created: ${prUrl}`,
-        fleetId: ship.fleetId,
-        repo: ship.repo,
-        issueNumber: ship.issueNumber,
-        issueTitle: ship.issueTitle,
-      },
-    });
+    // Broadcast PR detection as ship:updated notification — Frontend fetches via REST API
+    this.broadcast({ type: "ship:updated", data: { shipId: id } });
   }
 
   private detectCompactStatus(

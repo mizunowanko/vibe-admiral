@@ -9,22 +9,20 @@ import {
   createShipSession,
   commanderSessionId,
 } from "@/stores/sessionStore";
-import type { ServerMessage, Fleet, Ship, Phase, StreamMessage, GatePhase, GateType } from "@/types";
+import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
   const selectFleet = useFleetStore((s) => s.selectFleet);
   const setMainView = useUIStore((s) => s.setMainView);
-  const addShip = useShipStore((s) => s.addShip);
-  const setShipPhase = useShipStore((s) => s.setShipPhase);
   const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
   const setShipLogs = useShipStore((s) => s.setShipLogs);
-  const setShipDone = useShipStore((s) => s.setShipDone);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
   const syncShips = useShipStore((s) => s.syncShips);
   const fetchShips = useShipStore((s) => s.fetchShips);
+  const updateShipFromApi = useShipStore((s) => s.updateShipFromApi);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
   const registerSession = useSessionStore((s) => s.registerSession);
@@ -88,55 +86,30 @@ export function useEngine() {
         }
 
         case "ship:created": {
-          const created = msg.data as {
-            id: string;
-            fleetId: string;
-            repo: string;
-            issueNumber: number;
-            issueTitle: string;
-            phase: Phase;
-            branchName?: string;
-          };
-          addShip(created);
-          // Register ship session
-          registerSession(
-            createShipSession(
-              created.id,
-              created.fleetId,
-              created.issueNumber,
-              created.issueTitle,
-            ),
-          );
+          const { shipId } = msg.data as { shipId: string };
+          // Fetch full Ship data via REST API, then register session
+          void updateShipFromApi(shipId).then(() => {
+            const ship = useShipStore.getState().ships.get(shipId);
+            if (ship) {
+              registerSession(
+                createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+              );
+            }
+          });
           break;
         }
 
-        case "ship:status": {
-          const statusData = msg.data as {
-            id: string;
-            phase: Phase;
-            detail?: string;
-            fleetId?: string;
-            repo?: string;
-            issueNumber?: number;
-            issueTitle?: string;
-          };
-          setShipPhase(statusData.id, statusData.phase, {
-            fleetId: statusData.fleetId,
-            repo: statusData.repo,
-            issueNumber: statusData.issueNumber,
-            issueTitle: statusData.issueTitle,
+        case "ship:updated": {
+          const { shipId } = msg.data as { shipId: string };
+          // Fetch latest Ship state via REST API
+          void updateShipFromApi(shipId).then(() => {
+            const ship = useShipStore.getState().ships.get(shipId);
+            if (ship) {
+              registerSession(
+                createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+              );
+            }
           });
-          // Update session label if issue info changed
-          if (statusData.issueNumber && statusData.issueTitle) {
-            registerSession(
-              createShipSession(
-                statusData.id,
-                statusData.fleetId ?? "",
-                statusData.issueNumber,
-                statusData.issueTitle,
-              ),
-            );
-          }
           break;
         }
 
@@ -180,12 +153,9 @@ export function useEngine() {
         }
 
         case "ship:done": {
-          const doneData = msg.data as {
-            id: string;
-            prUrl?: string;
-            merged: boolean;
-          };
-          setShipDone(doneData.id, doneData.prUrl, doneData.merged);
+          const { shipId } = msg.data as { shipId: string };
+          // Fetch final Ship state via REST API
+          void updateShipFromApi(shipId);
           break;
         }
 
@@ -244,7 +214,21 @@ export function useEngine() {
     // Fetch data on every connect/reconnect
     const unsubConnect = wsClient.onConnect(() => {
       fetchFleets();
-      void fetchShips();
+      void fetchShips().then(() => {
+        // Register sessions for ships loaded via REST API.
+        // The ship:data WS handler would do this, but Engine never sends
+        // that message — ships are fetched via REST on connect/reconnect.
+        const ships = useShipStore.getState().ships;
+        const currentLogs = useShipStore.getState().shipLogs;
+        for (const ship of ships.values()) {
+          registerSession(
+            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+          );
+          if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
+            wsClient.send({ type: "ship:logs", data: { id: ship.id } });
+          }
+        }
+      });
     });
 
     return () => {
@@ -257,16 +241,14 @@ export function useEngine() {
     setFleets,
     selectFleet,
     setMainView,
-    addShip,
-    setShipPhase,
     setShipCompacting,
     addShipLog,
     setShipLogs,
-    setShipDone,
     setGateCheck,
     clearGateCheck,
     syncShips,
     fetchShips,
+    updateShipFromApi,
     setEngineConnected,
     fetchFleets,
     registerSession,

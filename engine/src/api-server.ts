@@ -5,8 +5,8 @@ import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, Phase, GatePhase } from "./types.js";
-import { isGatePhase, DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
+import { isGatePhase, DEFAULT_GATE_TYPES, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
@@ -25,6 +25,7 @@ interface ApiDeps {
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
     shipRulePaths?: string[];
+    customInstructions?: CustomInstructions;
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
@@ -144,7 +145,10 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);
   const sharedRules = await deps.loadRules(fleet.sharedRulePaths ?? []);
   const shipRules = await deps.loadRules(fleet.shipRulePaths ?? []);
-  const shipExtraPrompt = [sharedRules, shipRules].filter(Boolean).join("\n\n") || undefined;
+  const ci = fleet.customInstructions;
+  const ciParts = [ci?.shared, ci?.ship].filter(Boolean);
+  const ciText = ciParts.length > 0 ? `## Custom Instructions\n\n${ciParts.join("\n\n")}` : undefined;
+  const shipExtraPrompt = [sharedRules, shipRules, ciText].filter(Boolean).join("\n\n") || undefined;
   return {
     fleetId: fleet.id,
     fleetRepos,
@@ -244,40 +248,105 @@ async function handleShipRoute(
     const metadata = (body.metadata as Record<string, unknown>) ?? {};
     const triggeredBy = (body.triggeredBy as string) ?? "ship";
 
+    // Determine the XState event based on target phase
+    const actorManager = deps.getActorManager();
+    let xstateEvent: import("./ship-machine.js").ShipMachineEvent;
+    if (isGatePhase(targetPhase as Phase)) {
+      xstateEvent = { type: "GATE_ENTER" };
+    } else if (targetPhase === "done") {
+      xstateEvent = { type: "COMPLETE" };
+    } else {
+      // For non-gate, non-done transitions requested by Ship (shouldn't normally happen)
+      sendJson(res, 400, { ok: false, error: `Ships can only transition to gate phases or done, not ${targetPhase}` });
+      return;
+    }
+
+    // XState is the sole authority: request transition through XState first
+    const result = actorManager.requestTransition(shipId, xstateEvent);
+    if (!result.success) {
+      sendJson(res, 409, { ok: false, error: `Transition rejected by XState: current phase is ${result.currentPhase ?? "unknown"}, cannot process ${xstateEvent.type}` });
+      return;
+    }
+
+    // XState approved — persist to DB
     try {
-      const applied = db.transitionPhase(
+      db.persistPhaseTransition(
         shipId,
-        ship.phase as Phase,
-        targetPhase as Phase,
+        result.fromPhase,
+        result.toPhase,
         triggeredBy,
         metadata,
       );
+    } catch (err) {
+      console.error(`[api-server] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}...:`, err);
+      // DB failed but XState already transitioned — log and continue
+    }
 
-      if (applied) {
-        shipManager.syncPhaseFromDb(shipId);
+    shipManager.syncPhaseFromDb(shipId);
 
-        // Send event to XState Actor for gate transitions
-        const actorManager = deps.getActorManager();
-        if (isGatePhase(targetPhase as Phase)) {
-          const gatePhase = targetPhase as GatePhase;
-          const gateType = DEFAULT_GATE_TYPES[gatePhase];
-          shipManager.setGateCheck(shipId, gatePhase, gateType);
+    // Handle gate-specific side effects: launch Escort on-demand for each gate
+    if (isGatePhase(result.toPhase)) {
+      const gatePhase = result.toPhase as GatePhase;
+      const gateType = DEFAULT_GATE_TYPES[gatePhase];
+      shipManager.setGateCheck(shipId, gatePhase, gateType);
 
-          // Notify Actor of gate entry
-          actorManager.send(shipId, { type: "GATE_ENTER" });
-
-          const escortManager = deps.getEscortManager();
-          escortManager.launchEscort(shipId, gatePhase, gateType);
-        } else if (targetPhase === "done") {
-          actorManager.send(shipId, { type: "COMPLETE" });
-        }
+      // Re-deploy skills so Escort picks up any changes made by the Ship
+      // (e.g., when the Ship modified skill source files during implementation).
+      try {
+        const fleetCtx = await resolveFleetContext(deps, ship.fleetId);
+        const skillSources = typeof fleetCtx === "string" ? undefined : fleetCtx.skillSources;
+        await shipManager.redeploySkills(shipId, skillSources);
+      } catch (err) {
+        console.warn(`[api-server] Skill redeploy failed for Ship ${shipId.slice(0, 8)}...:`, err);
+        // Non-fatal: Escort can still run with existing (possibly stale) skills
       }
 
-      sendJson(res, 200, { ok: true, phase: targetPhase });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 400, { ok: false, error: message });
+      // On-demand Escort launch: start (or resume) an Escort for this gate.
+      // Unlike the persistent model, Escorts exit after each gate review
+      // and are resumed with --resume sessionId for the next gate.
+      const escortManager = deps.getEscortManager();
+
+      // Build Escort custom instructions from fleet settings
+      let escortExtraPrompt: string | undefined;
+      {
+        const fleets = await deps.loadFleets();
+        const fleet = fleets.find((f) => f.id === ship.fleetId);
+        const ci = fleet?.customInstructions;
+        const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
+        if (ciParts.length > 0) {
+          escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+        }
+      }
+      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
+      if (!escortId) {
+        // Escort launch failed — revert via XState ESCORT_DIED
+        const prevPhase = GATE_PREV_PHASE[gatePhase];
+        console.error(
+          `[api-server] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
+        );
+        const revertResult = actorManager.requestTransition(shipId, {
+          type: "ESCORT_DIED",
+          exitCode: null,
+          feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+        });
+        if (revertResult.success) {
+          try {
+            db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
+              gate_result: "rejected",
+              feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+            });
+          } catch (revertErr) {
+            console.error(`[api-server] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
+          }
+          shipManager.syncPhaseFromDb(shipId);
+        }
+        shipManager.clearGateCheck(shipId);
+        sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
+        return;
+      }
     }
+
+    sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
   }
 
@@ -301,37 +370,35 @@ async function handleShipRoute(
       return;
     }
 
-    const gatePhase = currentPhase as GatePhase;
     const feedback = body.feedback as string | undefined;
-    let targetPhase: Phase;
-    let metadata: Record<string, unknown>;
 
-    if (verdict === "approve") {
-      targetPhase = GATE_NEXT_PHASE[gatePhase];
-      metadata = { gate_result: "approved" };
-    } else {
-      targetPhase = GATE_PREV_PHASE[gatePhase];
-      metadata = { gate_result: "rejected", feedback: feedback ?? "" };
+    // XState is the sole authority: request transition through XState first
+    const actorManager = deps.getActorManager();
+    const xstateEvent: import("./ship-machine.js").ShipMachineEvent = verdict === "approve"
+      ? { type: "GATE_APPROVED" }
+      : { type: "GATE_REJECTED", feedback: feedback ?? "" };
+
+    const result = actorManager.requestTransition(shipId, xstateEvent);
+    if (!result.success) {
+      sendJson(res, 409, { ok: false, error: `Gate verdict rejected by XState: current phase is ${result.currentPhase ?? "unknown"}` });
+      return;
     }
+
+    // XState approved — persist to DB
+    const metadata: Record<string, unknown> = verdict === "approve"
+      ? { gate_result: "approved" }
+      : { gate_result: "rejected", feedback: feedback ?? "" };
 
     try {
-      db.transitionPhase(shipId, currentPhase, targetPhase, "escort", metadata);
-      shipManager.syncPhaseFromDb(shipId);
-      shipManager.clearGateCheck(shipId);
-
-      // Send gate verdict event to XState Actor
-      const actorManager = deps.getActorManager();
-      if (verdict === "approve") {
-        actorManager.send(shipId, { type: "GATE_APPROVED" });
-      } else {
-        actorManager.send(shipId, { type: "GATE_REJECTED", feedback: feedback ?? "" });
-      }
-
-      sendJson(res, 200, { ok: true, phase: targetPhase });
+      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 400, { ok: false, error: message });
+      console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}...:`, err);
     }
+
+    shipManager.syncPhaseFromDb(shipId);
+    shipManager.clearGateCheck(shipId);
+
+    sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
   }
 
@@ -344,19 +411,23 @@ async function handleShipRoute(
       return;
     }
 
-    try {
-      db.transitionPhase(shipId, ship.phase as Phase, "done", "ship", { reason, nothingToDo: true });
-      shipManager.syncPhaseFromDb(shipId);
-
-      // Send nothing-to-do event to XState Actor
-      const actorManager = deps.getActorManager();
-      actorManager.send(shipId, { type: "NOTHING_TO_DO", reason });
-
-      sendJson(res, 200, { ok: true, phase: "done" });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 400, { ok: false, error: message });
+    // XState is the sole authority: request transition through XState first
+    const actorManager = deps.getActorManager();
+    const result = actorManager.requestTransition(shipId, { type: "NOTHING_TO_DO", reason });
+    if (!result.success) {
+      sendJson(res, 409, { ok: false, error: `Nothing-to-do rejected by XState: current phase is ${result.currentPhase ?? "unknown"}` });
+      return;
     }
+
+    // XState approved — persist to DB
+    try {
+      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "ship", { reason, nothingToDo: true });
+    } catch (err) {
+      console.error(`[api-server] DB persist failed after nothing-to-do for Ship ${shipId.slice(0, 8)}...:`, err);
+    }
+
+    shipManager.syncPhaseFromDb(shipId);
+    sendJson(res, 200, { ok: true, phase: "done" });
     return;
   }
 
@@ -411,13 +482,46 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       // === Frontend API endpoints ===
 
       // GET /api/ships — Ship list as JSON array (for Frontend)
+      // Excludes escort records; attaches escort info to parent ships.
       if (route === "ships" && req.method === "GET") {
         const fleetId = url.searchParams.get("fleetId") ?? undefined;
         const shipManager = deps.getShipManager();
-        const ships = fleetId
+        const allShips = fleetId
           ? shipManager.getShipsByFleet(fleetId)
           : shipManager.getAllShips();
+
+        // Separate ships and escorts
+        const escorts = allShips.filter((s) => s.kind === "escort");
+        const ships = allShips
+          .filter((s) => s.kind !== "escort")
+          .map((s) => {
+            const childEscorts = escorts.filter((e) => e.parentShipId === s.id);
+            if (childEscorts.length === 0) return s;
+            return {
+              ...s,
+              escorts: childEscorts.map((e) => ({
+                id: e.id,
+                phase: e.phase,
+                processDead: e.processDead ?? false,
+              })),
+            };
+          });
+
         sendJson(res, 200, { ok: true, ships });
+        return;
+      }
+
+      // GET /api/ships/:id — Individual Ship data (for Frontend notification→fetch pattern)
+      const shipByIdMatch = route.match(/^ships\/([^/]+)$/);
+      if (shipByIdMatch && req.method === "GET") {
+        const shipId = shipByIdMatch[1]!;
+        const shipManager = deps.getShipManager();
+        const ship = shipManager.getShip(shipId);
+        if (!ship) {
+          sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+          return;
+        }
+        sendJson(res, 200, { ok: true, ships: [ship] });
         return;
       }
 

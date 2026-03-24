@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
+import { parseStreamMessage } from "./stream-parser.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
@@ -28,6 +29,14 @@ This Ship is managed by vibe-admiral. Use the /implement skill to execute the wo
 - \`VIBE_ADMIRAL_SHIP_ID\` — This Ship's unique ID
 - \`VIBE_ADMIRAL_MAIN_REPO\` — The fleet's main repository (owner/repo)
 - \`VIBE_ADMIRAL_ENGINE_PORT\` — Engine API port (default: 9721)
+
+## Rate Limit vs Polling vs Machine Sleep
+
+- **Rate limit**: stderr に \`429\` / \`rate_limit_error\` が出る。全 Unit が同時に停止する。
+- **ポーリング sleep**: スキル内の意図的な待機。エラーは出ない。
+- **マシンスリープ復帰**: 応答遅延するがエラーメッセージはない。1 Unit だけの遅延なら rate limit ではない。
+
+rate limit でない遅延に対して不要な待機やリトライを行わないこと。
 
 ## Constraints
 
@@ -62,6 +71,9 @@ export class ShipManager {
   private onPhaseChange:
     | ((id: string, phase: Phase, detail?: string) => void)
     | null = null;
+  private onShipCreated:
+    | ((id: string) => void)
+    | null = null;
 
   constructor(
     processManager: ProcessManager,
@@ -88,6 +100,10 @@ export class ShipManager {
     handler: (id: string, phase: Phase, detail?: string) => void,
   ): void {
     this.onPhaseChange = handler;
+  }
+
+  setShipCreatedHandler(handler: (id: string) => void): void {
+    this.onShipCreated = handler;
   }
 
   async sortie(
@@ -192,6 +208,8 @@ export class ShipManager {
       retryCount: 0,
       createdAt: new Date().toISOString(),
       lastOutputAt: null,
+      kind: "ship",
+      parentShipId: null,
     };
 
     // Persist to DB first — DB record is a precondition for process spawn.
@@ -251,7 +269,166 @@ export class ShipManager {
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
     this.updatePhase(shipId, "planning");
+    this.onShipCreated?.(shipId);
     return ship;
+  }
+
+  /**
+   * Launch a new Escort for the first gate. Creates a fresh Escort Ship record
+   * and launches the `/escort` skill with the gate phase as context.
+   *
+   * Reuses the parent Ship's worktree, branch, and repo — skips worktree
+   * creation, skill deployment, npm install, issue label changes, and PR detection.
+   */
+  sortieEscort(parentShip: ShipProcess, gatePhase?: GatePhase, extraPrompt?: string, extraEnv?: Record<string, string>): ShipProcess {
+    const escortId = randomUUID();
+
+    const escort: ShipProcess = {
+      id: escortId,
+      fleetId: parentShip.fleetId,
+      repo: parentShip.repo,
+      issueNumber: parentShip.issueNumber,
+      issueTitle: parentShip.issueTitle,
+      phase: "planning",
+      isCompacting: false,
+      branchName: parentShip.branchName,
+      worktreePath: parentShip.worktreePath,
+      sessionId: null,
+      prUrl: null,
+      prReviewStatus: null,
+      gateCheck: null,
+      qaRequired: false,
+      retryCount: 0,
+      createdAt: new Date().toISOString(),
+      lastOutputAt: null,
+      kind: "escort",
+      parentShipId: parentShip.id,
+    };
+
+    // Persist to DB
+    try {
+      this.persistToDb(escort);
+    } catch (err) {
+      console.error(`[ship-manager] DB INSERT failed for escort ${escortId} (parent: ${parentShip.id.slice(0, 8)}...):`, err);
+      throw new Error(`Failed to persist escort to DB: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Store runtime state
+    this.runtime.set(escortId, {
+      isCompacting: false,
+      lastOutputAt: null,
+      processDead: false,
+      gateCheck: null,
+      prReviewStatus: null,
+      retryCount: 0,
+    });
+
+    // Create XState Actor
+    this.actorManager?.createActor({
+      shipId: escortId,
+      fleetId: parentShip.fleetId,
+      repo: parentShip.repo,
+      issueNumber: parentShip.issueNumber,
+      worktreePath: parentShip.worktreePath,
+      branchName: parentShip.branchName,
+      sessionId: null,
+      prUrl: null,
+      qaRequired: false,
+    });
+
+    // Launch via processManager.sortie() with /escort skill + gate phase context
+    const escortEnv: Record<string, string> = {
+      VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
+      VIBE_ADMIRAL_SHIP_ID: escortId,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
+      VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+      ...extraEnv,
+    };
+
+    const gateContext = gatePhase
+      ? `\n\n[Gate Context] The parent Ship is currently in ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`
+      : "";
+
+    this.processManager.sortie(
+      escortId,
+      parentShip.worktreePath,
+      parentShip.issueNumber,
+      [extraPrompt, gateContext].filter(Boolean).join("\n\n") || undefined,
+      "/escort",
+      escortEnv,
+    );
+
+    console.log(
+      `[ship-manager] Launched new Escort ${escortId.slice(0, 8)}... for Ship ${parentShip.id.slice(0, 8)}... at ${gatePhase ?? "unknown"} gate (issue #${parentShip.issueNumber})`,
+    );
+
+    return escort;
+  }
+
+  /**
+   * Resume an existing Escort for a subsequent gate phase.
+   * Uses `--resume sessionId` to preserve context from prior gate reviews
+   * (e.g., planning review insights carry over to code review).
+   */
+  resumeEscort(
+    existingEscort: ShipProcess,
+    gatePhase: GatePhase,
+    extraEnv?: Record<string, string>,
+  ): ShipProcess {
+    if (!existingEscort.sessionId) {
+      throw new Error(`Cannot resume Escort ${existingEscort.id.slice(0, 8)}... — no sessionId`);
+    }
+
+    const escortId = existingEscort.id;
+
+    // Reset runtime state for the new gate
+    const rt = this.ensureRuntime(escortId);
+    if (rt) {
+      rt.processDead = false;
+      rt.isCompacting = false;
+    }
+
+    // Build Escort env vars
+    const escortEnv: Record<string, string> = {
+      VIBE_ADMIRAL_MAIN_REPO: existingEscort.repo,
+      VIBE_ADMIRAL_SHIP_ID: escortId,
+      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
+      VIBE_ADMIRAL_PARENT_SHIP_ID: existingEscort.parentShipId!,
+      ...extraEnv,
+    };
+
+    // Resume with gate context message
+    const resumeMessage = `The parent Ship has entered ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`;
+
+    this.processManager.resumeSession(
+      escortId,
+      existingEscort.sessionId,
+      resumeMessage,
+      existingEscort.worktreePath,
+      escortEnv,
+    );
+
+    console.log(
+      `[ship-manager] Resumed Escort ${escortId.slice(0, 8)}... (session: ${existingEscort.sessionId.slice(0, 12)}...) for ${gatePhase}`,
+    );
+
+    return this.getShip(escortId) ?? existingEscort;
+  }
+
+  /** Check if a Ship is an Escort by its kind field. */
+  isEscort(shipId: string): boolean {
+    const ship = this.getShip(shipId);
+    return ship?.kind === "escort";
+  }
+
+  /** Get the Escort Ship for a parent Ship, if any. */
+  getEscortForShip(parentShipId: string): ShipProcess | undefined {
+    if (!this.fleetDb) return undefined;
+    const allShips = this.fleetDb.getAllShips();
+    const escort = allShips.find(
+      (s) => s.kind === "escort" && s.parentShipId === parentShipId && s.phase !== "done",
+    );
+    return escort ? this.mergeRuntime(escort) : undefined;
   }
 
   stopShip(shipId: string): boolean {
@@ -410,7 +587,7 @@ export class ShipManager {
 
   /**
    * Sync phase from DB and notify frontend.
-   * Called by the REST API after it has already updated the DB via transitionPhase().
+   * Called by the REST API after it has already updated the DB via persistPhaseTransition().
    * Unlike updatePhase(), this does NOT write to DB — it only reads and notifies.
    */
   syncPhaseFromDb(id: string): void {
@@ -507,17 +684,20 @@ export class ShipManager {
   /**
    * Deploy a single skill to the worktree, skipping if the repo already provides it.
    * Returns true if deployed, false if skipped (repo skill preserved).
+   * When force=true, always overwrite (used by redeploySkills to refresh stale copies).
    */
   private async deploySkill(
     skillName: string,
     srcPath: string,
     worktreePath: string,
+    force = false,
   ): Promise<boolean> {
     const dest = join(worktreePath, ".claude", "skills", skillName, "SKILL.md");
 
     // Preserve repo-specific skill: if the worktree already has this skill
     // (inherited from git tracked files), do not overwrite it.
-    if (await this.fileExists(dest)) {
+    // When force=true, always overwrite — the Ship may have updated the skill source.
+    if (!force && await this.fileExists(dest)) {
       console.log(`[ship-manager] Skipping /${skillName} — repo-specific skill preserved`);
       return false;
     }
@@ -532,6 +712,7 @@ export class ShipManager {
     repoRoot: string,
     worktreePath: string,
     skillSources?: FleetSkillSources,
+    force = false,
   ): Promise<void> {
     // Resolve the Admiral skills directory.
     // admiralSkillsDir is auto-populated by resolveFleetContext(); fall back to
@@ -545,7 +726,7 @@ export class ShipManager {
       ? join(skillSources.implement, "SKILL.md")
       : join(admiralSkillsDir, "implement", "SKILL.md");
     try {
-      await this.deploySkill("implement", implementSrc, worktreePath);
+      await this.deploySkill("implement", implementSrc, worktreePath, force);
     } catch (err) {
       // Fatal: /implement is required for Ship operation
       throw new Error(`Failed to deploy /implement skill: ${err instanceof Error ? err.message : String(err)}`);
@@ -559,10 +740,12 @@ export class ShipManager {
       "implement-code",
       "implement-review",
       "implement-merge",
-      // Gate skills (deployed to worktree; Engine launches Escort processes that use these)
+      // Gate skills (deployed to worktree for reference by Escort)
       "planning-gate",
       "implementing-gate",
       "acceptance-test-gate",
+      // Persistent Escort skill (unified gate reviewer)
+      "escort",
       // Shared skills (Bridge/Ship common)
       "admiral-protocol",
       "read-issue",
@@ -572,7 +755,7 @@ export class ShipManager {
     for (const skillName of admiralSkills) {
       const src = join(admiralSkillsDir, skillName, "SKILL.md");
       try {
-        await this.deploySkill(skillName, src, worktreePath);
+        await this.deploySkill(skillName, src, worktreePath, force);
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill`);
       }
@@ -586,11 +769,30 @@ export class ShipManager {
     for (const skillName of devSharedSkills) {
       const src = join(devSharedDir, skillName, "SKILL.md");
       try {
-        await this.deploySkill(skillName, src, worktreePath);
+        await this.deploySkill(skillName, src, worktreePath, force);
       } catch {
         console.warn(`[ship-manager] Failed to deploy /${skillName} skill from dev-shared`);
       }
     }
+  }
+
+  /**
+   * Re-deploy all skills to a Ship's worktree, overwriting stale copies.
+   * Called before Escort launch at gate phase transitions so that skill
+   * changes made by the Ship during implementation are picked up.
+   */
+  async redeploySkills(
+    shipId: string,
+    skillSources?: FleetSkillSources,
+  ): Promise<void> {
+    const ship = this.getShip(shipId);
+    if (!ship) {
+      console.warn(`[ship-manager] redeploySkills: Ship ${shipId.slice(0, 8)}... not found`);
+      return;
+    }
+    const repoRoot = await worktree.getRepoRoot(ship.worktreePath);
+    await this.deploySkills(repoRoot, ship.worktreePath, skillSources, true);
+    console.log(`[ship-manager] Re-deployed skills to ${ship.worktreePath}`);
   }
 
   /**
@@ -779,7 +981,8 @@ export class ShipManager {
         const msgs: StreamMessage[] = [];
         for (const line of lines) {
           try {
-            msgs.push(JSON.parse(line) as StreamMessage);
+            const parsed = parseStreamMessage(JSON.parse(line));
+            if (parsed) msgs.push(parsed);
           } catch {
             // Skip malformed lines
           }

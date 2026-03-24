@@ -58,10 +58,14 @@ export function sortIssuesByPriority<T extends Issue>(issues: T[]): T[] {
   });
 }
 
-export async function getUnblockedTodoIssues(
+export async function getUnblockedReadyIssues(
   repo: string,
 ): Promise<UnblockedIssue[]> {
-  const issues = await github.listIssues(repo, "status/ready");
+  // Get all open issues (no label filter) and exclude those with status/sortied
+  const allIssues = await github.listIssues(repo);
+  const issues = allIssues.filter(
+    (issue) => !issue.labels.includes("status/sortied"),
+  );
 
   const results = await Promise.all(
     issues.map(async (issue) => {

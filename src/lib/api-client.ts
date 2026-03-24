@@ -26,6 +26,12 @@ export async function fetchShips(fleetId?: string): Promise<Ship[]> {
   return data.ships ?? [];
 }
 
+export async function fetchShip(shipId: string): Promise<Ship | null> {
+  const data = await request<Ship[]>(`/ships/${encodeURIComponent(shipId)}`);
+  const ships = data.ships ?? [];
+  return ships[0] ?? null;
+}
+
 export async function sortie(
   fleetId: string,
   repo: string,

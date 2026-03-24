@@ -129,25 +129,6 @@ describe("ProcessManager", () => {
     });
   });
 
-  describe("launchEscort", () => {
-    it("spawns an Escort with stdin ignored and max-turns 100", () => {
-      pm.launchEscort("escort-001", "/worktree", "planning-gate", 42);
-
-      expect(spawn).toHaveBeenCalledWith(
-        "claude",
-        expect.arrayContaining([
-          "-p",
-          "/planning-gate 42",
-          "--max-turns",
-          "100",
-        ]),
-        expect.objectContaining({
-          stdio: ["ignore", "pipe", "pipe"],
-        }),
-      );
-    });
-  });
-
   describe("launchCommander", () => {
     it("spawns a Commander with stdin pipe and allowedTools", () => {
       mockProc = createMockProcess({ withStdin: true });

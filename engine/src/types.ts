@@ -81,6 +81,21 @@ export interface GateCheckState {
 /** @deprecated Use GatePhase instead. Kept for backward compat in admiral-protocol. */
 export type GateTransition = GatePhase;
 
+// === Custom Instructions ===
+/** Per-actor custom instructions injected via --append-system-prompt. */
+export interface CustomInstructions {
+  /** Instructions shared across all actors (Dock, Flagship, Ship, Escort). */
+  shared?: string;
+  /** Instructions specific to the Dock commander. */
+  dock?: string;
+  /** Instructions specific to the Flagship commander. */
+  flagship?: string;
+  /** Instructions specific to Ship sessions. */
+  ship?: string;
+  /** Instructions specific to Escort sessions. */
+  escort?: string;
+}
+
 // === Fleet ===
 export interface FleetRepo {
   localPath: string;
@@ -109,6 +124,8 @@ export interface Fleet {
   shipRulePaths?: string[];
   /** @deprecated Use flagshipRulePaths instead. Auto-migrated on load. */
   bridgeRulePaths?: string[];
+  /** Per-actor custom instructions (system prompts) injected at launch time. */
+  customInstructions?: CustomInstructions;
   /** Gate settings: which gate phases are enabled and their types. */
   gates?: FleetGateSettings;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
@@ -118,6 +135,9 @@ export interface Fleet {
 
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
+
+// === Ship Kind ===
+export type ShipKind = "ship" | "escort";
 
 // === Ship ===
 export interface Ship {
@@ -138,6 +158,10 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   retryCount: number;
   createdAt: string;
+  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
+  kind: ShipKind;
+  /** For escort Ships, the ID of the parent Ship being reviewed. */
+  parentShipId: string | null;
 }
 
 // === Issue ===
@@ -267,6 +291,10 @@ export interface ShipProcess {
   lastOutputAt: number | null;
   /** Whether this Ship's process has died without reaching "done". Derived state. */
   processDead?: boolean;
+  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
+  kind: ShipKind;
+  /** For escort Ships, the ID of the parent Ship being reviewed. */
+  parentShipId: string | null;
 }
 
 // === Commander Role (Dock or Flagship) ===

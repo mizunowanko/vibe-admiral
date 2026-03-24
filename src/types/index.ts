@@ -8,6 +8,21 @@ export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
 
+// === Custom Instructions ===
+/** Per-actor custom instructions injected via --append-system-prompt. */
+export interface CustomInstructions {
+  /** Instructions shared across all actors (Dock, Flagship, Ship, Escort). */
+  shared?: string;
+  /** Instructions specific to the Dock commander. */
+  dock?: string;
+  /** Instructions specific to the Flagship commander. */
+  flagship?: string;
+  /** Instructions specific to Ship sessions. */
+  ship?: string;
+  /** Instructions specific to Escort sessions. */
+  escort?: string;
+}
+
 // === Fleet ===
 export interface FleetRepo {
   localPath: string;
@@ -30,6 +45,8 @@ export interface Fleet {
   /** @deprecated Use flagshipRulePaths instead. */
   bridgeRulePaths?: string[];
   shipRulePaths?: string[];
+  /** Per-actor custom instructions (system prompts) injected at launch time. */
+  customInstructions?: CustomInstructions;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
@@ -67,6 +84,16 @@ export interface GateCheckState {
   feedback?: string;
 }
 
+// === Ship Kind ===
+export type ShipKind = "ship" | "escort";
+
+// === Escort Info (attached to parent Ship by API) ===
+export interface EscortInfo {
+  id: string;
+  phase: Phase;
+  processDead: boolean;
+}
+
 // === Ship ===
 export interface Ship {
   id: string;
@@ -86,6 +113,12 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   retryCount: number;
   createdAt: string;
+  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
+  kind?: ShipKind;
+  /** For escort Ships, the ID of the parent Ship being reviewed. */
+  parentShipId?: string | null;
+  /** Escort information attached by the API (only present when escorts exist). */
+  escorts?: EscortInfo[];
 }
 
 // === Issue ===
@@ -140,15 +173,13 @@ export interface StreamMessage {
     | "error"
     | "tool_use"
     | "tool_result"
-    | "history"
-    | "question";
+    | "history";
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
   subtype?: StreamMessageSubtype;
   meta?: SystemMessageMeta;
   timestamp?: number;
-  toolUseId?: string;
   images?: ImageAttachment[];
   imageCount?: number;
 }
@@ -175,6 +206,7 @@ export type ClientMessage =
         flagshipRulePaths?: string[];
         dockRulePaths?: string[];
         shipRulePaths?: string[];
+        customInstructions?: CustomInstructions;
         maxConcurrentSorties?: number;
       };
     }
@@ -230,8 +262,8 @@ export type ServerMessage =
     }
   | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
   | {
-      type: "ship:status";
-      data: { id: string; phase: Phase; detail?: string };
+      type: "ship:updated";
+      data: { shipId: string };
     }
   | {
       type: "ship:compacting";
@@ -239,19 +271,11 @@ export type ServerMessage =
     }
   | {
       type: "ship:created";
-      data: {
-        id: string;
-        fleetId: string;
-        repo: string;
-        issueNumber: number;
-        issueTitle: string;
-        phase: Phase;
-        branchName: string;
-      };
+      data: { shipId: string };
     }
   | {
       type: "ship:done";
-      data: { id: string; prUrl?: string; merged: boolean };
+      data: { shipId: string };
     }
   | {
       type: "ship:gate-pending";
