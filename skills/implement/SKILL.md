@@ -128,7 +128,14 @@ done
 
 > **コンテキストリフレッシュ**: `/implement-code` の Step 1a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
 
-state が `NO_STATE` の場合は Step 1 (`/implement-setup`) から開始する。
+state が `NO_STATE` の場合:
+
+1. **`[Re-sortie Context]` が prompt に含まれている場合** — re-sortie。前回の Ship の状態に基づいて resume する:
+   - `Previous workflow-state.json` が含まれていれば、その `currentStep` に基づいて `workflow-state.json` を生成し、そこから resume する
+   - workflow-state.json がなければ `Suggested /implement start step` の値を使用する
+   - ただし `/implement-setup` (Steps 1-2) は常にスキップする（Admiral が worktree を管理済み）
+   - workflow-state.json を生成した後、該当する sub-skill のフローに従う
+2. **`[Re-sortie Context]` がない場合** — 新規 sortie。Step 1 (`/implement-setup`) から開始する。
 
 **`VIBE_ADMIRAL` 未設定時**:
 admiral-request ブロックは不要。フェーズ宣言もスキップしてよい。

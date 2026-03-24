@@ -284,6 +284,10 @@ export interface ShipProcess {
   lastOutputAt: number | null;
   /** Whether this Ship's process has died without reaching "done". Derived state. */
   processDead?: boolean;
+  /** Discriminator: "ship" for regular Ships, "escort" for Escort Ships */
+  kind?: "ship" | "escort";
+  /** If this is an Escort, the parent Ship's ID */
+  parentShipId?: string | null;
 }
 
 // === Escort Process Info (separate from Ship) ===
