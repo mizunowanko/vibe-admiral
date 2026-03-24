@@ -84,13 +84,10 @@ export interface GateCheckState {
   feedback?: string;
 }
 
-// === Ship Kind ===
-export type ShipKind = "ship" | "escort";
-
 // === Escort Info (attached to parent Ship by API) ===
 export interface EscortInfo {
   id: string;
-  phase: Phase;
+  phase: string;
   processDead: boolean;
 }
 
@@ -113,10 +110,6 @@ export interface Ship {
   gateCheck: GateCheckState | null;
   retryCount: number;
   createdAt: string;
-  /** Discriminator: "ship" (default) or "escort" (persistent gate reviewer). */
-  kind?: ShipKind;
-  /** For escort Ships, the ID of the parent Ship being reviewed. */
-  parentShipId?: string | null;
   /** Escort information attached by the API (only present when escorts exist). */
   escorts?: EscortInfo[];
 }

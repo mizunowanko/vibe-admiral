@@ -186,23 +186,17 @@ export class EngineServer {
 
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
-      // Route Escort-Ship stream data to frontend (separate from Ship stream)
+      // Route Escort stream data to frontend (separate from Ship stream)
       if (this.escortManager.isEscortProcess(id)) {
         const parentShipId = this.escortManager.findShipIdByEscortId(id);
         if (parentShipId) {
           const parentShip = this.shipManager.getShip(parentShipId);
           const parsed = parseStreamMessage(msg);
 
-          // Update Escort-Ship's lastOutputAt for Lookout
-          this.shipManager.setLastOutputAt(id, Date.now());
-
-          // Extract sessionId from Escort init messages
+          // Extract sessionId from Escort init messages and persist to escorts table
           const sessionId = extractSessionId(msg);
           if (sessionId) {
-            const escort = this.shipManager.getShip(id);
-            if (escort && !escort.sessionId) {
-              this.shipManager.setSessionId(id, sessionId);
-            }
+            this.escortManager.setEscortSessionId(id, sessionId);
           }
 
           if (parsed && parsed.type !== "result") {

@@ -134,13 +134,6 @@ export class StateSync {
     const ship = this.shipManager.getShip(shipId);
     if (!ship) return;
 
-    // Escort-Ships: skip worktree cleanup, label rollback, and issue closure.
-    // Their lifecycle is tied to the parent Ship, not the issue.
-    if (ship.kind === "escort") {
-      this.shipManager.setIsCompacting(shipId, false);
-      return;
-    }
-
     // Clear compacting flag — process is gone, no more compact events
     this.shipManager.setIsCompacting(shipId, false);
 
