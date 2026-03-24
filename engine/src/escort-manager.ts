@@ -108,6 +108,21 @@ export class EscortManager {
     }
   }
 
+  /**
+   * Notify Flagship that an Escort launch failed.
+   * Called by api-server when launchEscort() returns null and phase is reverted.
+   * Distinct from onEscortExit() death notifications — this covers failures
+   * before a process is ever created (e.g., sortie/resume errors, duplicate prevention).
+   */
+  notifyLaunchFailure(parentShipId: string, gatePhase: GatePhase, reason: string): void {
+    const parentShip = this.shipManager.getShip(parentShipId);
+    if (!parentShip) return;
+
+    const prevPhase = GATE_PREV_PHASE[gatePhase];
+    const message = `Escort launch failed for Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) at ${gatePhase}: ${reason}. Phase reverted to ${prevPhase}.`;
+    this.onEscortDeathCallback?.(parentShipId, message);
+  }
+
   /** Check if an Escort process is currently running for a parent Ship. */
   isEscortRunning(parentShipId: string): boolean {
     const escortId = this.escorts.get(parentShipId);
