@@ -270,23 +270,33 @@ export class ProcessManager extends EventEmitter {
     message: string,
     cwd: string,
     extraEnv?: Record<string, string>,
+    appendSystemPrompt?: string,
   ): ChildProcess {
     // Same stdio/disallowedTools constraints as sortie().
     // See .claude/rules/cli-subprocess.md for full rationale.
+    const args = [
+      "--resume",
+      sessionId,
+      "-p",
+      message,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--disallowedTools",
+      "EnterPlanMode,ExitPlanMode,AskUserQuestion",
+    ];
+
+    // Re-inject system prompt so customInstructions survive session resume.
+    // The original --append-system-prompt from sortie() is part of the stored session,
+    // but re-applying it provides defense-in-depth against content loss.
+    if (appendSystemPrompt) {
+      args.push("--append-system-prompt", appendSystemPrompt);
+    }
+
     const proc = spawn(
       "claude",
-      [
-        "--resume",
-        sessionId,
-        "-p",
-        message,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--disallowedTools",
-        "EnterPlanMode,ExitPlanMode,AskUserQuestion",
-      ],
+      args,
       {
         cwd,
         env: {

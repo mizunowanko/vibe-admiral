@@ -133,6 +133,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   repoRemotes: string[];
   skillSources?: FleetSkillSources;
   shipExtraPrompt?: string;
+  customInstructionsText?: string;
   maxConcurrentSorties?: number;
 } | string> {
   const fleets = await deps.loadFleets();
@@ -162,6 +163,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     repoRemotes,
     skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
+    customInstructionsText: ciText,
     maxConcurrentSorties: fleet.maxConcurrentSorties,
   };
 }
@@ -683,6 +685,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         ctx.skillSources,
         ctx.shipExtraPrompt,
         ctx.maxConcurrentSorties,
+        ctx.customInstructionsText,
       );
 
       deps.broadcastRequestResult(ctx.fleetId, result);

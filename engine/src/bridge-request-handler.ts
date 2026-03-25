@@ -19,10 +19,11 @@ export class FlagshipRequestHandler {
     skillSources?: FleetSkillSources,
     shipExtraPrompt?: string,
     maxConcurrentSorties?: number,
+    customInstructionsText?: string,
   ): Promise<string> {
     switch (request.request) {
       case "sortie":
-        return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt, maxConcurrentSorties);
+        return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt, maxConcurrentSorties, customInstructionsText);
       case "ship-status":
         return this.handleShipStatus(fleetId);
       case "ship-stop":
@@ -48,6 +49,7 @@ export class FlagshipRequestHandler {
     skillSources?: FleetSkillSources,
     shipExtraPrompt?: string,
     maxConcurrentSorties?: number,
+    customInstructionsText?: string,
   ): Promise<string> {
     // Determine concurrent sortie limit (static, not dynamically adjusted)
     const configuredMax = maxConcurrentSorties ?? 6;
@@ -115,6 +117,7 @@ export class FlagshipRequestHandler {
           skillSources,
           shipExtraPrompt,
           item.skill,
+          customInstructionsText,
         );
         launched++;
         results.push(
