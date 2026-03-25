@@ -130,6 +130,8 @@ export interface Fleet {
   gates?: FleetGateSettings;
   /** Custom Escort prompts per gate type. Overrides default gate skill behavior. */
   gatePrompts?: Partial<Record<GateType, string>>;
+  /** Glob patterns for paths that force qaRequired=true when changed. Passed to Escorts via env var. */
+  qaRequiredPaths?: string[];
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
