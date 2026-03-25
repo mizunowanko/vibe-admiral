@@ -101,7 +101,7 @@ describe("FlagshipRequestHandler (integration)", () => {
       expect(mockStateSync.sortieGuard).toHaveBeenCalledWith("owner/repo", 42);
       expect(mockShipManager.sortie).toHaveBeenCalledWith(
         "fleet-1", "owner/repo", 42, "/home/user/repo",
-        undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined,
       );
     });
 

@@ -118,6 +118,7 @@ export class ShipManager {
     skillSources?: FleetSkillSources,
     extraPrompt?: string,
     skill?: string,
+    customInstructionsText?: string,
   ): Promise<ShipProcess> {
     // Collect re-sortie context from previous Ship BEFORE deleting it.
     // This preserves phase history & workflow state for the new Ship.
@@ -156,6 +157,11 @@ export class ShipManager {
 
     // 5b. Write minimal CLAUDE.md for external repos (overrides vibe-admiral's CLAUDE.md)
     await this.deployCLAUDEmd(repoRoot, worktreePath);
+
+    // 5c. Persist customInstructions to .claude/rules/ so they survive context compaction.
+    // Claude Code always reloads .claude/rules/*.md on every turn, unlike --append-system-prompt
+    // which may be lost when the CLI compacts context mid-session.
+    await this.deployCustomInstructions(worktreePath, customInstructionsText);
 
     // 6. Remove stale .claude work files from previous sortie (or inherited from main)
     const staleFiles = [
@@ -924,6 +930,29 @@ export class ShipManager {
   }
 
   /**
+   * Persist customInstructions to `.claude/rules/custom-instructions.md` in the worktree.
+   * Claude Code always reloads `.claude/rules/*.md` on every turn, so this content
+   * survives context compaction — unlike `--append-system-prompt` which may be lost.
+   * If no customInstructions are provided, remove any stale file from a previous sortie.
+   */
+  private async deployCustomInstructions(
+    worktreePath: string,
+    customInstructionsText?: string,
+  ): Promise<void> {
+    const rulesDir = join(worktreePath, ".claude", "rules");
+    const filePath = join(rulesDir, "custom-instructions.md");
+
+    if (!customInstructionsText) {
+      // Clean up stale file if it exists
+      await unlink(filePath).catch(() => {});
+      return;
+    }
+
+    await mkdir(rulesDir, { recursive: true });
+    await writeFile(filePath, customInstructionsText, "utf-8");
+  }
+
+  /**
    * For external repos, replace the inherited CLAUDE.md with a minimal Ship template.
    * Worktrees inherit CLAUDE.md from the git tree they branch from. When the
    * worktree's main repo (the repo that owns the .worktrees/ directory) differs
@@ -1047,13 +1076,15 @@ export class ShipManager {
     this.actorManager?.send(shipId, { type: "RESUME" });
 
     if (ship.sessionId) {
-      // Resume existing session
+      // Resume existing session — re-inject extraPrompt as appendSystemPrompt
+      // so customInstructions survive the session resume.
       this.processManager.resumeSession(
         shipId,
         ship.sessionId,
         "The previous session was interrupted. Continue from where you left off.",
         ship.worktreePath,
         shipEnv,
+        extraPrompt,
       );
       const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "coding";
       this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
