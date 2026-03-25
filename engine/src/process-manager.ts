@@ -103,6 +103,7 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // See .claude/rules/cli-subprocess.md for full rationale.
     //
@@ -133,6 +134,7 @@ export class ProcessManager extends EventEmitter {
       env: {
         ...process.env,
         VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -147,8 +149,9 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
-    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt);
+    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   sendMessage(
@@ -217,6 +220,7 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     const args = [
       "--resume",
@@ -239,6 +243,7 @@ export class ProcessManager extends EventEmitter {
       env: {
         ...process.env,
         VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -254,8 +259,9 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
-    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt);
+    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   resumeSession(

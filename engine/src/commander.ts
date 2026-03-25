@@ -73,6 +73,8 @@ export class CommanderManager {
     };
     this.sessions.set(fleetId, session);
 
+    const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
+
     if (session.sessionId) {
       this.processManager.resumeCommander(
         sessionId,
@@ -80,6 +82,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
+        commanderEnv,
       );
     } else {
       this.processManager.launchCommander(
@@ -87,6 +90,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
+        commanderEnv,
       );
     }
     return sessionId;
