@@ -1,6 +1,7 @@
 import { memo, useState, useMemo, useRef } from "react";
 import { useSessionStore, commanderSessionId, shipSessionId } from "@/stores/sessionStore";
 import { useShipStore } from "@/stores/shipStore";
+import { useDispatchListener } from "@/hooks/useDispatchListener";
 import { ActiveShipSummary } from "@/components/ship/ActiveShipSummary";
 import { SessionCard, DispatchCard } from "./SessionCard";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -125,6 +126,9 @@ function DispatchSection({
 export const SessionCardList = memo(function SessionCardList({
   fleetId,
 }: SessionCardListProps) {
+  // Listen for dispatch events from both Dock and Flagship, regardless of focus
+  useDispatchListener(fleetId);
+
   const focusedSessionId = useSessionStore((s) => s.focusedSessionId);
   const setFocus = useSessionStore((s) => s.setFocus);
   const sessions = useSessionStore((s) => s.sessions);
