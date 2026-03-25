@@ -19,6 +19,7 @@ interface ApiDeps {
   getShipManager: () => ShipManager;
   getEscortManager: () => EscortManager;
   getActorManager: () => ShipActorManager;
+  getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
   loadFleets: () => Promise<Array<{
     id: string;
     repos: FleetRepo[];
@@ -517,6 +518,38 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           return;
         }
         sendJson(res, 200, { ok: true, ships: [ship] });
+        return;
+      }
+
+      // GET /api/commander-logs — Commander chat history (for Dock↔Flagship cross-read)
+      if (route === "commander-logs" && req.method === "GET") {
+        const role = url.searchParams.get("role");
+        if (role !== "flagship" && role !== "dock") {
+          sendJson(res, 400, { ok: false, error: 'role query parameter is required and must be "flagship" or "dock"' });
+          return;
+        }
+        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        const fleets = await deps.loadFleets();
+        let resolvedFleetId: string;
+        if (fleetId) {
+          if (!fleets.find((f) => f.id === fleetId)) {
+            sendJson(res, 400, { ok: false, error: `Fleet not found: ${fleetId}` });
+            return;
+          }
+          resolvedFleetId = fleetId;
+        } else if (fleets.length === 1) {
+          resolvedFleetId = fleets[0]!.id;
+        } else if (fleets.length === 0) {
+          sendJson(res, 400, { ok: false, error: "No fleets configured" });
+          return;
+        } else {
+          sendJson(res, 400, { ok: false, error: "Multiple fleets exist — fleetId is required" });
+          return;
+        }
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 500);
+        const logs = await deps.getCommanderHistory(role, resolvedFleetId);
+        const trimmed = logs.slice(-limit);
+        sendJson(res, 200, { ok: true, logs: trimmed, role, fleetId: resolvedFleetId } as ApiResponse & { logs: unknown[]; role: string; fleetId: string });
         return;
       }
 
