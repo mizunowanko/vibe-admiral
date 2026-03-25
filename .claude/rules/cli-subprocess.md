@@ -40,6 +40,7 @@ Set the following environment variables for all Ship, Escort, and session resume
 - `VIBE_ADMIRAL_SHIP_ID` — The Ship's unique ID (set by Engine at sortie/retry)
 - `VIBE_ADMIRAL_MAIN_REPO` — The fleet's main repository (owner/repo)
 - `VIBE_ADMIRAL_ENGINE_PORT` — Engine API port (default: 9721)
+- `VIBE_ADMIRAL_FLEET_ID` — The Fleet's UUID. Set for all Units (Commander, Ship, Escort). Commanders use this to include `fleetId` in Engine API calls (e.g., `POST /api/sortie`)
 
 Ships and Escorts communicate with Engine exclusively via REST API (`curl`). They do NOT access the database directly.
 

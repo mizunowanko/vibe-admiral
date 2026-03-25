@@ -23,6 +23,7 @@ interface ApiDeps {
   getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
   loadFleets: () => Promise<Array<{
     id: string;
+    name: string;
     repos: FleetRepo[];
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
@@ -144,7 +145,8 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   } else if (fleets.length === 0) {
     return "No fleets configured";
   } else {
-    return "Multiple fleets exist — fleetId is required";
+    const fleetList = fleets.map((f) => `  - ${f.id} (${f.name})`).join("\n");
+    return `Multiple fleets exist — fleetId is required. Available fleets:\n${fleetList}`;
   }
   const fleetRepos = fleet.repos;
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);

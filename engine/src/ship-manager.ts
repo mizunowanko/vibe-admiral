@@ -271,6 +271,7 @@ export class ShipManager {
       VIBE_ADMIRAL_MAIN_REPO: repo,
       VIBE_ADMIRAL_SHIP_ID: shipId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
+      VIBE_ADMIRAL_FLEET_ID: fleetId,
     };
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
@@ -449,6 +450,7 @@ export class ShipManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+      VIBE_ADMIRAL_FLEET_ID: parentShip.fleetId,
     };
 
     const gateContext = gatePhase
@@ -499,6 +501,7 @@ export class ShipManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: existingEscort.parentShipId!,
+      VIBE_ADMIRAL_FLEET_ID: existingEscort.fleetId,
     };
 
     // Resume with gate context message
