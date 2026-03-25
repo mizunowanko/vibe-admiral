@@ -104,6 +104,10 @@ export class EngineServer {
       getShipManager: () => this.shipManager,
       getEscortManager: () => this.escortManager,
       getActorManager: () => this.actorManager,
+      getCommanderHistory: (role, fleetId) => {
+        const manager: CommanderManager = role === "flagship" ? this.flagshipManager : this.dockManager;
+        return manager.getHistoryWithDiskFallback(fleetId);
+      },
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
       broadcastRequestResult: (fleetId, result) => {
