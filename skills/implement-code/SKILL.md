@@ -37,14 +37,53 @@ CLAUDE.md の Commands テーブルに記載されたビルド・テスト・リ
 
 ## Step 3: 統合
 
-最新のデフォルトブランチをマージし、コンフリクトがあれば解消する。
+最新のデフォルトブランチと統合する。競合の規模に応じて段階的に戦略をエスカレーションする。
 
 ```bash
 DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
-git fetch origin "$DEFAULT_BRANCH" && git merge "origin/$DEFAULT_BRANCH"
+git fetch origin "$DEFAULT_BRANCH"
 ```
 
-- コンフリクトが発生したら解消してからコミットする
+### 段階 1: 通常の merge（推奨）
+
+```bash
+git merge "origin/$DEFAULT_BRANCH"
+```
+
+- 競合なし → そのまま Step 4 へ
+- 少数の競合（1-3 ファイル）→ 手動で解消してコミット
+- 多数の競合（4+ ファイル）→ abort して段階 2 へ
+
+### 段階 2: rebase（rename 追跡を活かす）
+
+大規模リファクタで rename が含まれる場合、rebase の方が git の rename 追跡が効き、競合が減ることがある。
+
+```bash
+git merge --abort 2>/dev/null  # 段階 1 の競合を破棄
+git rebase "origin/$DEFAULT_BRANCH"
+```
+
+- 競合なし or 少数 → 手動で解消して `git rebase --continue`
+- 多数の競合が残る → `git rebase --abort` して段階 3 へ
+
+### 段階 3: merge commit にフォールバック
+
+rebase でも競合が多い場合は、merge commit を使う。squash merge する PR では最終的にコミット履歴は圧縮されるため、merge commit でも問題ない。
+
+```bash
+git rebase --abort 2>/dev/null  # 段階 2 の rebase を破棄
+git merge "origin/$DEFAULT_BRANCH"
+```
+
+この段階では競合を 1 つずつ手動で解消する。解消の指針:
+- **main 側が正しい場合**: main の変更を採用（例: main で修正された import パス）
+- **feature branch 側が正しい場合**: feature の変更を維持
+- **両方の変更が必要な場合**: 手動でマージ
+- **rename 競合の場合**: rename 先のファイルに main の変更内容を手動で反映
+
+> **コンテキスト節約のコツ**: 競合ファイルが多い場合、`git diff --name-only --diff-filter=U` で競合ファイル一覧を確認し、パターンが同じ競合はまとめて解消する。
+
+- 全ての競合を解消後: `git add <resolved-files> && git commit`
 - **Web プロジェクトの場合**: `npm install` も実行する
 
 ## Step 4: テスト再実行

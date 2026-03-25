@@ -50,6 +50,11 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
 **`VIBE_ADMIRAL` 設定時**: EnterPlanMode は使わない。代わりに:
 
 1. 実装計画をテキストとして作成する（変更対象ファイル、実装方針、影響範囲、テスト方針を含む）
+
+   **大規模リファクタの分割チェック**: 変更対象ファイルが 10 以上になる場合、以下の分割を検討する:
+   - **リネームと機能変更を分離**: ファイルリネーム（`A.ts` → `B.ts`）だけの PR を先に出し、機能変更は後続 PR で行う。リネームのみの PR は git が rename を追跡できるため競合が起きにくい
+   - **レイヤー別に分割**: 型定義 → Engine → Frontend のように、依存関係の上流から順に PR を分ける
+   - **分割が不適切な場合**: 分割すると中間状態でビルドが通らない場合は無理に分割しない。計画コメントに「分割不可の理由」を明記する
 2. **QA 要否を判断する**: Issue の type ラベルと変更内容から、Playwright QA が必要かどうかを判断する:
    - `type/feature` で UI 変更を含む → `qaRequired: true`
    - `type/bug` で UI に影響するバグ → `qaRequired: true`
