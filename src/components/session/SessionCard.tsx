@@ -186,24 +186,6 @@ function ShipSessionCard({
             )}
             {ship.processDead ? "Error" : phaseDisplayName(ship.phase)}
           </Badge>
-          {ship.isCompacting && (
-            <Badge className="text-[10px] px-1 py-0 bg-purple-500/20 text-purple-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Compact
-            </Badge>
-          )}
-          {ship.gateCheck?.status === "pending" && (
-            <Badge className="text-[10px] px-1 py-0 bg-sky-500/20 text-sky-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Gate
-            </Badge>
-          )}
-          {ship.escorts && ship.escorts.length > 0 && (
-            <Badge className="text-[10px] px-1 py-0 bg-amber-500/20 text-amber-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Escort
-            </Badge>
-          )}
         </div>
       </div>
       <p className="truncate text-foreground">

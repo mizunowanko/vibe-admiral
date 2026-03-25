@@ -85,18 +85,6 @@ function ShipSessionHeader({
             )}
             {ship.processDead ? "Error" : phaseDisplayName(ship.phase)}
           </Badge>
-          {ship.isCompacting && (
-            <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Compact
-            </Badge>
-          )}
-          {ship.gateCheck?.status === "pending" && (
-            <Badge className="text-[10px] px-1.5 py-0 bg-sky-500/20 text-sky-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Gate
-            </Badge>
-          )}
         </div>
         <p className="text-xs font-medium truncate">
           {ship.issueTitle || `Issue #${ship.issueNumber}`}
