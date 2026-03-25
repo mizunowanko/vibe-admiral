@@ -24,11 +24,8 @@ export function MainPanel() {
     if (!selectedFleetId) return;
     registerSession(createCommanderSession("dock", selectedFleetId));
     registerSession(createCommanderSession("flagship", selectedFleetId));
-    // Auto-focus flagship for this fleet if nothing focused
-    const currentFocus = useSessionStore.getState().focusedSessionId;
-    if (!currentFocus) {
-      setFocus(commanderSessionId("flagship", selectedFleetId));
-    }
+    // Always focus this fleet's Flagship when fleet changes
+    setFocus(commanderSessionId("flagship", selectedFleetId));
   }, [selectedFleetId, registerSession, setFocus]);
 
   // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships, ? or Ctrl+/ → help
