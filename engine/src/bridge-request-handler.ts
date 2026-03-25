@@ -86,6 +86,13 @@ export class FlagshipRequestHandler {
         continue;
       }
 
+      // Append non-blocking file overlap warnings (informational only)
+      if (guard.warnings?.length) {
+        for (const warning of guard.warnings) {
+          results.push(`⚠️ ${item.repo}#${item.issueNumber}: ${warning}`);
+        }
+      }
+
       // Find local path
       const repoEntry = fleetRepos.find(
         (r) => r.remote === item.repo || r.localPath === item.repo,
