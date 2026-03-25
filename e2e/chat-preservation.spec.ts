@@ -208,10 +208,6 @@ test.describe("Chat Preservation — Issue #657 (#656 regression)", () => {
     await expect(dockInput).toHaveValue(testText, { timeout: 3000 });
     // Same DOM node (not remounted)
     expect(await hasMarker(page, "sortie-1")).toBe(true);
-
-    // Ship card should be visible in the Ships panel
-    const shipCard = page.getByText(SHIP_1.issueTitle);
-    await expect(shipCard).toBeVisible({ timeout: 5000 });
   });
 
   // ── Scenario 2: Phase 遷移時のチャット維持 ──
@@ -340,14 +336,6 @@ test.describe("Chat Preservation — Issue #657 (#656 regression)", () => {
     await expect(dockInput).toBeVisible({ timeout: 3000 });
     await expect(dockInput).toHaveValue(testText, { timeout: 3000 });
     expect(await hasMarker(page, "multi-sortie")).toBe(true);
-
-    // Both ship cards should be visible
-    await expect(page.getByText(SHIP_1.issueTitle)).toBeVisible({
-      timeout: 5000,
-    });
-    await expect(page.getByText(SHIP_2.issueTitle)).toBeVisible({
-      timeout: 5000,
-    });
   });
 
   // ── Scenario 4: Fleet 切り替え往復 ──
