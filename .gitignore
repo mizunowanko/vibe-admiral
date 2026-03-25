@@ -31,6 +31,9 @@ playwright-report/
 .claude/gate-request.json
 .claude/gate-response.json
 
+# Restart marker (dev-runner)
+.restart
+
 # Environment
 .env
 .env.*
