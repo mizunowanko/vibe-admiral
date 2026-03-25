@@ -221,10 +221,10 @@ export class StateSync {
       this.shipManager.notifyProcessDead(shipId);
 
       // --- PR existence fallback ---
-      // If the Ship is in "implementing" phase and a PR exists for the branch,
+      // If the Ship is in "coding" phase and a PR exists for the branch,
       // the Ship likely created a PR but died before calling the phase-transition API.
-      // Auto-transition to implementing-gate so the Escort can review the PR.
-      if (ship.phase === "implementing") {
+      // Auto-transition to coding-gate so the Escort can review the PR.
+      if (ship.phase === "coding") {
         const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
         if (prFallbackApplied) return;
       }
@@ -259,8 +259,8 @@ export class StateSync {
   }
 
   /**
-   * PR existence fallback: if a Ship died in "implementing" phase but a PR
-   * already exists for the branch, auto-transition to implementing-gate
+   * PR existence fallback: if a Ship died in "coding" phase but a PR
+   * already exists for the branch, auto-transition to coding-gate
    * so the Escort can review the PR.
    * Returns true if the fallback was applied.
    */
@@ -284,13 +284,13 @@ export class StateSync {
 
       const pr = JSON.parse(trimmed) as { number: number; url: string };
       console.log(
-        `[state-sync] Ship #${issueNumber} (${shipId.slice(0, 8)}...) died in implementing phase ` +
-        `but PR #${pr.number} exists — auto-transitioning to implementing-gate`,
+        `[state-sync] Ship #${issueNumber} (${shipId.slice(0, 8)}...) died in coding phase ` +
+        `but PR #${pr.number} exists — auto-transitioning to coding-gate`,
       );
 
-      // Transition: implementing → implementing-gate via XState GATE_ENTER event
+      // Transition: coding → coding-gate via XState GATE_ENTER event
       this.actorManager?.send(shipId, { type: "GATE_ENTER" });
-      this.shipManager.updatePhase(shipId, "implementing-gate", `PR fallback: PR #${pr.number} found`);
+      this.shipManager.updatePhase(shipId, "coding-gate", `PR fallback: PR #${pr.number} found`);
 
       // Store PR URL so the Escort can find it
       this.shipManager.setPrUrl(shipId, pr.url);

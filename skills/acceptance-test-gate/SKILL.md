@@ -6,7 +6,7 @@ user-invocable: true
 
 # /acceptance-test-gate — Acceptance Test Gate (Engine Escort)
 
-Engine が acceptance-test-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
+Engine が qa-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 Playwright E2E テストを実行し、Issue の受け入れ基準と照合して、結果を PR コメントに書き込む。
 
 ## 引数

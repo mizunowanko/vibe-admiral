@@ -15,7 +15,7 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
  * session resume, cleanup, and process exit handling.
  *
  * Lifecycle per gate:
- *   1. Ship enters gate phase (e.g., planning-gate)
+ *   1. Ship enters gate phase (e.g., plan-gate)
  *   2. Engine calls launchEscort(parentShipId, gatePhase, gateType)
  *   3. EscortManager creates or resumes an Escort process
  *   4. Escort reviews, submits verdict, and exits
@@ -83,7 +83,7 @@ export class EscortManager {
 
       if (existingEscort?.sessionId) {
         // Resume previous Escort session — preserves context from prior gate reviews
-        const escortId = this.resumeEscort(existingEscort, parentShip, gatePhase ?? "planning-gate");
+        const escortId = this.resumeEscort(existingEscort, parentShip, gatePhase ?? "plan-gate");
         this.escorts.set(parentShipId, escortId);
 
         console.log(
@@ -140,7 +140,7 @@ export class EscortManager {
       shipId: parentShip.id,
       sessionId: null,
       processPid: null,
-      phase: "planning",
+      phase: "plan",
       createdAt: new Date().toISOString(),
       completedAt: null,
     };

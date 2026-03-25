@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Anchor, Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { STATUS_CONFIG, PROCESS_DEAD_CONFIG, phaseDisplayName } from "@/lib/ship-status";
 import type { Session, Ship } from "@/types";
 
 interface SessionHeaderProps {
@@ -83,7 +83,7 @@ function ShipSessionHeader({
             {statusConfig.animate && (
               <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
             )}
-            {statusConfig.label}
+            {ship.processDead ? "Error" : phaseDisplayName(ship.phase)}
           </Badge>
           {ship.isCompacting && (
             <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400">

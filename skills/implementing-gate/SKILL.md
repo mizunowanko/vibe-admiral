@@ -6,7 +6,7 @@ user-invocable: true
 
 # /implementing-gate — Code Review Gate (Engine Escort)
 
-Engine が implementing-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
+Engine が coding-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 
 ## 引数
 

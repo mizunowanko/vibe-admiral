@@ -202,7 +202,7 @@ export class ShipManager {
       repo,
       issueNumber,
       issueTitle: issue.title,
-      phase: "planning",
+      phase: "plan",
       isCompacting: false,
       branchName,
       worktreePath,
@@ -274,7 +274,7 @@ export class ShipManager {
     };
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
-    this.updatePhase(shipId, "planning");
+    this.updatePhase(shipId, "plan");
     this.onShipCreated?.(shipId);
     return ship;
   }
@@ -338,12 +338,12 @@ export class ShipManager {
 
     // 4. Map last phase to suggested /implement step
     const phaseToStep: Record<string, number> = {
-      planning: 3,
-      "planning-gate": 3,
-      implementing: 5,
-      "implementing-gate": 5,
-      "acceptance-test": 11,
-      "acceptance-test-gate": 11,
+      plan: 3,
+      "plan-gate": 3,
+      coding: 5,
+      "coding-gate": 5,
+      qa: 11,
+      "qa-gate": 11,
       merging: 15,
     };
     const suggestedStep = lastPhase ? phaseToStep[lastPhase] ?? 3 : 3;
@@ -394,7 +394,7 @@ export class ShipManager {
       repo: parentShip.repo,
       issueNumber: parentShip.issueNumber,
       issueTitle: parentShip.issueTitle,
-      phase: "planning",
+      phase: "plan",
       isCompacting: false,
       branchName: parentShip.branchName,
       worktreePath: parentShip.worktreePath,
@@ -1055,7 +1055,7 @@ export class ShipManager {
         ship.worktreePath,
         shipEnv,
       );
-      const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "implementing";
+      const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "coding";
       this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
     } else {
       // No session to resume — re-sortie
@@ -1067,7 +1067,7 @@ export class ShipManager {
         skill,
         shipEnv,
       );
-      this.updatePhase(shipId, "planning", "Re-sortied");
+      this.updatePhase(shipId, "plan", "Re-sortied");
     }
 
     return this.getShip(shipId) ?? null;

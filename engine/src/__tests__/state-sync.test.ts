@@ -78,7 +78,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: REPO,
     issueNumber: 42,
     issueTitle: "Test",
-    phase: "implementing",
+    phase: "coding",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/repo/.worktrees/feature/42-test",

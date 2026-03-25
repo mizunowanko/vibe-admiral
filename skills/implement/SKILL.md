@@ -97,7 +97,7 @@ done
 
 ### Gate フロー（Engine Escort 方式）
 
-1. Ship が Engine REST API で gate phase に遷移（例: `planning` → `planning-gate`）
+1. Ship が Engine REST API で gate phase に遷移（例: `plan` → `plan-gate`）
 2. Engine が Escort プロセスを起動（`/planning-gate`, `/implementing-gate`, `/acceptance-test-gate` スキル）
 3. Escort がレビュー実施 → GitHub に記録 → Engine REST API で gate-verdict を送信
 4. Ship が REST API をポーリングして phase 変更を検知
@@ -108,9 +108,9 @@ done
 
 | 遷移 | Gate タイプ | 内容 |
 |------|-----------|------|
-| `planning → planning-gate` | plan-review | Ship の Escort が計画の妥当性を検証 |
-| `implementing → implementing-gate` | code-review | Ship の Escort が PR の品質を検証 |
-| `acceptance-test → acceptance-test-gate` | playwright | Ship の Escort が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
+| `plan → plan-gate` | plan-review | Ship の Escort が計画の妥当性を検証 |
+| `coding → coding-gate` | code-review | Ship の Escort が PR の品質を検証 |
+| `qa → qa-gate` | playwright | Ship の Escort が Playwright E2E テストで品質を検証（`qaRequired: false` の場合スキップ） |
 
 ## Sub-Skill ルーティング
 
@@ -126,7 +126,7 @@ done
 
 > **フェーズ順序制約**: 各 sub-skill は上から順に実行する。code-review gate (`/implement-review`) の承認を得てから受け入れテスト (`/implement-merge`) に進む。順序のスキップ・逆転は禁止。
 
-> **コンテキストリフレッシュ**: `/implement-code` の Step 1a で Issue 全文（plan コメント含む）を再読み込みする。Planning phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
+> **コンテキストリフレッシュ**: `/implement-code` の Step 1a で Issue 全文（plan コメント含む）を再読み込みする。Plan phase の調査でコンテキストが膨らんでいるため、承認済み plan を GitHub から読み直してフレッシュな状態で実装を開始する。
 
 state が `NO_STATE` の場合:
 

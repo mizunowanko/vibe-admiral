@@ -23,7 +23,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test issue",
-    phase: "implementing",
+    phase: "coding",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/repo/.worktrees/feature/42-test",
@@ -41,7 +41,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
 
 function makeGateCheck(overrides: Partial<GateCheckState> = {}): GateCheckState {
   return {
-    gatePhase: "planning-gate",
+    gatePhase: "plan-gate",
     gateType: "plan-review",
     status: "pending",
     requestedAt: new Date().toISOString(),
