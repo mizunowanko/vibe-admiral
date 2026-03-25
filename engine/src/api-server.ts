@@ -31,6 +31,7 @@ interface ApiDeps {
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
+  requestRestart: () => void;
 }
 
 interface ApiResponse {
@@ -571,6 +572,14 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         );
         deps.broadcastRequestResult(ctx.fleetId, result);
         sendJson(res, 200, { ok: true, result });
+        return;
+      }
+
+      // POST /api/restart — Restart Engine + Frontend
+      if (route === "restart" && req.method === "POST") {
+        sendJson(res, 200, { ok: true, result: "Restart initiated" });
+        // Trigger restart asynchronously after response is sent
+        setImmediate(() => deps.requestRestart());
         return;
       }
 

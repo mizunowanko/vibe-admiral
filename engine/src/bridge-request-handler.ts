@@ -35,6 +35,8 @@ export class FlagshipRequestHandler {
         return this.handleShipDelete(request);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
+      case "restart":
+        return "[Restart] Use POST /api/restart endpoint directly";
     }
   }
 

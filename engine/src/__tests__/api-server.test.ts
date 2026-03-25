@@ -25,6 +25,7 @@ function createMockDeps() {
     }]),
     loadRules: vi.fn().mockResolvedValue(""),
     broadcastRequestResult: vi.fn(),
+    requestRestart: vi.fn(),
     _handle: handle,
   };
 }
