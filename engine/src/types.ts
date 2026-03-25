@@ -301,6 +301,20 @@ export interface EscortProcess {
   completedAt: string | null;
 }
 
+// === Dispatch (Commander sub-agent launched via Task tool) ===
+export type DispatchStatus = "running" | "completed" | "failed";
+
+export interface Dispatch {
+  id: string;
+  parentRole: CommanderRole;
+  fleetId: string;
+  name: string;
+  status: DispatchStatus;
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
+}
+
 // === Commander Role (Dock or Flagship) ===
 export type CommanderRole = "dock" | "flagship";
 
