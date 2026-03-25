@@ -1,20 +1,26 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Session, SessionType } from "@/types";
+import type { Session, SessionType, Dispatch } from "@/types";
 
 interface SessionState {
   sessions: Map<string, Session>;
   focusedSessionId: string | null;
   /** Per-session input drafts preserved across component remounts. */
   inputDrafts: Record<string, string>;
+  /** Dispatch sub-agents keyed by dispatch ID, grouped per commander session. */
+  dispatches: Map<string, Dispatch>;
 
   registerSession: (session: Session) => void;
   unregisterSession: (id: string) => void;
   setFocus: (sessionId: string | null) => void;
   setInputDraft: (sessionId: string, value: string) => void;
+  addDispatch: (dispatch: Dispatch) => void;
+  updateDispatch: (dispatch: Dispatch) => void;
 
   /** Get the focused session object. */
   getFocusedSession: () => Session | null;
+  /** Get dispatches for a specific commander session. */
+  getDispatchesForSession: (sessionId: string) => Dispatch[];
 }
 
 /** Build a deterministic session ID for commander roles. */
@@ -67,6 +73,7 @@ export const useSessionStore = create<SessionState>()(
       sessions: new Map(),
       focusedSessionId: null,
       inputDrafts: {},
+      dispatches: new Map(),
 
       registerSession: (session) => {
         set((state) => {
@@ -102,10 +109,38 @@ export const useSessionStore = create<SessionState>()(
       setInputDraft: (sessionId, value) =>
         set((s) => ({ inputDrafts: { ...s.inputDrafts, [sessionId]: value } })),
 
+      addDispatch: (dispatch) => {
+        set((state) => {
+          const dispatches = new Map(state.dispatches);
+          dispatches.set(dispatch.id, dispatch);
+          return { dispatches };
+        });
+      },
+
+      updateDispatch: (dispatch) => {
+        set((state) => {
+          const dispatches = new Map(state.dispatches);
+          dispatches.set(dispatch.id, dispatch);
+          return { dispatches };
+        });
+      },
+
       getFocusedSession: () => {
         const { sessions, focusedSessionId } = get();
         if (!focusedSessionId) return null;
         return sessions.get(focusedSessionId) ?? null;
+      },
+
+      getDispatchesForSession: (sessionId) => {
+        const { dispatches } = get();
+        const results: Dispatch[] = [];
+        for (const d of dispatches.values()) {
+          const dispatchSessionId = `${d.parentRole}-${d.fleetId}`;
+          if (dispatchSessionId === sessionId) {
+            results.push(d);
+          }
+        }
+        return results;
       },
     }),
     {
