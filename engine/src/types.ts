@@ -1,14 +1,14 @@
 // === Phase ===
-// Gate is a phase: planning → planning-gate → implementing → implementing-gate
-// → acceptance-test → acceptance-test-gate → merging → done
+// Gate is a phase: plan → plan-gate → coding → coding-gate
+// → qa → qa-gate → merging → done
 // "error" is a derived state: phase ≠ done && process dead.
 export type Phase =
-  | "planning"
-  | "planning-gate"
-  | "implementing"
-  | "implementing-gate"
-  | "acceptance-test"
-  | "acceptance-test-gate"
+  | "plan"
+  | "plan-gate"
+  | "coding"
+  | "coding-gate"
+  | "qa"
+  | "qa-gate"
   | "merging"
   | "done"
   | "stopped";
@@ -18,18 +18,18 @@ export type ShipStatus = Phase;
 
 /** Ordered list of all phases for forward-only validation. */
 export const PHASE_ORDER: readonly Phase[] = [
-  "planning",
-  "planning-gate",
-  "implementing",
-  "implementing-gate",
-  "acceptance-test",
-  "acceptance-test-gate",
+  "plan",
+  "plan-gate",
+  "coding",
+  "coding-gate",
+  "qa",
+  "qa-gate",
   "merging",
   "done",
 ] as const;
 
 /** Gate phases and their associated gate types. */
-export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
+export type GatePhase = "plan-gate" | "coding-gate" | "qa-gate";
 
 /** Gate type determines which Dispatch sub-agent or mechanism handles the check. */
 export type GateType = "plan-review" | "code-review" | "playwright";
@@ -42,28 +42,28 @@ export type FleetGateSettings = Partial<Record<GatePhase, GateConfig>>;
 
 /** Default gate types for each gate phase. */
 export const DEFAULT_GATE_TYPES: Record<GatePhase, GateType> = {
-  "planning-gate": "plan-review",
-  "implementing-gate": "code-review",
-  "acceptance-test-gate": "playwright",
+  "plan-gate": "plan-review",
+  "coding-gate": "code-review",
+  "qa-gate": "playwright",
 };
 
 /** The phase that follows each gate phase when approved. */
 export const GATE_NEXT_PHASE: Record<GatePhase, Phase> = {
-  "planning-gate": "implementing",
-  "implementing-gate": "acceptance-test",
-  "acceptance-test-gate": "merging",
+  "plan-gate": "coding",
+  "coding-gate": "qa",
+  "qa-gate": "merging",
 };
 
 /** The phase preceding each gate phase (what triggers the gate). */
 export const GATE_PREV_PHASE: Record<GatePhase, Phase> = {
-  "planning-gate": "planning",
-  "implementing-gate": "implementing",
-  "acceptance-test-gate": "acceptance-test",
+  "plan-gate": "plan",
+  "coding-gate": "coding",
+  "qa-gate": "qa",
 };
 
 /** Check if a phase is a gate phase. */
 export function isGatePhase(phase: Phase): phase is GatePhase {
-  return phase === "planning-gate" || phase === "implementing-gate" || phase === "acceptance-test-gate";
+  return phase === "plan-gate" || phase === "coding-gate" || phase === "qa-gate";
 }
 
 /** Status of a pending gate check. */

@@ -6,7 +6,7 @@ user-invocable: true
 
 # /planning-gate — Plan Review Gate (Engine Escort)
 
-Engine が planning-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
+Engine が plan-gate フェーズを検知したとき、独立プロセス（`claude -p`）として起動される Escort skill。
 
 ## 引数
 

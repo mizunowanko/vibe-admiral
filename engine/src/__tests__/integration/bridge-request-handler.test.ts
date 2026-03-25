@@ -32,7 +32,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test feature",
-    phase: "planning",
+    phase: "plan",
     isCompacting: false,
     branchName: "feature/42-test-feature",
     worktreePath: "/tmp/worktrees/42",
@@ -132,8 +132,8 @@ describe("FlagshipRequestHandler (integration)", () => {
 
     it("throttles when concurrent limit is reached", async () => {
       const activeShips = [
-        makeShip({ id: "s1", phase: "planning" }),
-        makeShip({ id: "s2", phase: "implementing" }),
+        makeShip({ id: "s1", phase: "plan" }),
+        makeShip({ id: "s2", phase: "coding" }),
       ];
       mockShipManager.getShipsByFleet.mockReturnValue(activeShips);
 
@@ -177,8 +177,8 @@ describe("FlagshipRequestHandler (integration)", () => {
   describe("ship-status", () => {
     it("returns status for all ships in fleet", async () => {
       mockShipManager.getShipsByFleet.mockReturnValue([
-        makeShip({ id: "s1", issueNumber: 10, phase: "planning" }),
-        makeShip({ id: "s2", issueNumber: 11, phase: "implementing" }),
+        makeShip({ id: "s1", issueNumber: 10, phase: "plan" }),
+        makeShip({ id: "s2", issueNumber: 11, phase: "coding" }),
       ]);
 
       const result = await handler.handle(
@@ -228,7 +228,7 @@ describe("FlagshipRequestHandler (integration)", () => {
 
   describe("ship-resume", () => {
     it("resumes a dead ship with session", async () => {
-      const ship = makeShip({ phase: "implementing", sessionId: "sess-123" });
+      const ship = makeShip({ phase: "coding", sessionId: "sess-123" });
       mockShipManager.resolveShip.mockReturnValue(ship);
       mockShipManager.retryShip.mockReturnValue(ship);
 

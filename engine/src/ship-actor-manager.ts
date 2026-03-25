@@ -52,7 +52,7 @@ export class ShipActorManager {
     this.setupSubscription(input.shipId, actor);
     actor.start();
     this.actors.set(input.shipId, actor);
-    // New actors start at "planning" — no effective phase override needed
+    // New actors start at "plan" — no effective phase override needed
     this.effectivePhase.delete(input.shipId);
 
     return actor;
@@ -83,7 +83,7 @@ export class ShipActorManager {
       phaseBeforeStopped: phaseBeforeStopped ?? null,
     };
 
-    // Create actor — XState v5 always starts at "planning" (initial state).
+    // Create actor — XState v5 always starts at "plan" (initial state).
     // We track the effective DB phase separately to avoid spurious side effects.
     // The actor is used for event-driven transitions going forward; getPhase()
     // returns the effective phase (DB truth) rather than the Actor's XState state.

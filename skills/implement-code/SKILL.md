@@ -10,7 +10,7 @@ user-invocable: false
 
 ### 1a. コンテキストリフレッシュ（必須）
 
-Planning phase の調査・試行錯誤でコンテキストが膨らんでいるため、実装開始前に Issue を再読み込みしてコンテキストをリフレッシュする。
+Plan phase の調査・試行錯誤でコンテキストが膨らんでいるため、実装開始前に Issue を再読み込みしてコンテキストをリフレッシュする。
 
 ```bash
 REPO="${REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
@@ -24,7 +24,7 @@ gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,body,labels,sta
 - **Plan Review コメント**: レビューでの指摘事項（あれば反映する）
 - **その他のコメント**: 人間からの追加指示や要件変更
 
-> **なぜこのステップが必要か**: Planning phase で大量の調査・コード探索を行うとコンテキストが圧迫される。承認済みの plan は Issue コメントに永続化されているため、plan + issue 本文を読み直す方が、stale な planning コンテキストを引きずるより効率的。
+> **なぜこのステップが必要か**: Plan phase で大量の調査・コード探索を行うとコンテキストが圧迫される。承認済みの plan は Issue コメントに永続化されているため、plan + issue 本文を読み直す方が、stale な plan コンテキストを引きずるより効率的。
 
 ### 1b. 実装
 

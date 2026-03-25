@@ -2,8 +2,8 @@
  * XState v5 Ship State Machine
  *
  * Formalizes the Ship lifecycle as a state machine:
- *   planning → planning-gate → implementing → implementing-gate
- *   → acceptance-test → acceptance-test-gate → merging → done
+ *   plan → plan-gate → coding → coding-gate
+ *   → qa → qa-gate → merging → done
  *
  * Gate states auto-trigger Escort launch via entry actions.
  * The "stopped" state preserves the previous phase for resume.
@@ -33,7 +33,7 @@ export interface ShipMachineContext {
   processDead: boolean;
   /** Phase before entering "stopped" — used to resume to the correct state. */
   phaseBeforeStopped: Phase | null;
-  /** Whether QA (acceptance-test-gate) is required. Determined during planning. */
+  /** Whether QA (qa-gate) is required. Determined during planning. */
   qaRequired: boolean;
   /** Timestamp (ms epoch) when the Ship process was last started/resumed. Used for rapid death detection. */
   lastStartedAt: number | null;
@@ -103,12 +103,12 @@ export const shipMachine = setup({
   },
   guards: {
     canSkipQA: ({ context }) => !context.qaRequired,
-    wasPlanning: ({ context }) => context.phaseBeforeStopped === "planning",
-    wasPlanningGate: ({ context }) => context.phaseBeforeStopped === "planning-gate",
-    wasImplementing: ({ context }) => context.phaseBeforeStopped === "implementing",
-    wasImplementingGate: ({ context }) => context.phaseBeforeStopped === "implementing-gate",
-    wasAcceptanceTest: ({ context }) => context.phaseBeforeStopped === "acceptance-test",
-    wasAcceptanceTestGate: ({ context }) => context.phaseBeforeStopped === "acceptance-test-gate",
+    wasPlan: ({ context }) => context.phaseBeforeStopped === "plan",
+    wasPlanGate: ({ context }) => context.phaseBeforeStopped === "plan-gate",
+    wasCoding: ({ context }) => context.phaseBeforeStopped === "coding",
+    wasCodingGate: ({ context }) => context.phaseBeforeStopped === "coding-gate",
+    wasQA: ({ context }) => context.phaseBeforeStopped === "qa",
+    wasQAGate: ({ context }) => context.phaseBeforeStopped === "qa-gate",
     wasMerging: ({ context }) => context.phaseBeforeStopped === "merging",
   },
 }).createMachine({
@@ -133,7 +133,7 @@ export const shipMachine = setup({
     lastStartedAt: null,
     rapidDeathCount: 0,
   }),
-  initial: "planning",
+  initial: "plan",
   // Global events available in all states
   on: {
     PROCESS_OUTPUT: {
@@ -171,106 +171,106 @@ export const shipMachine = setup({
     },
   },
   states: {
-    planning: {
+    plan: {
       on: {
-        GATE_ENTER: { target: "planning-gate" },
+        GATE_ENTER: { target: "plan-gate" },
         STOP: {
           target: "stopped",
           actions: assign({
-            phaseBeforeStopped: (): Phase | null => "planning",
+            phaseBeforeStopped: (): Phase | null => "plan",
           }),
         },
         NOTHING_TO_DO: { target: "done" },
       },
     },
 
-    "planning-gate": {
+    "plan-gate": {
       entry: assign({
-        gateCheck: () => makeGateCheck("planning-gate"),
+        gateCheck: () => makeGateCheck("plan-gate"),
       }),
       on: {
         GATE_APPROVED: {
-          target: "implementing",
+          target: "coding",
           actions: "clearGateCheck",
         },
         GATE_REJECTED: {
-          target: "planning",
+          target: "plan",
           actions: "clearGateCheck",
         },
         ESCORT_DIED: {
-          target: "planning",
+          target: "plan",
           actions: "clearGateCheck",
         },
         STOP: {
           target: "stopped",
           actions: assign({
-            phaseBeforeStopped: (): Phase | null => "planning-gate",
+            phaseBeforeStopped: (): Phase | null => "plan-gate",
           }),
         },
       },
     },
 
-    implementing: {
+    coding: {
       on: {
-        GATE_ENTER: { target: "implementing-gate" },
+        GATE_ENTER: { target: "coding-gate" },
         STOP: {
           target: "stopped",
           actions: assign({
-            phaseBeforeStopped: (): Phase | null => "implementing",
+            phaseBeforeStopped: (): Phase | null => "coding",
           }),
         },
         NOTHING_TO_DO: { target: "done" },
       },
     },
 
-    "implementing-gate": {
+    "coding-gate": {
       entry: assign({
-        gateCheck: () => makeGateCheck("implementing-gate"),
+        gateCheck: () => makeGateCheck("coding-gate"),
       }),
       on: {
         GATE_APPROVED: {
-          target: "acceptance-test",
+          target: "qa",
           actions: "clearGateCheck",
         },
         GATE_REJECTED: {
-          target: "implementing",
+          target: "coding",
           actions: "clearGateCheck",
         },
         ESCORT_DIED: {
-          target: "implementing",
+          target: "coding",
           actions: "clearGateCheck",
         },
         STOP: {
           target: "stopped",
           actions: assign({
-            phaseBeforeStopped: (): Phase | null => "implementing-gate",
+            phaseBeforeStopped: (): Phase | null => "coding-gate",
           }),
         },
       },
     },
 
-    "acceptance-test": {
+    qa: {
       on: {
         GATE_ENTER: [
           {
             target: "merging",
             guard: "canSkipQA",
           },
-          { target: "acceptance-test-gate" },
+          { target: "qa-gate" },
         ],
         STOP: {
           target: "stopped",
           actions: assign({
-            phaseBeforeStopped: (): Phase | null => "acceptance-test",
+            phaseBeforeStopped: (): Phase | null => "qa",
           }),
         },
         NOTHING_TO_DO: { target: "done" },
       },
     },
 
-    "acceptance-test-gate": {
+    "qa-gate": {
       entry: assign({
-        gateCheck: () => makeGateCheck("acceptance-test-gate"),
+        gateCheck: () => makeGateCheck("qa-gate"),
       }),
       on: {
         GATE_APPROVED: {
@@ -278,17 +278,17 @@ export const shipMachine = setup({
           actions: "clearGateCheck",
         },
         GATE_REJECTED: {
-          target: "acceptance-test",
+          target: "qa",
           actions: "clearGateCheck",
         },
         ESCORT_DIED: {
-          target: "acceptance-test",
+          target: "qa",
           actions: "clearGateCheck",
         },
         STOP: {
           target: "stopped",
           actions: assign({
-            phaseBeforeStopped: (): Phase | null => "acceptance-test-gate",
+            phaseBeforeStopped: (): Phase | null => "qa-gate",
           }),
         },
       },
@@ -324,8 +324,8 @@ export const shipMachine = setup({
         },
         RESUME: [
           {
-            target: "planning",
-            guard: "wasPlanning",
+            target: "plan",
+            guard: "wasPlan",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -333,8 +333,8 @@ export const shipMachine = setup({
             }),
           },
           {
-            target: "planning-gate",
-            guard: "wasPlanningGate",
+            target: "plan-gate",
+            guard: "wasPlanGate",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -342,8 +342,8 @@ export const shipMachine = setup({
             }),
           },
           {
-            target: "implementing",
-            guard: "wasImplementing",
+            target: "coding",
+            guard: "wasCoding",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -351,8 +351,8 @@ export const shipMachine = setup({
             }),
           },
           {
-            target: "implementing-gate",
-            guard: "wasImplementingGate",
+            target: "coding-gate",
+            guard: "wasCodingGate",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -360,8 +360,8 @@ export const shipMachine = setup({
             }),
           },
           {
-            target: "acceptance-test",
-            guard: "wasAcceptanceTest",
+            target: "qa",
+            guard: "wasQA",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -369,8 +369,8 @@ export const shipMachine = setup({
             }),
           },
           {
-            target: "acceptance-test-gate",
-            guard: "wasAcceptanceTestGate",
+            target: "qa-gate",
+            guard: "wasQAGate",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -387,8 +387,8 @@ export const shipMachine = setup({
             }),
           },
           {
-            // Default: resume to implementing if phaseBeforeStopped is unknown
-            target: "implementing",
+            // Default: resume to coding if phaseBeforeStopped is unknown
+            target: "coding",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
@@ -413,9 +413,9 @@ export function stateValueToPhase(stateValue: string): Phase {
 /** Map Phase to XState event for entering a gate. */
 export function phaseToGateEvent(phase: Phase): ShipMachineEvent | null {
   switch (phase) {
-    case "planning-gate":
-    case "implementing-gate":
-    case "acceptance-test-gate":
+    case "plan-gate":
+    case "coding-gate":
+    case "qa-gate":
       return { type: "GATE_ENTER" };
     default:
       return null;

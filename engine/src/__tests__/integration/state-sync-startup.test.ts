@@ -55,7 +55,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test",
-    phase: "implementing",
+    phase: "coding",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/repo/.worktrees/feature/42-test",
@@ -130,7 +130,7 @@ describe("StateSync startup reconciliation (integration)", () => {
 
     it("blocks sortie when a Ship already exists for this issue", async () => {
       mockShipManager.getShipByIssue.mockReturnValue(
-        makeShip({ phase: "implementing" }),
+        makeShip({ phase: "coding" }),
       );
 
       const result = await stateSync.sortieGuard("owner/repo", 42);
@@ -178,7 +178,7 @@ describe("StateSync startup reconciliation (integration)", () => {
     });
 
     it("notifies process dead and rollbacks label on failed exit", async () => {
-      const ship = makeShip({ phase: "implementing" });
+      const ship = makeShip({ phase: "coding" });
       mockShipManager.getShip.mockReturnValue(ship);
       // rescueIfAlreadyDone will call getIssue — issue is open, so not rescued
       vi.mocked(github.getIssue).mockResolvedValue(
@@ -193,7 +193,7 @@ describe("StateSync startup reconciliation (integration)", () => {
     });
 
     it("rescues Ship as done if issue is already closed on GitHub", async () => {
-      const ship = makeShip({ phase: "implementing" });
+      const ship = makeShip({ phase: "coding" });
       mockShipManager.getShip.mockReturnValue(ship);
       vi.mocked(github.getIssue).mockResolvedValue(
         makeIssue({ number: 42, state: "closed", labels: ["status/sortied"] }),
