@@ -31,7 +31,7 @@ QA_REQUIRED="${VIBE_ADMIRAL_QA_REQUIRED:-true}"
 
 `QA_REQUIRED` が `false` の場合:
 
-1. PR を特定して QA スキップコメントを投稿:
+1. PR を特定:
    ```bash
    REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
    SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
@@ -40,24 +40,45 @@ QA_REQUIRED="${VIBE_ADMIRAL_QA_REQUIRED:-true}"
    PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --repo "$REPO" --json number --jq '.[0].number')
    ```
 
-   PR が見つかった場合のみコメントを投稿:
+2. **UI 変更フォールバックチェック**: `qaRequired: false` であっても、以下に該当する場合は **最低限の UI 表示確認** を実施する:
+   ```bash
+   # PR の diff に UI 関連ファイルの変更があるか確認
+   UI_CHANGES=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only 2>/dev/null | grep -E '^src/components/|STATUS_CONFIG|phase|badge|card' || true)
+   ```
+   - `UI_CHANGES` が空でない場合 → **Step 3.5（UI 表示整合性チェック）を実施してから approve する**。コメントには確認した UI 項目を記載する
+   - `UI_CHANGES` が空の場合 → 従来通り即 approve
+
+   **UI 変更なしの場合**: QA スキップコメントを投稿して即 approve:
    ```bash
    gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## Acceptance Test: ⏭️ SKIPPED
 
    QA not required for this change (\`qaRequired: false\`).
+   No UI-related file changes detected.
    Automatically approved by acceptance-test-gate.
 
    🤖 Generated with [Claude Code](https://claude.com/claude-code)"
    ```
 
-2. 即 gate-verdict approve を送信:
+   **UI 変更ありの場合**: Step 3.5 の UI 表示整合性チェックを実施した後、結果をコメントに含めて approve:
+   ```bash
+   gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## Acceptance Test: ⏭️ SKIPPED (with UI verification)
+
+   QA not required (\`qaRequired: false\`), but UI-related changes detected.
+   Performed minimum UI integrity check:
+
+   <UI 表示整合性チェックの結果をここに記載>
+
+   🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+   ```
+
+3. gate-verdict approve を送信:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}'
    ```
 
-3. **ここで終了する。以降の手順は実行しない。**
+4. **ここで終了する。以降の手順は実行しない。**
 
 `QA_REQUIRED` が `true` の場合、以降の手順に進む。
 
@@ -132,6 +153,48 @@ GATE_PROMPT="${VIBE_ADMIRAL_GATE_PROMPT:-}"
 
 Gate prompt にはプロジェクト固有のテスト手順が記述されている（例: Playwright E2E、CLI テスト、API テストなど）。
 その手順に従ってテストを実行し、結果を収集する。
+
+### Step 3.5: UI 表示整合性チェック（UI 関連変更がある場合は必須）
+
+PR の diff に以下のいずれかが含まれる場合、このステップは **必須** で実行する:
+- `src/components/` 配下のファイル変更
+- 表示値（phase 名、ステータス、ラベル等）のリネーム・変更
+- `STATUS_CONFIG`、表示ヘルパー関数、バッジ定義の変更
+- Store（Zustand）の状態構造変更
+
+```bash
+# PR の diff からUI関連ファイルを検出
+UI_FILES=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only 2>/dev/null | grep -E '^src/components/|STATUS_CONFIG|phase|badge|card|store' || true)
+```
+
+UI 関連変更が **ない** 場合はこのステップをスキップしてよい。
+
+#### 3.5a. レンダリング画面の特定
+
+変更されたコンポーネントが **実際にレンダリングされる全ての画面・箇所** を特定する:
+- どのページ・パネルで使用されているか
+- 親コンポーネントからどのように呼び出されているか
+- 条件付きレンダリング（if/switch）がある場合、全ブランチを確認
+
+#### 3.5b. 表示値のソース追跡
+
+変更された表示値について、データフローを **末端から源泉まで** 追跡する:
+1. **Frontend**: コンポーネントの props / store selector / computed 値を確認
+2. **Engine**: WebSocket メッセージや REST API レスポンスで渡される値を確認
+3. **DB / 型定義**: `engine/src/types.ts` や共通型の定義と一致するか確認
+
+> **重要**: phase 名のような「DB → Engine → Frontend」を貫通する値は、**全レイヤーの型定義が一貫している** ことを確認する。1 箇所でもリネーム漏れがあれば FAIL とする。
+
+#### 3.5c. 関連コンポーネントの横断確認
+
+同じ値を表示する **全てのコンポーネント** で正しく表示されることを確認する:
+- Ship カード（一覧表示）
+- Ship 詳細パネル
+- バッジ・ステータス表示
+- リスト・テーブル表示
+- ツールチップやポップオーバー
+
+> **失敗事例（PR #641）**: phase 名のリネームで一部のコンポーネント（バッジ表示）の更新が漏れ、`qaRequired: false` で承認されてしまった。この横断確認で検出できるケース。
 
 ### Step 4: テスト結果を判定
 
