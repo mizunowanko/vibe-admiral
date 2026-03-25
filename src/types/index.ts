@@ -47,6 +47,8 @@ export interface Fleet {
   shipRulePaths?: string[];
   /** Per-actor custom instructions (system prompts) injected at launch time. */
   customInstructions?: CustomInstructions;
+  /** Custom Escort prompts per gate type. Overrides default gate skill behavior. */
+  gatePrompts?: Partial<Record<GateType, string>>;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   /** Gate settings: which gate phases are enabled and their types. */

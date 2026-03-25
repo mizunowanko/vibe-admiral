@@ -32,7 +32,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -893,6 +893,7 @@ export class EngineServer {
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
     if (updates.customInstructions !== undefined) fleet.customInstructions = updates.customInstructions as CustomInstructions;
     if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
+    if (updates.gatePrompts !== undefined) fleet.gatePrompts = updates.gatePrompts as Partial<Record<GateType, string>>;
     if (updates.maxConcurrentSorties !== undefined) fleet.maxConcurrentSorties = updates.maxConcurrentSorties as number;
     await this.saveFleets(fleets);
   }

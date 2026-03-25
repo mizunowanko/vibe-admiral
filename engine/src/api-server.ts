@@ -28,8 +28,9 @@ interface ApiDeps {
     sharedRulePaths?: string[];
     shipRulePaths?: string[];
     customInstructions?: CustomInstructions;
-    maxConcurrentSorties?: number;
     gates?: import("./types.js").FleetGateSettings;
+    gatePrompts?: Partial<Record<import("./types.js").GateType, string>>;
+    maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
@@ -335,7 +336,7 @@ async function handleShipRoute(
       // and are resumed with --resume sessionId for the next gate.
       const escortManager = deps.getEscortManager();
 
-      // Build Escort custom instructions from fleet settings
+      // Build Escort custom instructions and gate prompt from fleet settings
       let escortExtraPrompt: string | undefined;
       {
         const ci = fleet?.customInstructions;
@@ -344,7 +345,10 @@ async function handleShipRoute(
           escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
         }
       }
-      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
+
+      // Pass fleet's gate prompt for this gate type to Escort via env var
+      const gatePrompt = fleet?.gatePrompts?.[gateType];
+      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];
