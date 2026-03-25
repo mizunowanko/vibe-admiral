@@ -20,7 +20,7 @@ if (existsSync(RESTART_MARKER)) unlinkSync(RESTART_MARKER);
 function start(env = {}) {
   const proc = spawn(
     "npx",
-    ["concurrently", "--kill-others", "vite", "tsx engine/src/index.ts"],
+    ["concurrently", "--kill-others", "\"vite\"", "\"tsx watch engine/src/index.ts\""],
     {
       cwd: ROOT,
       stdio: "inherit",
