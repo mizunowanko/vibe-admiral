@@ -128,6 +128,8 @@ export interface Fleet {
   customInstructions?: CustomInstructions;
   /** Gate settings: which gate phases are enabled and their types. */
   gates?: FleetGateSettings;
+  /** Custom Escort prompts per gate type. Overrides default gate skill behavior. */
+  gatePrompts?: Partial<Record<GateType, string>>;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;

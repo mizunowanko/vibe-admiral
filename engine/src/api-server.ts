@@ -7,6 +7,7 @@ import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
 import { isGatePhase, DEFAULT_GATE_TYPES, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { resolveGateType } from "./gate-config.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
@@ -27,6 +28,8 @@ interface ApiDeps {
     sharedRulePaths?: string[];
     shipRulePaths?: string[];
     customInstructions?: CustomInstructions;
+    gates?: import("./types.js").FleetGateSettings;
+    gatePrompts?: Partial<Record<import("./types.js").GateType, string>>;
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
@@ -288,7 +291,11 @@ async function handleShipRoute(
     // Handle gate-specific side effects: launch Escort on-demand for each gate
     if (isGatePhase(result.toPhase)) {
       const gatePhase = result.toPhase as GatePhase;
-      const gateType = DEFAULT_GATE_TYPES[gatePhase];
+
+      // Resolve gate type from Fleet config (falls back to defaults)
+      const fleets = await deps.loadFleets();
+      const fleet = fleets.find((f) => f.id === ship.fleetId);
+      const gateType = resolveGateType(gatePhase, fleet?.gates) ?? DEFAULT_GATE_TYPES[gatePhase];
       shipManager.setGateCheck(shipId, gatePhase, gateType);
 
       // Re-deploy skills so Escort picks up any changes made by the Ship
@@ -307,18 +314,19 @@ async function handleShipRoute(
       // and are resumed with --resume sessionId for the next gate.
       const escortManager = deps.getEscortManager();
 
-      // Build Escort custom instructions from fleet settings
+      // Build Escort custom instructions and gate prompt from fleet settings
       let escortExtraPrompt: string | undefined;
       {
-        const fleets = await deps.loadFleets();
-        const fleet = fleets.find((f) => f.id === ship.fleetId);
         const ci = fleet?.customInstructions;
         const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
         if (ciParts.length > 0) {
           escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
         }
       }
-      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
+
+      // Pass fleet's gate prompt for this gate type to Escort via env var
+      const gatePrompt = fleet?.gatePrompts?.[gateType];
+      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];
