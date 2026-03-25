@@ -104,6 +104,10 @@ export class EngineServer {
       getShipManager: () => this.shipManager,
       getEscortManager: () => this.escortManager,
       getActorManager: () => this.actorManager,
+      getCommanderHistory: (role, fleetId) => {
+        const manager: CommanderManager = role === "flagship" ? this.flagshipManager : this.dockManager;
+        return manager.getHistoryWithDiskFallback(fleetId);
+      },
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
       broadcastRequestResult: (fleetId, result) => {
@@ -279,6 +283,46 @@ export class EngineServer {
             this.broadcast({
               type: questionType,
               data: { fleetId, message: questionMessage },
+            });
+          } else if (
+            parsed.type === "tool_use" &&
+            parsed.tool === "Task"
+          ) {
+            // Dispatch sub-agent launched — register and notify frontend
+            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
+            const toolUseId = parsed.toolUseId as string | undefined;
+            const dispatchName = (toolInput?.description as string) ?? "dispatch";
+            if (toolUseId) {
+              const dispatch = manager.registerDispatch(fleetId, toolUseId, dispatchName);
+              if (dispatch) {
+                this.broadcast({
+                  type: `${role}:dispatch-started`,
+                  data: { fleetId, dispatch },
+                });
+              }
+            }
+            manager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: streamType,
+              data: { fleetId, message: parsed },
+            });
+          } else if (
+            parsed.type === "system" &&
+            (parsed.subtype === "dispatch-log" || parsed.subtype === "task-notification")
+          ) {
+            // Dispatch completed — update status and notify frontend
+            const result = parsed.content;
+            const dispatch = manager.completeLatestDispatch(fleetId, "completed", result);
+            if (dispatch) {
+              this.broadcast({
+                type: `${role}:dispatch-completed`,
+                data: { fleetId, dispatch },
+              });
+            }
+            manager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: streamType,
+              data: { fleetId, message: parsed },
             });
           } else if (parsed.type !== "result") {
             manager.addToHistory(fleetId, parsed);

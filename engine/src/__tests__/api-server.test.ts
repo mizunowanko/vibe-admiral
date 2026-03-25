@@ -17,6 +17,7 @@ function createMockDeps() {
     getShipManager: vi.fn().mockReturnValue({ syncPhaseFromDb: vi.fn() }),
     getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn().mockReturnValue("escort-1"), isEscortRunning: vi.fn().mockReturnValue(false) }),
     getActorManager: vi.fn().mockReturnValue({ send: vi.fn() }),
+    getCommanderHistory: vi.fn().mockResolvedValue([]),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",
       repos: [{ localPath: "/home/user/repo", remote: "owner/repo" }] as FleetRepo[],
@@ -678,6 +679,87 @@ describe("API Server", () => {
           s2.server.close();
         }
       });
+    });
+  });
+
+  describe("GET /api/commander-logs", () => {
+    it("returns flagship logs with default limit", async () => {
+      const mockLogs = [
+        { type: "user", content: "hello" },
+        { type: "assistant", content: "hi there" },
+      ];
+      deps.getCommanderHistory.mockResolvedValue(mockLogs);
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=flagship");
+      expect(res.status).toBe(200);
+      const data = res.data as ApiResponseData & { logs: unknown[]; role: string; fleetId: string };
+      expect(data.ok).toBe(true);
+      expect(data.logs).toHaveLength(2);
+      expect(data.role).toBe("flagship");
+      expect(data.fleetId).toBe("fleet-1");
+      expect(deps.getCommanderHistory).toHaveBeenCalledWith("flagship", "fleet-1");
+    });
+
+    it("returns dock logs", async () => {
+      deps.getCommanderHistory.mockResolvedValue([{ type: "user", content: "test" }]);
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=dock");
+      expect(res.status).toBe(200);
+      const data = res.data as ApiResponseData & { logs: unknown[]; role: string };
+      expect(data.ok).toBe(true);
+      expect(data.logs).toHaveLength(1);
+      expect(data.role).toBe("dock");
+      expect(deps.getCommanderHistory).toHaveBeenCalledWith("dock", "fleet-1");
+    });
+
+    it("respects limit parameter", async () => {
+      const mockLogs = Array.from({ length: 200 }, (_, i) => ({ type: "user", content: `msg-${i}` }));
+      deps.getCommanderHistory.mockResolvedValue(mockLogs);
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=flagship&limit=50");
+      expect(res.status).toBe(200);
+      const data = res.data as ApiResponseData & { logs: unknown[] };
+      expect(data.logs).toHaveLength(50);
+    });
+
+    it("caps limit at 500", async () => {
+      const mockLogs = Array.from({ length: 500 }, (_, i) => ({ type: "user", content: `msg-${i}` }));
+      deps.getCommanderHistory.mockResolvedValue(mockLogs);
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=flagship&limit=9999");
+      expect(res.status).toBe(200);
+      const data = res.data as ApiResponseData & { logs: unknown[] };
+      expect(data.logs).toHaveLength(500);
+    });
+
+    it("returns 400 when role is missing", async () => {
+      const res = await apiRequest(port, "GET", "/api/commander-logs");
+      expect(res.status).toBe(400);
+      expect(res.data.error).toContain("role");
+    });
+
+    it("returns 400 for invalid role", async () => {
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=invalid");
+      expect(res.status).toBe(400);
+      expect(res.data.error).toContain("role");
+    });
+
+    it("returns empty array when commander not started", async () => {
+      deps.getCommanderHistory.mockResolvedValue([]);
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=flagship");
+      expect(res.status).toBe(200);
+      const data = res.data as ApiResponseData & { logs: unknown[] };
+      expect(data.ok).toBe(true);
+      expect(data.logs).toHaveLength(0);
+    });
+
+    it("resolves fleetId from query parameter", async () => {
+      deps.getCommanderHistory.mockResolvedValue([]);
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=flagship&fleetId=fleet-1");
+      expect(res.status).toBe(200);
+      expect(deps.getCommanderHistory).toHaveBeenCalledWith("flagship", "fleet-1");
+    });
+
+    it("returns 400 for unknown fleetId", async () => {
+      const res = await apiRequest(port, "GET", "/api/commander-logs?role=flagship&fleetId=unknown");
+      expect(res.status).toBe(400);
+      expect(res.data.error).toContain("Fleet not found");
     });
   });
 

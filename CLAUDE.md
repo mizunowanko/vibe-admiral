@@ -134,6 +134,24 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 > `stopped` は DB phase であり、ラベルではない。Ship 停止中も `status/sortied` を保持する。
 > 依存関係の追跡は `depends-on/*` ラベルで行う。
 
+## Conflict Risk Areas
+
+並行 Ship が同じファイルを変更すると rebase/merge 時に競合が発生する。以下は競合リスクが高い領域:
+
+| 領域 | ファイル例 | リスク理由 |
+|------|-----------|-----------|
+| Engine 型定義 | `engine/src/types.ts` | ほぼ全ての Engine 変更が触る |
+| Ship ライフサイクル | `engine/src/ship-manager.ts` | 新機能追加時に頻繁に変更 |
+| WS メッセージ | `engine/src/ws-server.ts` | メッセージ種別追加のたびに変更 |
+| 共通スキル | `skills/implement/SKILL.md` | ワークフロー改善で頻繁に更新 |
+| フロントエンド Store | `src/stores/ship-store.ts` | Ship 機能追加のたびに変更 |
+
+### 競合を減らすガイドライン
+
+- **大規模リファクタ**: リネームと機能変更を別 PR に分割する（`/implement-plan` 参照）
+- **型定義の追加**: 既存の型を変更するのではなく、新しいファイルに型を追加することを検討する
+- **Engine の拡張**: 既存ファイルへの追加が避けられない場合、ファイル末尾に追加してdiff の競合を最小化する
+
 ### カテゴリラベル（`type/` prefix）— 人間または Bridge が付与
 | 優先順位 | ラベル | コミット prefix |
 |----------|--------|----------------|

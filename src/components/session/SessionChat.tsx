@@ -14,6 +14,29 @@ import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 
 type DisplayMessage = StreamMessage & { repeatCount?: number };
 
+/**
+ * Pre-filter messages that SessionMessage would suppress (return null).
+ * Removing them before groupToolMessages() prevents invisible messages
+ * from breaking consecutive tool_use grouping.
+ *
+ * Keep in sync with SessionMessage.tsx render-level guards (L41, L54, L58, L61).
+ */
+function filterSessionMessages(msgs: StreamMessage[], context: "ship" | "command"): StreamMessage[] {
+  const isShip = context === "ship";
+  return msgs.filter((msg) => {
+    const isSystem = msg.type === "system";
+    // Ship sessions never show User messages
+    if (isShip && msg.type === "user") return false;
+    // Lookout alerts: suppress in Ship
+    if (isSystem && msg.subtype === "lookout-alert" && isShip) return false;
+    // Commander status: suppress in Ship
+    if (isSystem && msg.subtype === "commander-status" && isShip) return false;
+    // Escort log: suppress in non-Ship
+    if (isSystem && msg.subtype === "escort-log" && !isShip) return false;
+    return true;
+  });
+}
+
 /** Collapse consecutive identical ship-status messages into one with a count. */
 function collapseShipStatus(msgs: StreamMessage[]): DisplayMessage[] {
   const result: DisplayMessage[] = [];
@@ -87,14 +110,15 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
     return messages;
   }, [messages, isShip]);
 
-  // collapseShipStatus only for Flagship (Dock doesn't show ship-status; Ship shows raw)
-  const displayItems = useMemo(
-    () => groupToolMessages(isFlagship ? collapseShipStatus(visibleMessages) : visibleMessages),
-    [visibleMessages, isFlagship],
-  );
-
   const config = session ? SESSION_CONFIG[session.type] : SESSION_CONFIG.flagship;
   const chatContext = isShip ? "ship" as const : "command" as const;
+
+  // Filter → collapse → group pipeline (see filterSessionMessages doc)
+  const displayItems = useMemo(() => {
+    const filtered = filterSessionMessages(visibleMessages, chatContext);
+    const collapsed = isFlagship ? collapseShipStatus(filtered) : filtered;
+    return groupToolMessages(collapsed);
+  }, [visibleMessages, isFlagship, chatContext]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;

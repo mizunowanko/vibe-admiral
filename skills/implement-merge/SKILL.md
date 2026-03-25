@@ -80,6 +80,28 @@ gh pr checks "$PR_NUM" --watch
 
 > **前提条件**: Step 1 の受け入れテストが完了していること（VIBE_ADMIRAL 設定時は `merging` phase に遷移済み）。
 
+### 4a. main との同期（マージ前に必須）
+
+squash merge の前に、PR ブランチが main の最新と同期済みであることを確認する。
+Gate 待機中（acceptance-test, code-review）に main に入った PR との競合を防ぐため。
+
+```bash
+DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+git fetch origin "$DEFAULT_BRANCH"
+BEHIND=$(git rev-list --count "HEAD..origin/$DEFAULT_BRANCH")
+```
+
+- `BEHIND=0` → 同期済み。Step 4b へ
+- `BEHIND>0` → main が先に進んでいる。`/implement-code` Step 3 の段階的マージ戦略に従って統合し、push する:
+  ```bash
+  git merge "origin/$DEFAULT_BRANCH"
+  # 競合があれば解消（/implement-code Step 3 の段階的戦略を参照）
+  git push
+  ```
+  push 後、**CI が再実行される場合は Step 2 に戻って CI パスを再確認する**。
+
+### 4b. squash merge
+
 ```bash
 gh pr merge "$PR_NUM" --squash
 ```

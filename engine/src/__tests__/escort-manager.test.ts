@@ -75,6 +75,20 @@ describe("EscortManager", () => {
       expect(escortId).not.toBeNull();
       expect(mockDb.upsertEscort).toHaveBeenCalled();
       expect(mockProcessManager.sortie).toHaveBeenCalled();
+
+      const sortieCall = mockProcessManager.sortie.mock.calls[0]!;
+      expect(sortieCall[0]).toBe(escortId); // id
+      expect(sortieCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
+      expect(sortieCall[2]).toBe(42); // issueNumber
+      expect(sortieCall[3]).toEqual(expect.stringContaining("planning-gate")); // prompt
+      expect(sortieCall[4]).toBe("/escort"); // skill
+      expect(sortieCall[5]).toEqual(
+        expect.objectContaining({
+          VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
+          VIBE_ADMIRAL_SHIP_ID: escortId,
+          VIBE_ADMIRAL_PARENT_SHIP_ID: "ship-001",
+        }),
+      ); // env
     });
 
     it("resumes existing Escort with sessionId for subsequent gates", () => {
@@ -124,6 +138,21 @@ describe("EscortManager", () => {
       // Re-launch should succeed
       const secondId = escortManager.launchEscort("ship-001", "coding-gate");
       expect(secondId).not.toBeNull();
+
+      // Verify the re-launched sortie has correct arguments
+      const lastCall = mockProcessManager.sortie.mock.calls.at(-1)!;
+      expect(lastCall[0]).toBe(secondId); // id
+      expect(lastCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
+      expect(lastCall[2]).toBe(42); // issueNumber
+      expect(lastCall[3]).toEqual(expect.stringContaining("implementing-gate")); // prompt
+      expect(lastCall[4]).toBe("/escort"); // skill
+      expect(lastCall[5]).toEqual(
+        expect.objectContaining({
+          VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
+          VIBE_ADMIRAL_SHIP_ID: secondId,
+          VIBE_ADMIRAL_PARENT_SHIP_ID: "ship-001",
+        }),
+      ); // env
     });
 
     it("returns null if parent Ship not found", () => {
