@@ -72,6 +72,18 @@ curl -s http://localhost:9721/api/pr-review-result \
 - `verdict`: `"approve"` or `"request-changes"`
 - `comments` (optional): Review comments string
 
+### 6. restart — Restart Engine + Frontend
+
+```bash
+curl -s http://localhost:9721/api/restart -X POST
+```
+
+- Triggers a graceful restart of Engine and Frontend (Vite dev server)
+- Engine broadcasts `engine:restarting` to all WebSocket clients, then shuts down
+- The dev-runner automatically restarts both processes
+- Ship phases persist in DB and survive the restart
+- **Safety**: Always confirm with the human user before calling this endpoint
+
 ## Error Handling
 
 All endpoints return structured JSON:

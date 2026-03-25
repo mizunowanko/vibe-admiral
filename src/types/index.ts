@@ -332,4 +332,6 @@ export type ServerMessage =
         entries: Array<{ name: string; isDirectory: boolean }>;
       };
     }
+  | { type: "engine:restarting"; data: Record<string, never> }
+  | { type: "engine:restarted"; data: Record<string, never> }
   | { type: "error"; data: { source: string; message: string } };
