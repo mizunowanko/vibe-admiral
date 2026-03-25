@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Fleet, FleetRepo, FleetSkillSources, CustomInstructions } from "@/types";
+import type { Fleet, FleetRepo, FleetSkillSources, CustomInstructions, FleetGateSettings } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 
 interface FleetState {
@@ -21,6 +21,7 @@ interface FleetState {
     shipRulePaths?: string[];
     customInstructions?: CustomInstructions;
     maxConcurrentSorties?: number;
+    gates?: FleetGateSettings;
   }) => void;
   deleteFleet: (id: string) => void;
   fetchFleets: () => void;
