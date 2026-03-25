@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { createServer, type Server as HttpServer } from "node:http";
 import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -110,6 +111,19 @@ export class EngineServer {
       },
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
+      requestRestart: () => {
+        console.log("[engine] Restart requested via API");
+        this.broadcast({ type: "engine:restarting", data: {} });
+        // Write restart marker so the dev-runner knows to restart
+        try {
+          const markerPath = join(import.meta.dirname, "..", "..", ".restart");
+          writeFileSync(markerPath, String(Date.now()));
+        } catch (err) {
+          console.warn("[engine] Failed to write .restart marker:", err);
+        }
+        this.shutdown();
+        process.exit(0);
+      },
       broadcastRequestResult: (fleetId, result) => {
         const resultMessage: StreamMessage = {
           type: "system",
@@ -146,6 +160,15 @@ export class EngineServer {
     this.startProcessLivenessCheck();
 
     console.log(`Engine HTTP+WebSocket server running on port ${port}`);
+
+    // Notify frontend if this is a restart (dev-runner sets RESTARTED=1)
+    if (process.env.RESTARTED === "1") {
+      console.log("[engine] Restart detected — notifying frontend");
+      // Delay broadcast to allow WebSocket clients to reconnect
+      setTimeout(() => {
+        this.broadcast({ type: "engine:restarted", data: {} });
+      }, 2000);
+    }
   }
 
   private setupWSS(): void {

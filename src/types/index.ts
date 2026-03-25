@@ -51,6 +51,8 @@ export interface Fleet {
   gatePrompts?: Partial<Record<GateType, string>>;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
+  /** Gate settings: which gate phases are enabled and their types. */
+  gates?: FleetGateSettings;
   createdAt: string;
 }
 
@@ -76,8 +78,14 @@ export interface Session {
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
 // === Gate ===
-export type GateType = "plan-review" | "code-review" | "playwright";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 export type GateStatus = "pending" | "approved" | "rejected";
+
+/** Per-gate configuration: true = default type, false = disabled, or a specific GateType. */
+export type GateConfig = boolean | GateType;
+
+/** Fleet-level gate settings. Omitted gate phases use defaults. */
+export type FleetGateSettings = Partial<Record<GatePhase, GateConfig>>;
 
 export interface GateCheckState {
   gatePhase: GatePhase;
@@ -217,6 +225,7 @@ export type ClientMessage =
         shipRulePaths?: string[];
         customInstructions?: CustomInstructions;
         maxConcurrentSorties?: number;
+        gates?: FleetGateSettings;
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
@@ -334,4 +343,6 @@ export type ServerMessage =
         entries: Array<{ name: string; isDirectory: boolean }>;
       };
     }
+  | { type: "engine:restarting"; data: Record<string, never> }
+  | { type: "engine:restarted"; data: Record<string, never> }
   | { type: "error"; data: { source: string; message: string } };

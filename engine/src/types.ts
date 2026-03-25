@@ -32,7 +32,7 @@ export const PHASE_ORDER: readonly Phase[] = [
 export type GatePhase = "plan-gate" | "coding-gate" | "qa-gate";
 
 /** Gate type determines which Dispatch sub-agent or mechanism handles the check. */
-export type GateType = "plan-review" | "code-review" | "playwright";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 
 /** Per-gate configuration: true = default type, string = specific type, false = disabled. */
 export type GateConfig = boolean | GateType;
@@ -257,6 +257,7 @@ export type FlagshipRequest =
   | { request: "ship-abandon"; shipId: string }
   | { request: "ship-delete"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
+  | { request: "restart" }
 ;
 
 /** @deprecated Use FlagshipRequest instead. Kept for backward compat. */

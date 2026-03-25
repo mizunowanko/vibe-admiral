@@ -6,7 +6,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
-import { isGatePhase, DEFAULT_GATE_TYPES, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
@@ -34,6 +34,7 @@ interface ApiDeps {
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
+  requestRestart: () => void;
 }
 
 interface ApiResponse {
@@ -292,10 +293,31 @@ async function handleShipRoute(
     if (isGatePhase(result.toPhase)) {
       const gatePhase = result.toPhase as GatePhase;
 
-      // Resolve gate type from Fleet config (falls back to defaults)
+      // Resolve gate type from fleet settings (supports disabled / auto-approve / override)
       const fleets = await deps.loadFleets();
       const fleet = fleets.find((f) => f.id === ship.fleetId);
-      const gateType = resolveGateType(gatePhase, fleet?.gates) ?? DEFAULT_GATE_TYPES[gatePhase];
+      const gateType = resolveGateType(gatePhase, fleet?.gates);
+
+      // Gate disabled or auto-approve: skip Escort, auto-transition to next phase
+      if (gateType === null || gateType === "auto-approve") {
+        const reason = gateType === null ? "gate disabled" : "auto-approve";
+        console.log(`[api-server] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
+        const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
+        if (autoResult.success) {
+          try {
+            db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
+              gate_result: "approved",
+              feedback: `Auto-approved: ${reason}`,
+            });
+          } catch (err) {
+            console.error(`[api-server] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
+          }
+          shipManager.syncPhaseFromDb(shipId);
+        }
+        sendJson(res, 200, { ok: true, phase: autoResult.success ? autoResult.toPhase : result.toPhase });
+        return;
+      }
+
       shipManager.setGateCheck(shipId, gatePhase, gateType);
 
       // Re-deploy skills so Escort picks up any changes made by the Ship
@@ -579,6 +601,14 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         );
         deps.broadcastRequestResult(ctx.fleetId, result);
         sendJson(res, 200, { ok: true, result });
+        return;
+      }
+
+      // POST /api/restart — Restart Engine + Frontend
+      if (route === "restart" && req.method === "POST") {
+        sendJson(res, 200, { ok: true, result: "Restart initiated" });
+        // Trigger restart asynchronously after response is sent
+        setImmediate(() => deps.requestRestart());
         return;
       }
 
