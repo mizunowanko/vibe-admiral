@@ -1,4 +1,4 @@
-import type { Phase } from "@/types";
+import type { Phase, GateType } from "@/types";
 
 export interface StatusConfig {
   color: string;
@@ -33,6 +33,21 @@ export function phaseDisplayName(phase: Phase | string): string {
     return `${phaseDisplayName(base)} (Review)`;
   }
   return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+
+/** Human-readable labels for gate types. */
+export const GATE_TYPE_LABELS: Record<GateType, string> = {
+  "plan-review": "計画レビュー",
+  "code-review": "コードレビュー",
+  playwright: "QA テスト",
+  "auto-approve": "自動承認",
+};
+
+/** Convert a gate type to display text.
+ *  e.g., "plan-review" → "計画レビュー", unknown → raw value */
+export function gateTypeDisplayName(gateType?: string): string {
+  if (!gateType) return "Gate";
+  return GATE_TYPE_LABELS[gateType as GateType] ?? gateType;
 }
 
 export function getStatusColor(content: string): string {
