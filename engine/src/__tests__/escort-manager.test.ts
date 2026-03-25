@@ -80,7 +80,7 @@ describe("EscortManager", () => {
       expect(sortieCall[0]).toBe(escortId); // id
       expect(sortieCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
       expect(sortieCall[2]).toBe(42); // issueNumber
-      expect(sortieCall[3]).toEqual(expect.stringContaining("planning-gate")); // prompt
+      expect(sortieCall[3]).toEqual(expect.stringContaining("plan-gate")); // prompt
       expect(sortieCall[4]).toBe("/escort"); // skill
       expect(sortieCall[5]).toEqual(
         expect.objectContaining({
@@ -144,7 +144,7 @@ describe("EscortManager", () => {
       expect(lastCall[0]).toBe(secondId); // id
       expect(lastCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
       expect(lastCall[2]).toBe(42); // issueNumber
-      expect(lastCall[3]).toEqual(expect.stringContaining("implementing-gate")); // prompt
+      expect(lastCall[3]).toEqual(expect.stringContaining("coding-gate")); // prompt
       expect(lastCall[4]).toBe("/escort"); // skill
       expect(lastCall[5]).toEqual(
         expect.objectContaining({
