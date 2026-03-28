@@ -29,7 +29,8 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
   const role = isCommander ? (session!.type as "dock" | "flagship") : "flagship";
   const fleetId = isCommander ? session!.fleetId : null;
 
-  const commander = useCommander(fleetId, role);
+  const commanderSessionId = isCommander ? sessionId : null;
+  const commander = useCommander(commanderSessionId, fleetId, role);
 
   const shipId = session?.type === "ship" ? session.shipId ?? null : null;
   const { logs } = useShip(shipId);
