@@ -123,6 +123,33 @@ describe("groupToolMessages", () => {
     expect((result[1] as ToolUseGroupItem).messages).toHaveLength(3);
   });
 
+  it("does not include assistant text inside tool_use groups (#724)", () => {
+    const input = [
+      msg("tool_use", { tool: "Bash" }),
+      msg("tool_result"),
+      msg("assistant"),
+      msg("tool_use", { tool: "Read" }),
+      msg("tool_result"),
+      msg("tool_use", { tool: "Grep" }),
+      msg("tool_result"),
+    ];
+    const result = groupToolMessages(input);
+    // tool_use(1) inline, assistant independent, tool_use(2) group
+    expect(result).toHaveLength(4);
+    expect(isToolGroup(result[0]!)).toBe(false);
+    expect((result[0] as StreamMessage).type).toBe("tool_use");
+    expect((result[1] as StreamMessage).type).toBe("tool_result");
+    expect((result[2] as StreamMessage).type).toBe("assistant");
+    expect(isToolGroup(result[3]!)).toBe(true);
+    expect((result[3] as ToolUseGroupItem).messages).toHaveLength(4);
+    // No assistant messages inside the group
+    expect(
+      (result[3] as ToolUseGroupItem).messages.every(
+        (m) => m.type === "tool_use" || m.type === "tool_result",
+      ),
+    ).toBe(true);
+  });
+
   it("does not group non-tool messages", () => {
     const input = [
       msg("assistant"),
