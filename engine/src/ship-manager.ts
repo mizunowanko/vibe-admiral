@@ -60,6 +60,8 @@ interface ShipRuntime {
   lastStartedAt: number | null;
   /** Count of consecutive rapid deaths (process exiting shortly after start). */
   rapidDeathCount: number;
+  /** Timestamp (ms epoch) when the Ship last hit a rate limit. Used for backoff on retry. */
+  lastRateLimitAt: number | null;
 }
 
 export class ShipManager {
@@ -243,6 +245,7 @@ export class ShipManager {
       retryCount: 0,
       lastStartedAt: Date.now(),
       rapidDeathCount: 0,
+      lastRateLimitAt: null,
     });
 
     // 9. Build extra context for Ship
@@ -435,6 +438,7 @@ export class ShipManager {
       retryCount: 0,
       lastStartedAt: Date.now(),
       rapidDeathCount: 0,
+      lastRateLimitAt: null,
     });
 
     // Create XState Actor
@@ -806,6 +810,17 @@ export class ShipManager {
     if (rt) rt.rapidDeathCount = 0;
   }
 
+  /** Record that a Ship hit a rate limit. */
+  setLastRateLimitAt(shipId: string, timestamp: number): void {
+    const rt = this.ensureRuntime(shipId);
+    if (rt) rt.lastRateLimitAt = timestamp;
+  }
+
+  /** Get the timestamp of the last rate limit hit, or null. */
+  getLastRateLimitAt(shipId: string): number | null {
+    return this.runtime.get(shipId)?.lastRateLimitAt ?? null;
+  }
+
   /**
    * Check whether a file exists (non-throwing).
    */
@@ -1030,11 +1045,46 @@ export class ShipManager {
     return purged;
   }
 
+  /** Base backoff delay (ms) for rate-limited retries. */
+  private static readonly RATE_LIMIT_BACKOFF_BASE_MS = 30_000;
+
+  /** Maximum backoff delay (ms) for rate-limited retries. */
+  private static readonly RATE_LIMIT_BACKOFF_MAX_MS = 120_000;
+
+  /** Window (ms) within which a rate limit hit triggers backoff on retry. */
+  private static readonly RATE_LIMIT_WINDOW_MS = 300_000; // 5 minutes
+
+  /**
+   * Compute backoff delay for a rate-limited Ship.
+   * Returns 0 if no backoff is needed (no recent rate limit).
+   */
+  private computeRateLimitBackoff(shipId: string): number {
+    const rt = this.runtime.get(shipId);
+    if (!rt?.lastRateLimitAt) return 0;
+
+    const elapsed = Date.now() - rt.lastRateLimitAt;
+    if (elapsed > ShipManager.RATE_LIMIT_WINDOW_MS) {
+      // Rate limit was too long ago — no backoff needed
+      rt.lastRateLimitAt = null;
+      return 0;
+    }
+
+    // Exponential backoff based on rapid death count: 30s, 60s, 120s
+    const factor = Math.pow(2, rt.rapidDeathCount);
+    return Math.min(
+      ShipManager.RATE_LIMIT_BACKOFF_BASE_MS * factor,
+      ShipManager.RATE_LIMIT_BACKOFF_MAX_MS,
+    );
+  }
+
   /**
    * Retry a dead Ship. If the Ship has a sessionId, resume the session.
    * Otherwise, re-sortie from scratch.
    * Retryable condition: phase !== "done" && process is dead.
    * Returns the resumed/re-launched ShipProcess, or null if not retryable.
+   *
+   * When a rate limit was recently detected, the actual spawn is delayed
+   * with exponential backoff (30s → 60s → 120s) to let the API recover.
    */
   retryShip(
     shipId: string,
@@ -1048,6 +1098,8 @@ export class ShipManager {
     if (ship.phase === "done" || this.processManager.isRunning(shipId)) {
       return null;
     }
+
+    const backoffMs = this.computeRateLimitBackoff(shipId);
 
     const rt = this.ensureRuntime(shipId);
     if (rt) {
@@ -1078,30 +1130,51 @@ export class ShipManager {
     // Send RESUME event to Actor (transitions from stopped to previous phase)
     this.actorManager?.send(shipId, { type: "RESUME" });
 
-    if (ship.sessionId) {
-      // Resume existing session — re-inject extraPrompt as appendSystemPrompt
-      // so customInstructions survive the session resume.
-      this.processManager.resumeSession(
-        shipId,
-        ship.sessionId,
-        "The previous session was interrupted. Continue from where you left off.",
-        ship.worktreePath,
-        shipEnv,
-        extraPrompt,
+    const doSpawn = () => {
+      // Clear rate limit flag after successful backoff wait
+      if (backoffMs > 0) {
+        const rtNow = this.runtime.get(shipId);
+        if (rtNow) {
+          rtNow.lastRateLimitAt = null;
+          rtNow.lastStartedAt = Date.now();
+        }
+      }
+
+      if (ship.sessionId) {
+        // Resume existing session — re-inject extraPrompt as appendSystemPrompt
+        // so customInstructions survive the session resume.
+        this.processManager.resumeSession(
+          shipId,
+          ship.sessionId,
+          "The previous session was interrupted. Continue from where you left off.",
+          ship.worktreePath,
+          shipEnv,
+          extraPrompt,
+        );
+        const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "coding";
+        this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
+      } else {
+        // No session to resume — re-sortie
+        this.processManager.sortie(
+          shipId,
+          ship.worktreePath,
+          ship.issueNumber,
+          extraPrompt,
+          skill,
+          shipEnv,
+        );
+        this.updatePhase(shipId, "plan", "Re-sortied");
+      }
+    };
+
+    if (backoffMs > 0) {
+      console.log(
+        `[ship-manager] Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...) rate limit backoff: ` +
+        `waiting ${Math.round(backoffMs / 1000)}s before retry`,
       );
-      const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "coding";
-      this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
+      setTimeout(doSpawn, backoffMs);
     } else {
-      // No session to resume — re-sortie
-      this.processManager.sortie(
-        shipId,
-        ship.worktreePath,
-        ship.issueNumber,
-        extraPrompt,
-        skill,
-        shipEnv,
-      );
-      this.updatePhase(shipId, "plan", "Re-sortied");
+      doSpawn();
     }
 
     return this.getShip(shipId) ?? null;
@@ -1207,6 +1280,7 @@ export class ShipManager {
           retryCount: 0,
           lastStartedAt: null,
           rapidDeathCount: 0,
+          lastRateLimitAt: null,
         });
 
         // Restore XState Actor for this Ship
@@ -1263,6 +1337,7 @@ export class ShipManager {
         retryCount: 0,
         lastStartedAt: null,
         rapidDeathCount: 0,
+        lastRateLimitAt: null,
       };
       this.runtime.set(shipId, rt);
     }
