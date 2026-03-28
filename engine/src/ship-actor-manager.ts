@@ -60,15 +60,26 @@ export class ShipActorManager {
   /**
    * Create and start a new Ship Actor.
    * Called when a Ship is sortied (new or re-sortied).
+   *
+   * @param startPhase If provided (re-sortie), replay events to advance the
+   *   actor to this phase. Side effects are suppressed during replay so that
+   *   intermediate gate phases don't trigger Escort launches.
    */
-  createActor(input: ShipMachineInput): Actor<typeof shipMachine> {
+  createActor(input: ShipMachineInput, startPhase?: Phase): Actor<typeof shipMachine> {
     // Stop existing actor if present (re-sortie case)
     this.stopActor(input.shipId);
 
     const actor = createActor(shipMachine, { input });
-    this.setupSubscription(input.shipId, actor);
+    const needsReplay = startPhase && startPhase !== "plan";
+    this.setupSubscription(input.shipId, actor, { suppressInitial: !!needsReplay });
     actor.start();
     this.actors.set(input.shipId, actor);
+
+    // Re-sortie: replay events to advance XState to the target phase.
+    // suppressInitial prevents side effects (Escort launches) during replay.
+    if (needsReplay) {
+      this.replayToPhase(input.shipId, actor, startPhase, null);
+    }
 
     return actor;
   }
