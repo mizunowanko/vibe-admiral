@@ -309,7 +309,7 @@ export class EngineServer {
             });
           } else if (
             parsed.type === "tool_use" &&
-            parsed.tool === "Task"
+            parsed.tool === "Agent"
           ) {
             // Dispatch sub-agent launched — register and notify frontend
             const toolInput = parsed.toolInput as Record<string, unknown> | undefined;

@@ -304,7 +304,7 @@ export interface EscortProcess {
   completedAt: string | null;
 }
 
-// === Dispatch (Commander sub-agent launched via Task tool) ===
+// === Dispatch (Commander sub-agent launched via Agent tool) ===
 export type DispatchStatus = "running" | "completed" | "failed";
 
 export interface Dispatch {
