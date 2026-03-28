@@ -10,7 +10,7 @@ describe("parseStreamMessage", () => {
         type: "tool_result",
         content: "hello world",
       });
-      expect(result).toEqual({ type: "tool_result", content: "hello world" });
+      expect(result).toEqual({ type: "tool_result", content: "hello world", timestamp: expect.any(Number) });
     });
 
     it("extracts text from ContentBlock array", () => {
@@ -24,6 +24,7 @@ describe("parseStreamMessage", () => {
       expect(result).toEqual({
         type: "tool_result",
         content: "line 1\nline 2",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -68,7 +69,7 @@ describe("parseStreamMessage", () => {
           { type: "text", text: "valid" },
         ],
       });
-      expect(result).toEqual({ type: "tool_result", content: "valid" });
+      expect(result).toEqual({ type: "tool_result", content: "valid", timestamp: expect.any(Number) });
     });
 
     it("returns null when content is an empty string", () => {
@@ -101,6 +102,7 @@ describe("parseStreamMessage", () => {
       expect(result).toEqual({
         type: "assistant",
         content: "Hello from Claude",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -117,6 +119,7 @@ describe("parseStreamMessage", () => {
       expect(result).toEqual({
         type: "assistant",
         content: "First paragraph\nSecond paragraph",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -140,6 +143,7 @@ describe("parseStreamMessage", () => {
         content: JSON.stringify({ file_path: "/tmp/test.ts" }, null, 2),
         toolInput: { file_path: "/tmp/test.ts" },
         toolUseId: "tu_123",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -161,6 +165,7 @@ describe("parseStreamMessage", () => {
       expect(result).toEqual({
         type: "assistant",
         content: "Let me read the file",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -178,6 +183,7 @@ describe("parseStreamMessage", () => {
         tool: "ListFiles",
         content: "ListFiles",
         toolUseId: "tu_789",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -216,6 +222,7 @@ describe("parseStreamMessage", () => {
         tool: "tool",
         content: JSON.stringify({ key: "value" }, null, 2),
         toolInput: { key: "value" },
+        timestamp: expect.any(Number),
       });
     });
 
@@ -257,6 +264,7 @@ describe("parseStreamMessage", () => {
         content: JSON.stringify({ file_path: "/first" }, null, 2),
         toolInput: { file_path: "/first" },
         toolUseId: "tu_first",
+        timestamp: expect.any(Number),
       });
     });
   });
@@ -290,6 +298,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "compact-status",
         content: "Compacting context...",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -303,6 +312,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "compact-status",
         content: "Context compaction complete",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -315,6 +325,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "compact-status",
         content: "Context compaction complete",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -329,6 +340,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "status",
         content: "Some status info",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -342,6 +354,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "compact-status",
         content: "Context compacted (manual, 150,000 tokens before)",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -355,6 +368,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "compact-status",
         content: "Context compacted (auto)",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -367,6 +381,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "compact-status",
         content: "Context compacted (auto)",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -380,6 +395,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "warning",
         content: "Rate limit approaching",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -392,6 +408,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: "unknown-subtype",
         content: "unknown-subtype",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -403,6 +420,7 @@ describe("parseStreamMessage", () => {
         type: "system",
         subtype: undefined,
         content: "system",
+        timestamp: expect.any(Number),
       });
     });
   });
@@ -418,6 +436,7 @@ describe("parseStreamMessage", () => {
       expect(result).toEqual({
         type: "result",
         content: "Task completed successfully",
+        timestamp: expect.any(Number),
       });
     });
 
@@ -452,6 +471,27 @@ describe("parseStreamMessage", () => {
       const result = parseStreamMessage({
         data: "no type field",
       });
+      expect(result).toBeNull();
+    });
+  });
+
+  // === timestamp ===
+
+  describe("timestamp", () => {
+    it("adds timestamp to all non-null messages", () => {
+      const before = Date.now();
+      const result = parseStreamMessage({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "test" }] },
+      });
+      const after = Date.now();
+      expect(result).not.toBeNull();
+      expect(result!.timestamp).toBeGreaterThanOrEqual(before);
+      expect(result!.timestamp).toBeLessThanOrEqual(after);
+    });
+
+    it("does not add timestamp to null results", () => {
+      const result = parseStreamMessage({ type: "unknown_type" });
       expect(result).toBeNull();
     });
   });
