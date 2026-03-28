@@ -34,7 +34,12 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     }
     prevFleetRef.current = { fleetId, role };
 
+    // Guard against stale closures: if the effect has been cleaned up
+    // (role/fleet changed), the listener must not process any more messages.
+    let active = true;
+
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
+      if (!active) return;
       if (msg.type === streamType) {
         const data = msg.data as { fleetId: string; message: StreamMessage };
         if (data.fleetId === fleetId) {
@@ -112,6 +117,7 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     });
 
     return () => {
+      active = false;
       unsub();
       unsubConnect();
     };

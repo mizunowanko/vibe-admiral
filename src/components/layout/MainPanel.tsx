@@ -116,7 +116,7 @@ export function MainPanel() {
         return (
           <div className="flex flex-1 min-h-0">
             {/* Left: Session Chat */}
-            <SessionChat sessionId={focusedSessionId} />
+            <SessionChat key={focusedSessionId ?? ''} sessionId={focusedSessionId} />
 
             {/* Right: Session Card List */}
             <SessionCardList fleetId={selectedFleetId!} />
