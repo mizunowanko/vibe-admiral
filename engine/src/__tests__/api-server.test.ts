@@ -49,7 +49,9 @@ function createMockDepsWithDb() {
 
   // Default: actorManager.requestTransition succeeds (XState approves)
   const requestTransition = vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
-  deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition });
+  const assertPhaseConsistency = vi.fn().mockReturnValue(true);
+  const reconcilePhase = vi.fn().mockReturnValue(false);
+  deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition, assertPhaseConsistency, reconcilePhase });
 
   return {
     ...deps,
