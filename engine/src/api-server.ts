@@ -342,17 +342,23 @@ async function handleShipRoute(
 
       // Build Escort custom instructions and gate prompt from fleet settings
       let escortExtraPrompt: string | undefined;
+      let shipCustomInstructionsText: string | undefined;
       {
         const ci = fleet?.customInstructions;
-        const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
-        if (ciParts.length > 0) {
-          escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+        const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
+        if (escortCiParts.length > 0) {
+          escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
+        }
+        // Build Ship's CI text for restoration after Escort exits
+        const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
+        if (shipCiParts.length > 0) {
+          shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
         }
       }
 
       // Pass fleet's gate prompt for this gate type to Escort via env var
       const gatePrompt = fleet?.gatePrompts?.[gateType];
-      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt);
+      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];
