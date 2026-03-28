@@ -333,9 +333,19 @@ export class StateSync {
       // If the Ship is in "coding" phase and a PR exists for the branch,
       // the Ship likely created a PR but died before calling the phase-transition API.
       // Auto-transition to coding-gate so the Escort can review the PR.
+      // Guard: skip if Escort has already failed in this gate (escortFailCount > 0),
+      // to prevent coding ↔ coding-gate infinite loop when Escort keeps crashing.
       if (ship.phase === "coding") {
-        const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
-        if (prFallbackApplied) return;
+        const context = this.actorManager?.getContext(shipId);
+        if (context && context.escortFailCount > 0) {
+          console.warn(
+            `[state-sync] PR fallback suppressed for Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...): ` +
+            `escortFailCount=${context.escortFailCount} — Escort has been failing in this gate`,
+          );
+        } else {
+          const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
+          if (prFallbackApplied) return;
+        }
       }
 
       // Check if the issue was already closed (PR merged) on GitHub.

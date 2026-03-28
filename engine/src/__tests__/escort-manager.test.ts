@@ -293,6 +293,7 @@ describe("EscortManager", () => {
       let mockActorManager: {
         send: ReturnType<typeof vi.fn>;
         requestTransition: ReturnType<typeof vi.fn>;
+        getContext: ReturnType<typeof vi.fn>;
       };
       let deathHandler: ReturnType<typeof vi.fn>;
 
@@ -300,6 +301,7 @@ describe("EscortManager", () => {
         mockActorManager = {
           send: vi.fn().mockReturnValue(true),
           requestTransition: vi.fn(),
+          getContext: vi.fn().mockReturnValue({ escortFailCount: 0 }),
         };
         deathHandler = vi.fn();
 
@@ -343,7 +345,7 @@ describe("EscortManager", () => {
         expect(deathHandler).toHaveBeenCalled();
       });
 
-      it("does not persist to DB when XState rejects ESCORT_DIED", async () => {
+      it("forces DB sync when XState rejects ESCORT_DIED", async () => {
         const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
         mockDb.getShipById.mockReturnValue({
@@ -359,7 +361,15 @@ describe("EscortManager", () => {
         escortManager.onEscortExit(escortId!, 1);
 
         expect(mockActorManager.requestTransition).toHaveBeenCalled();
-        expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
+        // Now forces DB sync to match XState phase even on rejection
+        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
+          "ship-001",
+          "plan-gate",
+          "coding",
+          "escort",
+          expect.objectContaining({ feedback: expect.stringContaining("forcing DB sync") }),
+        );
+        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
       });
 
       it("skips XState when parent is no longer in gate phase", async () => {
