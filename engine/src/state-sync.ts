@@ -261,6 +261,9 @@ export class StateSync {
       // Clean up Escort: kill process + mark DB record as done
       this.escortManager?.cleanupForDoneShip(shipId);
 
+      // Persist chat logs to DB before worktree deletion
+      await this.shipManager.persistChatLogs(shipId);
+
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
@@ -328,6 +331,9 @@ export class StateSync {
 
       // Notify the status change handler so Bridge gets notified.
       this.shipManager.notifyProcessDead(shipId);
+
+      // Persist chat logs on failure too (worktree may be cleaned up later)
+      await this.shipManager.persistChatLogs(shipId);
 
       // --- PR existence fallback ---
       // If the Ship is in "coding" phase and a PR exists for the branch,
