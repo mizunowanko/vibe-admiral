@@ -95,6 +95,47 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
+   * Launch a Dispatch process — an independent CLI session for investigation or modification.
+   * Similar to sortie() but with type-dependent allowedTools instead of disallowedTools.
+   */
+  dispatchSortie(
+    id: string,
+    cwd: string,
+    prompt: string,
+    type: "investigate" | "modify",
+    extraEnv?: Record<string, string>,
+  ): ChildProcess {
+    const allowedTools = type === "investigate"
+      ? "Bash,Read,Glob,Grep,WebSearch,WebFetch"
+      : "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch";
+
+    const args = [
+      "-p",
+      prompt,
+      "--output-format",
+      "stream-json",
+      "--dangerously-skip-permissions",
+      "--allowedTools",
+      allowedTools,
+      "--max-turns",
+      "100",
+      "--verbose",
+    ];
+
+    const proc = spawn("claude", args, {
+      cwd,
+      env: {
+        ...process.env,
+        ...extraEnv,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    this.setupProcess(id, proc);
+    return proc;
+  }
+
+  /**
    * Launch an interactive commander session (Dock or Flagship).
    * Both roles use the same CLI config — they differ only in system prompt and skills.
    */

@@ -5,7 +5,8 @@ import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
+import type { DispatchManager } from "./dispatch-manager.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
 
@@ -18,6 +19,7 @@ interface ApiDeps {
   requestHandler: FlagshipRequestHandler;
   getDatabase: () => FleetDatabase | null;
   getShipManager: () => ShipManager;
+  getDispatchManager: () => DispatchManager;
   getEscortManager: () => EscortManager;
   getActorManager: () => ShipActorManager;
   getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
@@ -571,6 +573,73 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       if (shipRouteMatch) {
         const [, shipId, action] = shipRouteMatch;
         await handleShipRoute(deps, req, res, shipId!, action!);
+        return;
+      }
+
+      // === Dispatch API endpoints ===
+
+      // POST /api/dispatch — Launch a new Dispatch process
+      if (route === "dispatch" && req.method === "POST") {
+        const rawBody = await readBody(req);
+        let body: Record<string, unknown>;
+        try {
+          body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: "Invalid JSON body" });
+          return;
+        }
+
+        const prompt = body.prompt as string | undefined;
+        if (!prompt) {
+          sendJson(res, 400, { ok: false, error: "prompt is required" });
+          return;
+        }
+        const name = (body.name as string) ?? "dispatch";
+        const type = (body.type as DispatchType) ?? "investigate";
+        if (type !== "investigate" && type !== "modify") {
+          sendJson(res, 400, { ok: false, error: 'type must be "investigate" or "modify"' });
+          return;
+        }
+        const parentRole = (body.parentRole as CommanderRole) ?? "flagship";
+        if (parentRole !== "dock" && parentRole !== "flagship") {
+          sendJson(res, 400, { ok: false, error: 'parentRole must be "dock" or "flagship"' });
+          return;
+        }
+        const fleetId = body.fleetId as string | undefined;
+        if (!fleetId) {
+          sendJson(res, 400, { ok: false, error: "fleetId is required" });
+          return;
+        }
+        const cwd = body.cwd as string | undefined;
+        if (!cwd) {
+          sendJson(res, 400, { ok: false, error: "cwd is required" });
+          return;
+        }
+
+        const dispatchManager = deps.getDispatchManager();
+        const dispatch = dispatchManager.launch({
+          fleetId,
+          parentRole,
+          prompt,
+          name,
+          type,
+          cwd,
+        });
+
+        sendJson(res, 200, { ok: true, result: dispatch.id, dispatch: dispatchManager.toDispatch(dispatch) } as ApiResponse & { dispatch: unknown });
+        return;
+      }
+
+      // GET /api/dispatches — List dispatches for a fleet
+      if (route === "dispatches" && req.method === "GET") {
+        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        if (!fleetId) {
+          sendJson(res, 400, { ok: false, error: "fleetId query parameter is required" });
+          return;
+        }
+        const dispatchManager = deps.getDispatchManager();
+        const dispatches = dispatchManager.getDispatchesByFleet(fleetId).map((d) => dispatchManager.toDispatch(d));
+        sendJson(res, 200, { ok: true, dispatches } as ApiResponse & { dispatches: unknown[] });
         return;
       }
 

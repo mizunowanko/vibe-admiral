@@ -17,6 +17,7 @@ const EMPTY_MESSAGES: StreamMessage[] = [];
  * Unified hook that provides messages for any session type.
  * For Commander sessions (dock/flagship), delegates to useCommander.
  * For Ship sessions, reads from the ship log store.
+ * For Dispatch sessions, reads from the dispatch log store.
  */
 export function useSessionMessages(sessionId: string | null): SessionMessages {
   const session = useSessionStore((s) =>
@@ -24,6 +25,7 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
   );
 
   const isCommander = session?.type === "dock" || session?.type === "flagship";
+  const isDispatch = session?.type === "dispatch";
   const role = isCommander ? (session!.type as "dock" | "flagship") : "flagship";
   const fleetId = isCommander ? session!.fleetId : null;
 
@@ -31,6 +33,12 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
 
   const shipId = session?.type === "ship" ? session.shipId ?? null : null;
   const { logs } = useShip(shipId);
+
+  // Dispatch logs: extract the dispatch process ID from session ID (format: "dispatch-dispatch-<uuid>")
+  const dispatchProcessId = isDispatch ? sessionId!.replace(/^dispatch-/, "") : null;
+  const dispatchLogs = useSessionStore((s) =>
+    dispatchProcessId ? s.dispatchLogs.get(dispatchProcessId) ?? EMPTY_MESSAGES : EMPTY_MESSAGES,
+  );
 
   return useMemo(() => {
     if (!session) {
@@ -50,11 +58,19 @@ export function useSessionMessages(sessionId: string | null): SessionMessages {
       };
     }
 
+    if (isDispatch) {
+      return {
+        messages: dispatchLogs,
+        isLoading: false,
+        session,
+      };
+    }
+
     // Ship session
     return {
       messages: logs,
       isLoading: false,
       session,
     };
-  }, [session, isCommander, commander, logs]);
+  }, [session, isCommander, isDispatch, commander, logs, dispatchLogs]);
 }
