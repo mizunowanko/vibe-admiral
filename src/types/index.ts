@@ -350,4 +350,5 @@ export type ServerMessage =
     }
   | { type: "engine:restarting"; data: Record<string, never> }
   | { type: "engine:restarted"; data: Record<string, never> }
+  | { type: "rate-limit:detected"; data: { processId: string } }
   | { type: "error"; data: { source: string; message: string } };

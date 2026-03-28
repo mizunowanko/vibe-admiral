@@ -25,12 +25,14 @@ export function useEngine() {
   const fetchShips = useShipStore((s) => s.fetchShips);
   const updateShipFromApi = useShipStore((s) => s.updateShipFromApi);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
+  const setRateLimitActive = useUIStore((s) => s.setRateLimitActive);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
   const registerSession = useSessionStore((s) => s.registerSession);
   const setFocus = useSessionStore((s) => s.setFocus);
 
   useEffect(() => {
     wsClient.connect();
+    let rateLimitTimer = 0;
 
     const checkConnection = setInterval(() => {
       const connected = wsClient.connected;
@@ -232,6 +234,14 @@ export function useEngine() {
           // Issue data handled by specific components
           break;
 
+        case "rate-limit:detected": {
+          // Show rate limit banner, auto-clear after 30s (#699)
+          setRateLimitActive(true);
+          clearTimeout(rateLimitTimer);
+          rateLimitTimer = window.setTimeout(() => setRateLimitActive(false), 30_000);
+          break;
+        }
+
         case "error": {
           const errorData = msg.data as { source: string; message: string };
           console.error(`Engine error [${errorData.source}]:`, errorData.message);
@@ -264,6 +274,7 @@ export function useEngine() {
       unsub();
       unsubConnect();
       clearInterval(checkConnection);
+      clearTimeout(rateLimitTimer);
       wsClient.disconnect();
     };
   }, [
@@ -279,6 +290,7 @@ export function useEngine() {
     fetchShips,
     updateShipFromApi,
     setEngineConnected,
+    setRateLimitActive,
     fetchFleets,
     registerSession,
     setFocus,
