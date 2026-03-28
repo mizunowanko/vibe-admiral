@@ -550,6 +550,27 @@ export class FleetDatabase {
     this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
   }
 
+  /**
+   * Transfer phase_transitions and phases from an old ship to a new ship ID.
+   * Used during re-sortie to preserve phase history across ship generations.
+   * FK constraints are temporarily disabled since the new ship may not exist yet.
+   */
+  transferTransitionsForReSortie(oldShipId: string, newShipId: string): void {
+    this.db.pragma("foreign_keys = OFF");
+    try {
+      this.db.transaction(() => {
+        this.db.prepare(
+          "UPDATE phase_transitions SET ship_id = ? WHERE ship_id = ?",
+        ).run(newShipId, oldShipId);
+        this.db.prepare(
+          "DELETE FROM phases WHERE ship_id = ?",
+        ).run(oldShipId);
+      })();
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
+  }
+
   /** Get all ships with non-terminal phase (for startup restoration).
    *  Includes "stopped" ships so they can be resumed after Engine restart. */
   getActiveShips(): ShipProcess[] {

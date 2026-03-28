@@ -12,6 +12,7 @@ import type { ShipActorManager } from "./ship-actor-manager.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, StreamMessage } from "./types.js";
+import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -126,12 +127,25 @@ export class ShipManager {
     // Collect re-sortie context from previous Ship BEFORE deleting it.
     // This preserves phase history & workflow state for the new Ship.
     let reSortieContext: string | null = null;
+    let reSortieStartPhase: Phase | null = null;
+    let previousShipId: string | null = null;
     if (this.fleetDb) {
       const existingShip = this.fleetDb.getShipByIssueAnyPhase(repo, issueNumber);
       if (existingShip && (existingShip.phase === "done" || existingShip.phase === "stopped")) {
         reSortieContext = await this.collectReSortieContext(existingShip);
+        previousShipId = existingShip.id;
+
+        // Determine the phase to start the new Ship at (#698).
+        // Gate phases → restart at work phase before the gate (gate was interrupted).
+        // Work phases → start at that phase directly (passed gates are skipped).
+        const lastPhase = this.fleetDb.getPhaseBeforeStopped(existingShip.id) ?? (existingShip.phase as Phase);
+        if (lastPhase !== "done" && lastPhase !== "stopped") {
+          reSortieStartPhase = isGatePhase(lastPhase)
+            ? GATE_PREV_PHASE[lastPhase]
+            : lastPhase;
+        }
+
         this.runtime.delete(existingShip.id);
-        this.fleetDb.deleteShip(existingShip.id);
       }
     }
 
@@ -205,13 +219,21 @@ export class ShipManager {
       // No existing PR or gh failed — continue without it
     }
 
+    // Re-sortie: transfer phase_transitions from old ship to new ship BEFORE
+    // deleting the old ship. This preserves the full phase history chain (#698).
+    if (previousShipId && this.fleetDb) {
+      this.fleetDb.transferTransitionsForReSortie(previousShipId, shipId);
+      this.fleetDb.deleteShip(previousShipId);
+    }
+
+    const initialPhase = reSortieStartPhase ?? "plan";
     const ship: ShipProcess = {
       id: shipId,
       fleetId,
       repo,
       issueNumber,
       issueTitle: issue.title,
-      phase: "plan",
+      phase: initialPhase,
       isCompacting: false,
       branchName,
       worktreePath,
@@ -263,7 +285,8 @@ export class ShipManager {
       .filter(Boolean)
       .join("\n\n") || undefined;
 
-    // 10. Create XState Actor for this Ship
+    // 10. Create XState Actor for this Ship.
+    // Re-sortie: replay events to advance actor to the previous phase (#698).
     this.actorManager?.createActor({
       shipId,
       fleetId,
@@ -274,7 +297,7 @@ export class ShipManager {
       sessionId: null,
       prUrl: existingPrUrl,
       qaRequired: true,
-    });
+    }, reSortieStartPhase ?? undefined);
 
     // 11. Launch Claude CLI process with Engine API access
     const shipEnv: Record<string, string> = {
@@ -285,7 +308,12 @@ export class ShipManager {
     };
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
-    this.updatePhase(shipId, "plan");
+    this.updatePhase(shipId, initialPhase);
+    if (reSortieStartPhase) {
+      console.log(
+        `[ship-manager] Re-sortie for issue #${issueNumber}: starting at phase "${initialPhase}" (previous ship: ${previousShipId?.slice(0, 8)}...)`,
+      );
+    }
     this.onShipCreated?.(shipId);
     return ship;
   }
