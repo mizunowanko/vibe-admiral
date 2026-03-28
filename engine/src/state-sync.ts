@@ -4,6 +4,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { StatusManager } from "./status-manager.js";
+import type { Phase } from "./types.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
@@ -558,7 +559,15 @@ export class StateSync {
       }
     }
 
-    // 3. Restored ships with no running process remain in their phase.
+    // 3. Validate XState/DB phase consistency after restoration (#689).
+    // Non-blocking: logs warnings but does not alter state.
+    for (const ship of this.shipManager.getAllShips()) {
+      if (ship.phase !== "done") {
+        this.actorManager?.assertPhaseConsistency(ship.id, ship.phase as Phase);
+      }
+    }
+
+    // 4. Restored ships with no running process remain in their phase.
     // The UI will show them as "process dead" based on the derived state.
     // Notify for each so Bridge gets the process-dead notification.
     for (const ship of this.shipManager.getAllShips()) {

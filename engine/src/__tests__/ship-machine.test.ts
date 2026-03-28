@@ -484,6 +484,20 @@ describe("shipMachine", () => {
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBeNull();
       actor.stop();
     });
+
+    it("RESUME with unrecognized phaseBeforeStopped goes to plan, not coding (#689)", () => {
+      const actor = createTestActor();
+      // Stop from plan (sets phaseBeforeStopped to "plan")
+      actor.send({ type: "STOP" });
+      expect(actor.getSnapshot().value).toBe("stopped");
+      // Override phaseBeforeStopped to a value with no matching guard (no "wasDone" guard)
+      // This simulates the edge case where phaseBeforeStopped is unknown/unexpected.
+      actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "done" });
+      // RESUME: no guard matches "done" → default target should be "plan" (not "coding")
+      actor.send({ type: "RESUME" });
+      expect(actor.getSnapshot().value).toBe("plan");
+      actor.stop();
+    });
   });
 });
 

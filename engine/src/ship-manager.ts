@@ -1151,7 +1151,13 @@ export class ShipManager {
           shipEnv,
           extraPrompt,
         );
-        const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "coding";
+        // For stopped ships, restore to the phase before STOP.
+        // For non-stopped ships (process died without formal STOP, e.g. rate limit),
+        // preserve the current DB phase — do NOT fall back to "coding" which would
+        // skip gate phases and cause XState/DB split-brain (#689).
+        const previousPhase = ship.phase === "stopped"
+          ? (this.fleetDb?.getPhaseBeforeStopped(shipId) ?? ship.phase)
+          : ship.phase;
         this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
       } else {
         // No session to resume — re-sortie
