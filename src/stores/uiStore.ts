@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-type MainView = "command" | "fleet-settings";
+type MainView = "command" | "fleet-settings" | "admiral-settings";
 
 interface UIState {
   mainView: MainView;

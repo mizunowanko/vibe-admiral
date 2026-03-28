@@ -8,6 +8,27 @@ export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
 
+// === Admiral Settings (3-layer configuration) ===
+/**
+ * Settings fields that participate in the 3-layer merge:
+ * Admiral Global → (Fleet Template at creation) → Fleet Per-Fleet
+ */
+export interface SettingsLayer {
+  customInstructions?: CustomInstructions;
+  gates?: FleetGateSettings;
+  gatePrompts?: Partial<Record<GateType, string>>;
+  qaRequiredPaths?: string[];
+  maxConcurrentSorties?: number;
+}
+
+/** Admiral-level settings: global (runtime merge) + template (creation-time snapshot). */
+export interface AdmiralSettings {
+  /** Settings applied to ALL fleets at runtime via deepMerge. */
+  global: SettingsLayer;
+  /** Template copied into new fleets at creation time. Does NOT affect existing fleets. */
+  template: SettingsLayer;
+}
+
 // === Custom Instructions ===
 /** Per-actor custom instructions injected via --append-system-prompt. */
 export interface CustomInstructions {
@@ -237,6 +258,8 @@ export type ClientMessage =
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
+  | { type: "admiral-settings:get" }
+  | { type: "admiral-settings:update"; data: { global?: SettingsLayer; template?: SettingsLayer } }
   | { type: "flagship:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
   | { type: "flagship:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "flagship:history"; data: { fleetId: string } }
@@ -340,6 +363,7 @@ export type ServerMessage =
   | { type: "ship:data"; data: Ship[] }
   | { type: "fleet:data"; data: Fleet[] }
   | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
+  | { type: "admiral-settings:data"; data: AdmiralSettings }
   | { type: "issue:data"; data: { repo: string; issues: Issue[] } }
   | {
       type: "fs:dir-listing";

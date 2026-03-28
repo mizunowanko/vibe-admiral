@@ -6,9 +6,10 @@ import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { DispatchManager } from "./dispatch-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole } from "./types.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole, AdmiralSettings } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
+import { mergeSettings } from "./deep-merge.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
@@ -37,6 +38,7 @@ interface ApiDeps {
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
+  loadAdmiralSettings: () => Promise<AdmiralSettings>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
   requestRestart: () => void;
 }
@@ -156,7 +158,18 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);
   const sharedRules = await deps.loadRules(fleet.sharedRulePaths ?? []);
   const shipRules = await deps.loadRules(fleet.shipRulePaths ?? []);
-  const ci = fleet.customInstructions;
+
+  // Merge Admiral global settings with Fleet per-fleet settings
+  const admiralSettings = await deps.loadAdmiralSettings();
+  const merged = mergeSettings(admiralSettings.global, {
+    customInstructions: fleet.customInstructions,
+    gates: fleet.gates,
+    gatePrompts: fleet.gatePrompts,
+    qaRequiredPaths: fleet.qaRequiredPaths,
+    maxConcurrentSorties: fleet.maxConcurrentSorties,
+  });
+
+  const ci = merged.customInstructions;
   const ciParts = [ci?.shared, ci?.ship].filter(Boolean);
   const ciText = ciParts.length > 0 ? `## Custom Instructions\n\n${ciParts.join("\n\n")}` : undefined;
   const shipExtraPrompt = [sharedRules, shipRules, ciText].filter(Boolean).join("\n\n") || undefined;
@@ -167,7 +180,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
     customInstructionsText: ciText,
-    maxConcurrentSorties: fleet.maxConcurrentSorties,
+    maxConcurrentSorties: merged.maxConcurrentSorties,
   };
 }
 
@@ -350,10 +363,17 @@ async function handleShipRoute(
     if (isGatePhase(result.toPhase)) {
       const gatePhase = result.toPhase as GatePhase;
 
-      // Resolve gate type from fleet settings (supports disabled / auto-approve / override)
+      // Resolve gate type from merged settings (Admiral global + Fleet per-fleet)
       const fleets = await deps.loadFleets();
       const fleet = fleets.find((f) => f.id === ship.fleetId);
-      const gateType = resolveGateType(gatePhase, fleet?.gates);
+      const admiralSettings = await deps.loadAdmiralSettings();
+      const mergedGateSettings = mergeSettings(admiralSettings.global, {
+        customInstructions: fleet?.customInstructions,
+        gates: fleet?.gates,
+        gatePrompts: fleet?.gatePrompts,
+        qaRequiredPaths: fleet?.qaRequiredPaths,
+      });
+      const gateType = resolveGateType(gatePhase, mergedGateSettings.gates);
 
       // Gate disabled or auto-approve: skip Escort, auto-transition to next phase
       if (gateType === null || gateType === "auto-approve") {
@@ -393,11 +413,11 @@ async function handleShipRoute(
       // and are resumed with --resume sessionId for the next gate.
       const escortManager = deps.getEscortManager();
 
-      // Build Escort custom instructions and gate prompt from fleet settings
+      // Build Escort custom instructions and gate prompt from merged settings
       let escortExtraPrompt: string | undefined;
       let shipCustomInstructionsText: string | undefined;
       {
-        const ci = fleet?.customInstructions;
+        const ci = mergedGateSettings.customInstructions;
         const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
         if (escortCiParts.length > 0) {
           escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
@@ -409,13 +429,13 @@ async function handleShipRoute(
         }
       }
 
-      // Pass fleet's gate prompt for this gate type to Escort via env var
-      const gatePrompt = fleet?.gatePrompts?.[gateType];
+      // Pass merged gate prompt for this gate type to Escort via env var
+      const gatePrompt = mergedGateSettings.gatePrompts?.[gateType];
 
       // Build extra env vars for Escort (qaRequiredPaths, qaRequired)
       const escortExtraEnv: Record<string, string> = {};
-      if (fleet?.qaRequiredPaths?.length) {
-        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(fleet.qaRequiredPaths);
+      if (mergedGateSettings.qaRequiredPaths?.length) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(mergedGateSettings.qaRequiredPaths);
       }
       // Pass parent Ship's qaRequired to acceptance-test-gate Escort
       const refreshedShip = db.getShipById(shipId);

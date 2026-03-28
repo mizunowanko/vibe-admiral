@@ -9,6 +9,7 @@ import {
 import { SessionChat } from "@/components/session/SessionChat";
 import { SessionCardList } from "@/components/session/SessionCardList";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
+import { AdmiralSettings } from "@/components/admiral/AdmiralSettings";
 import { KeyboardShortcutsDialog } from "@/components/layout/KeyboardShortcutsDialog";
 
 export function MainPanel() {
@@ -91,7 +92,7 @@ export function MainPanel() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  if (!selectedFleetId && mainView !== "fleet-settings") {
+  if (!selectedFleetId && mainView !== "fleet-settings" && mainView !== "admiral-settings") {
     return (
       <>
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -124,6 +125,8 @@ export function MainPanel() {
         );
       case "fleet-settings":
         return <FleetSettings />;
+      case "admiral-settings":
+        return <AdmiralSettings />;
       default:
         return null;
     }

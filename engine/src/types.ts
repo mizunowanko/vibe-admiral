@@ -81,6 +81,27 @@ export interface GateCheckState {
 /** @deprecated Use GatePhase instead. Kept for backward compat in admiral-protocol. */
 export type GateTransition = GatePhase;
 
+// === Admiral Settings (3-layer configuration) ===
+/**
+ * Settings fields that participate in the 3-layer merge:
+ * Admiral Global → (Fleet Template at creation) → Fleet Per-Fleet
+ */
+export interface SettingsLayer {
+  customInstructions?: CustomInstructions;
+  gates?: FleetGateSettings;
+  gatePrompts?: Partial<Record<GateType, string>>;
+  qaRequiredPaths?: string[];
+  maxConcurrentSorties?: number;
+}
+
+/** Admiral-level settings: global (runtime merge) + template (creation-time snapshot). */
+export interface AdmiralSettings {
+  /** Settings applied to ALL fleets at runtime via deepMerge. */
+  global: SettingsLayer;
+  /** Template copied into new fleets at creation time. Does NOT affect existing fleets. */
+  template: SettingsLayer;
+}
+
 // === Custom Instructions ===
 /** Per-actor custom instructions injected via --append-system-prompt. */
 export interface CustomInstructions {

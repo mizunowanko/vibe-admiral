@@ -3,6 +3,7 @@ import { wsClient } from "@/lib/ws-client";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
+import { useAdmiralSettingsStore } from "@/stores/admiralSettingsStore";
 import {
   useSessionStore,
   createCommanderSession,
@@ -10,7 +11,7 @@ import {
   createDispatchSession,
   commanderSessionId,
 } from "@/stores/sessionStore";
-import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole } from "@/types";
+import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole, AdmiralSettings } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -27,6 +28,8 @@ export function useEngine() {
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const setRateLimitActive = useUIStore((s) => s.setRateLimitActive);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
+  const setAdmiralSettings = useAdmiralSettingsStore((s) => s.setSettings);
+  const fetchAdmiralSettings = useAdmiralSettingsStore((s) => s.fetchSettings);
   const registerSession = useSessionStore((s) => s.registerSession);
   const setFocus = useSessionStore((s) => s.setFocus);
 
@@ -230,6 +233,12 @@ export function useEngine() {
           // Commander messages are handled by useCommander hook
           break;
 
+        case "admiral-settings:data": {
+          const admiralSettings = msg.data as unknown as AdmiralSettings;
+          setAdmiralSettings(admiralSettings);
+          break;
+        }
+
         case "issue:data":
           // Issue data handled by specific components
           break;
@@ -253,6 +262,7 @@ export function useEngine() {
     // Fetch data on every connect/reconnect
     const unsubConnect = wsClient.onConnect(() => {
       fetchFleets();
+      fetchAdmiralSettings();
       void fetchShips().then(() => {
         // Register sessions for ships loaded via REST API.
         // The ship:data WS handler would do this, but Engine never sends
@@ -292,6 +302,8 @@ export function useEngine() {
     setEngineConnected,
     setRateLimitActive,
     fetchFleets,
+    setAdmiralSettings,
+    fetchAdmiralSettings,
     registerSession,
     setFocus,
   ]);
