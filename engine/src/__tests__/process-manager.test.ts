@@ -267,18 +267,18 @@ describe("ProcessManager", () => {
   });
 
   describe("stderr and error events", () => {
-    it("emits rate-limit on retryable stderr content", () => {
+    it("emits rate-limit on retryable stderr content without error event (#712)", () => {
       const rateLimitHandler = vi.fn();
       const errorHandler = vi.fn();
       pm.on("rate-limit", rateLimitHandler);
-      pm.on("error", errorHandler); // Must handle error event to avoid unhandled throw
+      pm.on("error", errorHandler);
 
       pm.sortie("ship-001", "/path", 42);
 
       mockProc.stderr!.emit("data", Buffer.from("Error 429 Too Many Requests"));
       expect(rateLimitHandler).toHaveBeenCalledWith("ship-001");
-      // error is also emitted alongside rate-limit
-      expect(errorHandler).toHaveBeenCalledWith("ship-001", expect.any(Error));
+      // error should NOT be emitted for retryable errors — prevents frontend noise
+      expect(errorHandler).not.toHaveBeenCalled();
     });
 
     it("emits error event for all stderr content", () => {

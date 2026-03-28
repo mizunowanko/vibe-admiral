@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-import { ProcessManager } from "./process-manager.js";
+import { ProcessManager, isRetryableError } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { FlagshipManager } from "./flagship.js";
 import { DockManager } from "./dock.js";
@@ -467,6 +467,7 @@ export class EngineServer {
               content: `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}): Escort review completed (exit ${code})`,
               meta: {
                 category: "ship-status" as const,
+                shipId: parentShipId,
                 issueNumber: parentShip.issueNumber,
                 issueTitle: parentShip.issueTitle,
               },
@@ -525,21 +526,47 @@ export class EngineServer {
     this.processManager.on("rate-limit", (id: string) => {
       if (this.isCommanderProcess(id)) {
         console.warn(`[ws-server] Commander ${id} hit rate limit`);
-        return;
+      } else {
+        console.warn(
+          `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — backoff will apply on next retry`,
+        );
+        this.shipManager.setLastRateLimitAt(id, Date.now());
       }
-      console.warn(
-        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — backoff will apply on next retry`,
-      );
-      this.shipManager.setLastRateLimitAt(id, Date.now());
+      // Notify Ship's own chat with a non-error status (#712)
+      const ship = this.shipManager.getShip(id);
+      if (ship) {
+        this.broadcast({
+          type: "ship:stream",
+          data: {
+            id,
+            message: {
+              type: "system" as const,
+              subtype: "rate-limit-status" as const,
+              content: "Rate limit detected — retrying automatically...",
+              timestamp: Date.now(),
+            },
+          },
+        });
+      }
+      // Notify frontend for global status indicator banner (#699)
+      this.broadcast({ type: "rate-limit:detected", data: { processId: id } });
     });
 
     this.processManager.on("error", (id: string, error: Error) => {
       console.error(`Process ${id} error:`, error.message);
+
+      // Retryable errors (rate limit, 429, 500, etc.) are handled by
+      // process-manager retry logic. Don't broadcast them to the frontend
+      // to avoid flooding chat panels with transient error messages (#699).
+      if (isRetryableError(error.message)) return;
+
       const errCommander = this.resolveCommander(id);
       if (errCommander) {
         const { role, manager, fleetId } = errCommander;
         const hadData = this.commanderFirstData.has(id);
-        this.commanderFirstData.delete(id);
+        // Don't delete commanderFirstData here — only delete on process exit.
+        // Deleting on error caused subsequent errors to be incorrectly treated
+        // as "failed to start" and broadcast as ${role}:stream (#699).
         const roleLabel = role === "flagship" ? "Flagship" : "Dock";
         // Only show "Failed to start" if commander never sent data (spawn failure)
         if (!hadData) {
@@ -585,6 +612,7 @@ export class EngineServer {
           content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${phase}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
           meta: {
             category: "ship-status" as const,
+            shipId: id,
             issueNumber: ship.issueNumber,
             issueTitle: ship.issueTitle,
           },
@@ -666,6 +694,7 @@ export class EngineServer {
         content: `[Escort Death] ${message}`,
         meta: {
           category: "ship-status",
+          shipId,
           issueNumber: ship.issueNumber,
           issueTitle: ship.issueTitle,
         },
@@ -1232,6 +1261,12 @@ export class EngineServer {
         type: "system" as const,
         subtype: "ship-status" as const,
         content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
+        meta: {
+          category: "ship-status" as const,
+          shipId: id,
+          issueNumber: ship.issueNumber,
+          issueTitle: ship.issueTitle,
+        },
         timestamp: Date.now(),
       };
       this.flagshipManager.addToHistory(ship.fleetId, compactMsg);

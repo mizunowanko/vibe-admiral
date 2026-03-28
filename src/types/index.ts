@@ -165,7 +165,8 @@ export type StreamMessageSubtype =
   | "lookout-alert"
   | "task-notification"
   | "dispatch-log"
-  | "escort-log";
+  | "escort-log"
+  | "rate-limit-status";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -349,4 +350,5 @@ export type ServerMessage =
     }
   | { type: "engine:restarting"; data: Record<string, never> }
   | { type: "engine:restarted"; data: Record<string, never> }
+  | { type: "rate-limit:detected"; data: { processId: string } }
   | { type: "error"; data: { source: string; message: string } };

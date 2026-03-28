@@ -313,6 +313,13 @@ async function handleShipRoute(
       return;
     }
 
+    // Pre-transition consistency check: reconcile XState/DB mismatch before processing (#694)
+    const dbPhase = ship.phase as Phase;
+    if (!actorManager.assertPhaseConsistency(shipId, dbPhase)) {
+      console.warn(`[api-server] Pre-transition reconciliation for Ship ${shipId.slice(0, 8)}...`);
+      actorManager.reconcilePhase(shipId, dbPhase);
+    }
+
     // XState is the sole authority: request transition through XState first
     const result = actorManager.requestTransition(shipId, xstateEvent);
     if (!result.success) {
@@ -330,8 +337,11 @@ async function handleShipRoute(
         metadata,
       );
     } catch (err) {
-      console.error(`[api-server] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}...:`, err);
-      // DB failed but XState already transitioned — log and continue
+      // DB failed but XState already transitioned — revert XState to prevent split-brain (#694)
+      console.error(`[api-server] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
+      actorManager.reconcilePhase(shipId, result.fromPhase);
+      sendJson(res, 500, { ok: false, error: "Phase transition failed: DB persist error" });
+      return;
     }
 
     shipManager.syncPhaseFromDb(shipId);
@@ -498,6 +508,13 @@ async function handleShipRoute(
 
     // XState is the sole authority: request transition through XState first
     const actorManager = deps.getActorManager();
+
+    // Pre-transition consistency check: reconcile XState/DB mismatch before processing (#694)
+    if (!actorManager.assertPhaseConsistency(shipId, currentPhase)) {
+      console.warn(`[api-server] Pre-verdict reconciliation for Ship ${shipId.slice(0, 8)}...`);
+      actorManager.reconcilePhase(shipId, currentPhase);
+    }
+
     const xstateEvent: import("./ship-machine.js").ShipMachineEvent = verdict === "approve"
       ? { type: "GATE_APPROVED" }
       : { type: "GATE_REJECTED", feedback: feedback ?? "" };
@@ -516,7 +533,11 @@ async function handleShipRoute(
     try {
       db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata);
     } catch (err) {
-      console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}...:`, err);
+      // DB failed but XState already transitioned — revert XState to prevent split-brain (#694)
+      console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
+      actorManager.reconcilePhase(shipId, result.fromPhase);
+      sendJson(res, 500, { ok: false, error: "Gate verdict failed: DB persist error" });
+      return;
     }
 
     shipManager.syncPhaseFromDb(shipId);

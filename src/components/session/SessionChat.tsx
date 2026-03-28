@@ -34,6 +34,8 @@ const RENDERED_SYSTEM_SUBTYPES = new Set([
   "lookout-alert",
   "commander-status",
   "escort-log",
+  "dispatch-log",
+  "rate-limit-status",
 ]);
 
 /**
@@ -63,19 +65,36 @@ function filterSessionMessages(msgs: StreamMessage[], context: "ship" | "command
   });
 }
 
-/** Collapse consecutive identical ship-status messages into one with a count. */
+/**
+ * Collapse consecutive ship-status messages into groups.
+ * - Identical messages → single message with repeatCount
+ * - Different ship-status messages within COLLAPSE_WINDOW_MS → grouped with count
+ *   (keeps the last message visible, collapses earlier ones)
+ */
+const COLLAPSE_WINDOW_MS = 5000;
+
 function collapseShipStatus(msgs: StreamMessage[]): DisplayMessage[] {
   const result: DisplayMessage[] = [];
   for (const msg of msgs) {
     const prev = result[result.length - 1];
-    if (
-      msg.type === "system" &&
-      msg.subtype === "ship-status" &&
-      prev?.type === "system" &&
-      prev?.subtype === "ship-status" &&
-      msg.content === prev.content
-    ) {
-      prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+    const isStatus = msg.type === "system" && msg.subtype === "ship-status";
+    const prevIsStatus = prev?.type === "system" && prev?.subtype === "ship-status";
+
+    if (isStatus && prevIsStatus) {
+      const timeDiff = Math.abs((msg.timestamp ?? 0) - (prev.timestamp ?? 0));
+      if (msg.content === prev.content) {
+        // Identical messages — always collapse
+        prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+      } else if (timeDiff < COLLAPSE_WINDOW_MS) {
+        // Different ship-status within time window — collapse into group
+        prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+        // Update content to show latest status, keeping the count
+        prev.content = msg.content;
+        prev.timestamp = msg.timestamp;
+        prev.meta = msg.meta;
+      } else {
+        result.push({ ...msg });
+      }
     } else {
       result.push({ ...msg });
     }
@@ -116,6 +135,7 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
   const { messages, sendMessage, isLoading, session } =
     useSessionMessages(sessionId);
   const engineConnected = useUIStore((s) => s.engineConnected);
+  const rateLimitActive = useUIStore((s) => s.rateLimitActive);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
@@ -218,6 +238,13 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
       {!engineConnected && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-center text-xs text-destructive">
           Engine disconnected — messages will not be delivered
+        </div>
+      )}
+
+      {/* Rate Limit Banner */}
+      {rateLimitActive && engineConnected && (
+        <div className="border-b border-yellow-500/20 bg-yellow-500/5 px-4 py-2 text-center text-xs text-yellow-600 dark:text-yellow-400">
+          API rate limit detected — requests will retry automatically
         </div>
       )}
 

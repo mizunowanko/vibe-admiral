@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAdmiralHome } from "./admiral-home.js";
 
@@ -414,11 +415,9 @@ export class ProcessManager extends EventEmitter {
 
           // Persist Ship log: skip system init/hook messages (noisy, may contain env info)
           if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
-            try {
-              appendFileSync(logFilePath, line + "\n");
-            } catch {
+            appendFile(logFilePath, line + "\n").catch(() => {
               // Best-effort: don't crash on write failure
-            }
+            });
           }
         } catch {
           // Non-JSON output, ignore
@@ -434,8 +433,12 @@ export class ProcessManager extends EventEmitter {
         console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
         if (isRetryableError(text)) {
           this.emit("rate-limit", id);
+          // Don't emit "error" for retryable errors — the retry mechanism
+          // handles recovery. Emitting "error" here would broadcast the
+          // transient failure to the frontend, confusing users. (#712)
+        } else {
+          this.emit("error", id, new Error(text));
         }
-        this.emit("error", id, new Error(text));
         stderrBuffer = "";
       }
     });
