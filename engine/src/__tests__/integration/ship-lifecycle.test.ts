@@ -472,6 +472,28 @@ describe("Ship lifecycle (integration)", () => {
       const ship = shipManager.getShip(shipId);
       expect(ship!.phase).toBe("plan");
     });
+
+    it("sends ship:updated notification even when phase does not change (#683)", () => {
+      // Simulate: ship is in "coding" phase but process died
+      shipManager.updatePhase(shipId, "coding");
+      processManager.kill(shipId);
+      shipManager.notifyProcessDead(shipId);
+      phaseChanges.length = 0; // clear previous notifications
+
+      // Resume the ship — phase stays "coding" but processDead changes
+      shipManager.retryShip(shipId);
+
+      // Should have at least one notification with "Ship resumed"
+      const resumeNotification = phaseChanges.find(
+        (c) => c.detail === "Ship resumed",
+      );
+      expect(resumeNotification).toBeDefined();
+      expect(resumeNotification!.phase).toBe("coding");
+
+      // processDead should be cleared
+      const ship = shipManager.getShip(shipId);
+      expect(ship!.processDead).toBe(false);
+    });
   });
 
   describe("ship queries", () => {

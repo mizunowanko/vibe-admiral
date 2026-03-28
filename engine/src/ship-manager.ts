@@ -1130,6 +1130,11 @@ export class ShipManager {
     // Send RESUME event to Actor (transitions from stopped to previous phase)
     this.actorManager?.send(shipId, { type: "RESUME" });
 
+    // Notify frontend immediately — processDead changed from true to false,
+    // but updatePhase() inside doSpawn() won't fire if the phase hasn't changed.
+    // This mirrors notifyProcessDead() which notifies without changing the phase.
+    this.onPhaseChange?.(shipId, ship.phase, "Ship resumed");
+
     const doSpawn = () => {
       // Clear rate limit flag after successful backoff wait
       if (backoffMs > 0) {
