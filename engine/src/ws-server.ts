@@ -359,6 +359,29 @@ export class EngineServer {
               type: streamType,
               data: { fleetId, message: parsed },
             });
+          } else if (
+            parsed.type === "tool_result" &&
+            parsed.toolUseId
+          ) {
+            // Fallback: complete dispatch by matching tool_use_id (#703).
+            // This handles cases where task_notification is missing or empty.
+            const dispatch = manager.updateDispatchStatus(
+              fleetId,
+              parsed.toolUseId as string,
+              "completed",
+              parsed.content,
+            );
+            if (dispatch) {
+              this.broadcast({
+                type: `${role}:dispatch-completed`,
+                data: { fleetId, dispatch },
+              });
+            }
+            manager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: streamType,
+              data: { fleetId, message: parsed },
+            });
           } else if (parsed.type !== "result") {
             manager.addToHistory(fleetId, parsed);
             this.broadcast({
