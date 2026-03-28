@@ -140,6 +140,13 @@ export interface Fleet {
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
+// === Gate Intent (Escort pre-verdict declaration) ===
+export interface GateIntent {
+  verdict: "approve" | "reject";
+  feedback?: string;
+  declaredAt: string;
+}
+
 // === Ship ===
 export interface Ship {
   id: string;

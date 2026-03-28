@@ -447,6 +447,33 @@ async function handleShipRoute(
     return;
   }
 
+  // POST /api/ship/:shipId/gate-intent — Escort declares verdict intent before actual verdict
+  // This is a fallback mechanism: if the Escort dies before calling gate-verdict,
+  // the Engine can use this declared intent to auto-approve instead of reverting.
+  if (action === "gate-intent") {
+    const verdict = body.verdict as string | undefined;
+    if (verdict !== "approve" && verdict !== "reject") {
+      sendJson(res, 400, { ok: false, error: 'verdict must be "approve" or "reject"' });
+      return;
+    }
+
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    const escortManager = deps.getEscortManager();
+    escortManager.setGateIntent(shipId, {
+      verdict,
+      feedback: body.feedback as string | undefined,
+      declaredAt: new Date().toISOString(),
+    });
+
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
   // POST /api/ship/:shipId/gate-verdict — Escort submits gate result
   if (action === "gate-verdict") {
     const verdict = body.verdict as string | undefined;
@@ -494,6 +521,10 @@ async function handleShipRoute(
 
     shipManager.syncPhaseFromDb(shipId);
     shipManager.clearGateCheck(shipId);
+
+    // Clear gate intent — verdict was successfully submitted
+    const escortMgr = deps.getEscortManager();
+    escortMgr.clearGateIntent(shipId);
 
     sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;

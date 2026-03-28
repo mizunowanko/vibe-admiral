@@ -81,23 +81,14 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    - 実現可能で適切なスコープか
    - re-review の場合、前回のフィードバックが反映されているか
 
-8. GitHub にレビュー結果を記録:
+8. **Gate intent を宣言**（verdict 前のフォールバック用）:
    ```bash
-   gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
-
-   <詳細なレビュー>
-
-   ### qaRequired Path Check
-   <QA_REQUIRED_PATHS が設定されている場合のみ記載>
-   - Configured patterns: <パターン一覧>
-   - Planned files matching: <マッチしたファイル一覧 or "none">
-   - Plan's qaRequired: <true or false>
-   - Check result: <PASS or FAIL (with reason)>
-
-   **Verdict: APPROVE** (or REJECT)"
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-intent \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "<approve or reject>"}'
    ```
 
-9. Engine REST API で gate verdict を送信:
+9. **Engine REST API で gate verdict を送信**（GitHub コメントより先に実行 — プロセス終了による verdict 喪失を防止）:
 
    承認の場合:
    ```bash
@@ -111,6 +102,22 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "reject", "feedback": "<修正すべき点>"}'
+   ```
+
+10. **GitHub にレビュー結果を記録**（verdict 送信後に実行）:
+   ```bash
+   gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
+
+   <詳細なレビュー>
+
+   ### qaRequired Path Check
+   <QA_REQUIRED_PATHS が設定されている場合のみ記載>
+   - Configured patterns: <パターン一覧>
+   - Planned files matching: <マッチしたファイル一覧 or "none">
+   - Plan's qaRequired: <true or false>
+   - Check result: <PASS or FAIL (with reason)>
+
+   **Verdict: APPROVE** (or REJECT)"
    ```
 
 ## Review Guidelines
