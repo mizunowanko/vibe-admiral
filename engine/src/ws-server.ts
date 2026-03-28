@@ -33,7 +33,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, HeadsUpNotification } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -179,6 +179,9 @@ export class EngineServer {
           type: "flagship:stream",
           data: { fleetId, message: resultMessage },
         });
+      },
+      deliverHeadsUp: (notification: HeadsUpNotification) => {
+        return this.deliverHeadsUp(notification);
       },
     });
 
@@ -711,6 +714,68 @@ export class EngineServer {
         this.processManager.sendMessage(flagshipId, `[Escort Death] ${message}`);
       }
     });
+  }
+
+  /** Deliver a heads-up notification from one Commander to another. */
+  private deliverHeadsUp(notification: HeadsUpNotification): boolean {
+    const targetManager: CommanderManager = notification.to === "flagship"
+      ? this.flagshipManager
+      : this.dockManager;
+
+    if (!targetManager.hasSession(notification.fleetId)) {
+      return false;
+    }
+
+    const fromLabel = notification.from === "flagship" ? "Flagship" : "Dock";
+    const toLabel = notification.to === "flagship" ? "Flagship" : "Dock";
+
+    // Build human-readable message for Commander stdin
+    const lines = [
+      `[heads-up from ${fromLabel}]`,
+      `Summary: ${notification.summary}`,
+      `Severity: ${notification.severity}`,
+    ];
+    if (notification.shipId || notification.issueNumber !== undefined) {
+      const parts: string[] = [];
+      if (notification.shipId) parts.push(`Ship: ${notification.shipId}`);
+      if (notification.issueNumber !== undefined) parts.push(`Issue #${notification.issueNumber}`);
+      lines.push(parts.join(" / "));
+    }
+    lines.push(`Investigation needed: ${notification.needsInvestigation ? "yes" : "no"}`);
+    lines.push("");
+    lines.push("Please create an Issue if appropriate, or take other action.");
+    const textContent = lines.join("\n");
+
+    // Create system message for history + frontend
+    const headsUpMessage: StreamMessage = {
+      type: "system",
+      subtype: "heads-up",
+      content: textContent,
+      meta: {
+        category: "heads-up",
+        ...(notification.shipId ? { shipId: notification.shipId } : {}),
+        ...(notification.issueNumber !== undefined ? { issueNumber: notification.issueNumber } : {}),
+      },
+      timestamp: Date.now(),
+    };
+
+    // Add to target Commander's history
+    targetManager.addToHistory(notification.fleetId, headsUpMessage);
+
+    // Broadcast to frontend
+    this.broadcast({
+      type: `${notification.to}:stream`,
+      data: { fleetId: notification.fleetId, message: headsUpMessage },
+    });
+
+    // Send to target Commander's stdin if running
+    const targetId = `${notification.to}-${notification.fleetId}`;
+    if (this.processManager.isRunning(targetId)) {
+      this.processManager.sendMessage(targetId, textContent);
+    }
+
+    console.log(`[engine] Heads-up delivered: ${fromLabel} → ${toLabel} (fleet ${notification.fleetId.slice(0, 8)}...): ${notification.summary.slice(0, 80)}`);
+    return true;
   }
 
   private async handleMessage(
