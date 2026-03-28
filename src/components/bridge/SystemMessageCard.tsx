@@ -51,6 +51,7 @@ const STYLE: Record<
   "request-result": null,
   "dispatch-log": null,
   "escort-log": null,
+  "rate-limit-status": null,
 };
 
 interface SystemMessageCardProps {

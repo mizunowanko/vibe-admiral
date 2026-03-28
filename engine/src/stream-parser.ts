@@ -185,6 +185,12 @@ function parseStreamMessageInner(
       };
     }
 
+    // Claude CLI emits rate_limit_event on stdout during rate limiting.
+    // Drop these — the Engine handles retry automatically. (#712)
+    case "rate_limit_event":
+    case "error":
+      return null;
+
     default:
       return null;
   }
