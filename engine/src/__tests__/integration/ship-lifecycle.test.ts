@@ -460,6 +460,18 @@ describe("Ship lifecycle (integration)", () => {
       ship = shipManager.getShip(shipId);
       expect(ship!.retryCount).toBe(2);
     });
+
+    it("preserves current phase for non-stopped process-dead ship with session (#689)", () => {
+      // Ship is in "plan" phase (initial), set sessionId, kill process
+      shipManager.setSessionId(shipId, "sess-plan");
+      processManager.kill(shipId);
+
+      // retryShip should preserve "plan", NOT fall back to "coding"
+      const retried = shipManager.retryShip(shipId);
+      expect(retried).not.toBeNull();
+      const ship = shipManager.getShip(shipId);
+      expect(ship!.phase).toBe("plan");
+    });
   });
 
   describe("ship queries", () => {

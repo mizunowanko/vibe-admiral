@@ -207,6 +207,29 @@ export class ShipActorManager {
   }
 
   /**
+   * Assert that the XState actor phase matches the expected DB phase.
+   * Logs a warning on mismatch (non-blocking diagnostic for #689).
+   * Returns true if consistent, false if mismatched or actor not found.
+   */
+  assertPhaseConsistency(shipId: string, dbPhase: Phase): boolean {
+    const actorPhase = this.getPhase(shipId);
+    if (actorPhase === undefined) {
+      console.warn(
+        `[ship-actor-manager] Phase consistency check: no actor for Ship ${shipId.slice(0, 8)}...`,
+      );
+      return false;
+    }
+    if (actorPhase !== dbPhase) {
+      console.error(
+        `[ship-actor-manager] Phase consistency MISMATCH for Ship ${shipId.slice(0, 8)}...: ` +
+        `XState=${actorPhase}, DB=${dbPhase}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Replay events to advance the XState actor from "plan" to the target phase.
    * Side effects are suppressed during replay.
    */

@@ -403,8 +403,10 @@ export const shipMachine = setup({
             }),
           },
           {
-            // Default: resume to coding if phaseBeforeStopped is unknown
-            target: "coding",
+            // Default: resume to plan if phaseBeforeStopped is unknown.
+            // "plan" is the safe initial state — resuming to "coding" would
+            // skip plan-gate, causing XState/DB split-brain (#689).
+            target: "plan",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,
