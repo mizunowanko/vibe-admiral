@@ -108,17 +108,29 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
 
 function DispatchSection({
   dispatches,
-  onFocus,
+  focusedSessionId,
+  onFocusDispatch,
 }: {
   dispatches: Dispatch[];
-  onFocus: () => void;
+  focusedSessionId: string | null;
+  onFocusDispatch: (dispatchId: string) => void;
 }) {
   if (dispatches.length === 0) return null;
   return (
-    <div className="mt-1.5 grid grid-cols-1 gap-1">
-      {dispatches.map((d) => (
-        <DispatchCard key={d.id} dispatch={d} onClick={onFocus} />
-      ))}
+    <div className="px-3 py-2">
+      <h3 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+        Dispatches
+      </h3>
+      <div className="grid grid-cols-1 gap-1">
+        {dispatches.map((d) => (
+          <DispatchCard
+            key={d.id}
+            dispatch={d}
+            isFocused={focusedSessionId === `dispatch-${d.id}`}
+            onClick={() => onFocusDispatch(d.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -139,25 +151,17 @@ export const SessionCardList = memo(function SessionCardList({
   const dockSession = sessions.get(dockSessionId);
   const flagshipSession = sessions.get(flagshipSessionId);
 
-  const dockDispatches = useMemo(() => {
+  const allDispatches = useMemo(() => {
     const result: Dispatch[] = [];
     for (const d of dispatches.values()) {
-      if (d.parentRole === "dock" && d.fleetId === fleetId) result.push(d);
-    }
-    return result.sort((a, b) => b.startedAt - a.startedAt);
-  }, [dispatches, fleetId]);
-
-  const flagshipDispatches = useMemo(() => {
-    const result: Dispatch[] = [];
-    for (const d of dispatches.values()) {
-      if (d.parentRole === "flagship" && d.fleetId === fleetId) result.push(d);
+      if (d.fleetId === fleetId) result.push(d);
     }
     return result.sort((a, b) => b.startedAt - a.startedAt);
   }, [dispatches, fleetId]);
 
   return (
     <div className="w-[420px] shrink-0 border-l border-border bg-background/50 flex flex-col min-h-0">
-      {/* Scrollable sections: Commander cards → Ships */}
+      {/* Scrollable sections: Commander cards → Dispatches → Ships */}
       <ScrollArea className="flex-1">
         <div className="divide-y divide-border">
           {/* Dock */}
@@ -169,10 +173,6 @@ export const SessionCardList = memo(function SessionCardList({
               <SessionCard
                 session={dockSession}
                 isFocused={focusedSessionId === dockSessionId}
-                onFocus={() => setFocus(dockSessionId)}
-              />
-              <DispatchSection
-                dispatches={dockDispatches}
                 onFocus={() => setFocus(dockSessionId)}
               />
             </div>
@@ -189,12 +189,15 @@ export const SessionCardList = memo(function SessionCardList({
                 isFocused={focusedSessionId === flagshipSessionId}
                 onFocus={() => setFocus(flagshipSessionId)}
               />
-              <DispatchSection
-                dispatches={flagshipDispatches}
-                onFocus={() => setFocus(flagshipSessionId)}
-              />
             </div>
           )}
+
+          {/* Dispatches (separate section) */}
+          <DispatchSection
+            dispatches={allDispatches}
+            focusedSessionId={focusedSessionId}
+            onFocusDispatch={(id) => setFocus(`dispatch-${id}`)}
+          />
 
           {/* Ships */}
           <ShipsSection fleetId={fleetId} />

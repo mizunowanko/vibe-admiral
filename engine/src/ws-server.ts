@@ -28,6 +28,7 @@ import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { EscortManager } from "./escort-manager.js";
 import { ShipActorManager } from "./ship-actor-manager.js";
+import { DispatchManager } from "./dispatch-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
@@ -49,6 +50,7 @@ export class EngineServer {
   private requestHandler: FlagshipRequestHandler;
   private escortManager: EscortManager;
   private actorManager: ShipActorManager;
+  private dispatchManager: DispatchManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
@@ -73,6 +75,7 @@ export class EngineServer {
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
     this.escortManager = new EscortManager(this.processManager, this.shipManager, () => this.fleetDb);
     this.actorManager = new ShipActorManager();
+    this.dispatchManager = new DispatchManager(this.processManager);
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
 
     // Wire up ShipActorManager to ShipManager, EscortManager, and StateSync
@@ -98,11 +101,51 @@ export class EngineServer {
       },
     });
 
+    // Dispatch completion handler: notify parent Commander via stdin + broadcast
+    this.dispatchManager.setOnCompleteHandler((dispatch) => {
+      const commanderId = `${dispatch.parentRole}-${dispatch.fleetId}`;
+      const statusLabel = dispatch.status === "completed" ? "completed" : "failed";
+      const summary = dispatch.result
+        ? `[Dispatch ${statusLabel}] "${dispatch.name}": ${dispatch.result.slice(0, 2000)}`
+        : `[Dispatch ${statusLabel}] "${dispatch.name}"`;
+
+      // Send result to Commander stdin if running
+      if (this.processManager.isRunning(commanderId)) {
+        this.processManager.sendMessage(commanderId, summary);
+      }
+
+      // Inject into Commander chat history
+      const manager: CommanderManager = dispatch.parentRole === "flagship"
+        ? this.flagshipManager
+        : this.dockManager;
+      const statusMessage: StreamMessage = {
+        type: "system",
+        subtype: "dispatch-log",
+        content: summary,
+        timestamp: Date.now(),
+      };
+      manager.addToHistory(dispatch.fleetId, statusMessage);
+      this.broadcast({
+        type: `${dispatch.parentRole}:stream`,
+        data: { fleetId: dispatch.fleetId, message: statusMessage },
+      });
+
+      // Broadcast dispatch:completed event
+      this.broadcast({
+        type: "dispatch:completed",
+        data: {
+          fleetId: dispatch.fleetId,
+          dispatch: this.dispatchManager.toDispatch(dispatch),
+        },
+      });
+    });
+
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
     const apiHandler = createApiHandler({
       requestHandler: this.requestHandler,
       getDatabase: () => this.fleetDb,
       getShipManager: () => this.shipManager,
+      getDispatchManager: () => this.dispatchManager,
       getEscortManager: () => this.escortManager,
       getActorManager: () => this.actorManager,
       getCommanderHistory: (role, fleetId) => {
@@ -213,6 +256,33 @@ export class EngineServer {
 
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
+      // Route Dispatch stream data to frontend (independent process)
+      if (this.dispatchManager.isDispatchProcess(id)) {
+        const dispatch = this.dispatchManager.getDispatch(id);
+        if (!dispatch) return;
+
+        const parsed = parseStreamMessage(msg);
+        if (parsed) {
+          // Capture result text for completion notification
+          if (parsed.type === "result" && parsed.content) {
+            this.dispatchManager.setResult(id, parsed.content);
+          }
+          // Stream all non-result messages to frontend
+          if (parsed.type !== "result") {
+            this.broadcast({
+              type: "dispatch:stream",
+              data: {
+                id,
+                fleetId: dispatch.fleetId,
+                parentRole: dispatch.parentRole,
+                message: parsed,
+              },
+            });
+          }
+        }
+        return;
+      }
+
       // Route Escort stream data to frontend (separate from Ship stream)
       if (this.escortManager.isEscortProcess(id)) {
         const parentShipId = this.escortManager.findShipIdByEscortId(id);
@@ -307,46 +377,6 @@ export class EngineServer {
               type: questionType,
               data: { fleetId, message: questionMessage },
             });
-          } else if (
-            parsed.type === "tool_use" &&
-            parsed.tool === "Agent"
-          ) {
-            // Dispatch sub-agent launched — register and notify frontend
-            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
-            const toolUseId = parsed.toolUseId as string | undefined;
-            const dispatchName = (toolInput?.description as string) ?? "dispatch";
-            if (toolUseId) {
-              const dispatch = manager.registerDispatch(fleetId, toolUseId, dispatchName);
-              if (dispatch) {
-                this.broadcast({
-                  type: `${role}:dispatch-started`,
-                  data: { fleetId, dispatch },
-                });
-              }
-            }
-            manager.addToHistory(fleetId, parsed);
-            this.broadcast({
-              type: streamType,
-              data: { fleetId, message: parsed },
-            });
-          } else if (
-            parsed.type === "system" &&
-            (parsed.subtype === "dispatch-log" || parsed.subtype === "task-notification")
-          ) {
-            // Dispatch completed — update status and notify frontend
-            const result = parsed.content;
-            const dispatch = manager.completeLatestDispatch(fleetId, "completed", result);
-            if (dispatch) {
-              this.broadcast({
-                type: `${role}:dispatch-completed`,
-                data: { fleetId, dispatch },
-              });
-            }
-            manager.addToHistory(fleetId, parsed);
-            this.broadcast({
-              type: streamType,
-              data: { fleetId, message: parsed },
-            });
           } else if (parsed.type !== "result") {
             manager.addToHistory(fleetId, parsed);
             this.broadcast({
@@ -393,6 +423,13 @@ export class EngineServer {
     });
 
     this.processManager.on("exit", (id: string, code: number | null) => {
+      // Handle Dispatch process exit
+      if (this.dispatchManager.isDispatchProcess(id)) {
+        console.log(`[ws-server] Dispatch ${id.slice(0, 16)}... exited (code=${code})`);
+        this.dispatchManager.onProcessExit(id, code);
+        return;
+      }
+
       // Handle Escort-Ship process exit
       if (this.escortManager.isEscortProcess(id)) {
         const parentShipId = this.escortManager.findShipIdByEscortId(id);
@@ -1336,6 +1373,7 @@ export class EngineServer {
       clearInterval(this.processLivenessTimer);
       this.processLivenessTimer = null;
     }
+    this.dispatchManager.killAll();
     this.escortManager.killAll();
     this.actorManager.stopAll();
     this.shipManager.stopAll();

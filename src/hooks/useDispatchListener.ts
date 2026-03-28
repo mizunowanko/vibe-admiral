@@ -1,45 +1,40 @@
 import { useEffect } from "react";
 import { wsClient } from "@/lib/ws-client";
 import { useSessionStore } from "@/stores/sessionStore";
-import type { ServerMessage, Dispatch } from "@/types";
+import type { ServerMessage, Dispatch, StreamMessage, CommanderRole } from "@/types";
 
 /**
- * Listens for Dispatch sub-agent events from both Dock and Flagship,
- * regardless of which Commander session is currently focused.
+ * Listens for Dispatch events from Engine-managed independent processes.
+ * Handles dispatch:stream (log messages) and dispatch:completed events.
  *
  * Mount this in a component that is always rendered when a fleet is
- * active (e.g. SessionCardList) so dispatch cards stay up-to-date.
+ * active (e.g. SessionCardList) so dispatch cards and logs stay up-to-date.
  */
 export function useDispatchListener(fleetId: string | null) {
   const addDispatch = useSessionStore((s) => s.addDispatch);
   const updateDispatch = useSessionStore((s) => s.updateDispatch);
+  const addDispatchLog = useSessionStore((s) => s.addDispatchLog);
+  const registerSession = useSessionStore((s) => s.registerSession);
 
   useEffect(() => {
     if (!fleetId) return;
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
-      // Dock dispatch events
-      if (msg.type === "dock:dispatch-started") {
-        const data = msg.data as { fleetId: string; dispatch: Dispatch };
+      // Dispatch stream: log messages from independent CLI process
+      if (msg.type === "dispatch:stream") {
+        const data = msg.data as {
+          id: string;
+          fleetId: string;
+          parentRole: CommanderRole;
+          message: StreamMessage;
+        };
         if (data.fleetId === fleetId) {
-          addDispatch(data.dispatch);
-        }
-      }
-      if (msg.type === "dock:dispatch-completed") {
-        const data = msg.data as { fleetId: string; dispatch: Dispatch };
-        if (data.fleetId === fleetId) {
-          updateDispatch(data.dispatch);
+          addDispatchLog(data.id, data.message);
         }
       }
 
-      // Flagship dispatch events
-      if (msg.type === "flagship:dispatch-started") {
-        const data = msg.data as { fleetId: string; dispatch: Dispatch };
-        if (data.fleetId === fleetId) {
-          addDispatch(data.dispatch);
-        }
-      }
-      if (msg.type === "flagship:dispatch-completed") {
+      // Dispatch completed: process exited
+      if (msg.type === "dispatch:completed") {
         const data = msg.data as { fleetId: string; dispatch: Dispatch };
         if (data.fleetId === fleetId) {
           updateDispatch(data.dispatch);
@@ -48,5 +43,5 @@ export function useDispatchListener(fleetId: string | null) {
     });
 
     return unsub;
-  }, [fleetId, addDispatch, updateDispatch]);
+  }, [fleetId, addDispatch, updateDispatch, addDispatchLog, registerSession]);
 }

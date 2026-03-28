@@ -306,8 +306,11 @@ export interface EscortProcess {
   completedAt: string | null;
 }
 
-// === Dispatch (Commander sub-agent launched via Agent tool) ===
+// === Dispatch (Engine-managed independent CLI process) ===
 export type DispatchStatus = "running" | "completed" | "failed";
+
+/** Dispatch type determines tool permissions. */
+export type DispatchType = "investigate" | "modify";
 
 export interface Dispatch {
   id: string;
@@ -315,6 +318,21 @@ export interface Dispatch {
   fleetId: string;
   name: string;
   status: DispatchStatus;
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
+}
+
+/** Full Dispatch process state tracked by DispatchManager. */
+export interface DispatchProcess {
+  id: string;
+  fleetId: string;
+  parentRole: CommanderRole;
+  name: string;
+  prompt: string;
+  type: DispatchType;
+  status: DispatchStatus;
+  cwd: string;
   startedAt: number;
   completedAt?: number;
   result?: string;
