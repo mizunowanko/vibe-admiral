@@ -212,6 +212,7 @@ export interface StreamMessage {
   toolInput?: Record<string, unknown>;
   subtype?: StreamMessageSubtype;
   meta?: SystemMessageMeta;
+  timestamp?: number;
   [key: string]: unknown;
 }
 
