@@ -32,7 +32,17 @@ export function parseStreamMessage(
   raw: Record<string, unknown>,
 ): StreamMessage | null {
   const type = raw.type as string | undefined;
+  const parsed = parseStreamMessageInner(raw, type);
+  if (parsed) {
+    parsed.timestamp = Date.now();
+  }
+  return parsed;
+}
 
+function parseStreamMessageInner(
+  raw: Record<string, unknown>,
+  type: string | undefined,
+): StreamMessage | null {
   switch (type) {
     case "assistant": {
       const msg = raw.message as
