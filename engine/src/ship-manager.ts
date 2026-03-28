@@ -1130,6 +1130,11 @@ export class ShipManager {
     // Send RESUME event to Actor (transitions from stopped to previous phase)
     this.actorManager?.send(shipId, { type: "RESUME" });
 
+    // Notify frontend immediately — processDead changed from true to false,
+    // but updatePhase() inside doSpawn() won't fire if the phase hasn't changed.
+    // This mirrors notifyProcessDead() which notifies without changing the phase.
+    this.onPhaseChange?.(shipId, ship.phase, "Ship resumed");
+
     const doSpawn = () => {
       // Clear rate limit flag after successful backoff wait
       if (backoffMs > 0) {
@@ -1151,7 +1156,13 @@ export class ShipManager {
           shipEnv,
           extraPrompt,
         );
-        const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "coding";
+        // For stopped ships, restore to the phase before STOP.
+        // For non-stopped ships (process died without formal STOP, e.g. rate limit),
+        // preserve the current DB phase — do NOT fall back to "coding" which would
+        // skip gate phases and cause XState/DB split-brain (#689).
+        const previousPhase = ship.phase === "stopped"
+          ? (this.fleetDb?.getPhaseBeforeStopped(shipId) ?? ship.phase)
+          : ship.phase;
         this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
       } else {
         // No session to resume — re-sortie

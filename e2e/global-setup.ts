@@ -95,4 +95,9 @@ export default async function globalSetup(config: FullConfig) {
   process.env.E2E_ENGINE_PORT = String(enginePort);
   process.env.E2E_VITE_PORT = String(vitePort);
   process.env.E2E_ADMIRAL_HOME = admiralHome;
+
+  // Log isolation summary for debugging
+  console.log(`[E2E isolation] ADMIRAL_HOME: ${admiralHome}`);
+  console.log(`[E2E isolation] Engine port: ${enginePort} (dev default: 9721)`);
+  console.log(`[E2E isolation] Vite port:   ${vitePort} (dev default: 1420)`);
 }

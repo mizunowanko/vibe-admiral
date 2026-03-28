@@ -333,6 +333,35 @@ describe("ShipActorManager", () => {
     });
   });
 
+  describe("assertPhaseConsistency", () => {
+    it("returns true when XState phase matches DB phase", () => {
+      manager.createActor(DEFAULT_INPUT);
+      expect(manager.assertPhaseConsistency("ship-1", "plan")).toBe(true);
+      manager.stopAll();
+    });
+
+    it("returns false and logs error on phase mismatch", () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      // XState is in "plan", but DB says "coding" — mismatch
+      expect(manager.assertPhaseConsistency("ship-1", "coding")).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Phase consistency MISMATCH"),
+      );
+      errorSpy.mockRestore();
+      manager.stopAll();
+    });
+
+    it("returns false when actor does not exist", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(manager.assertPhaseConsistency("nonexistent", "plan")).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("no actor for Ship"),
+      );
+      warnSpy.mockRestore();
+    });
+  });
+
   describe("side effects", () => {
     it("fires onPhaseChange when actor transitions", () => {
       manager.createActor(DEFAULT_INPUT);

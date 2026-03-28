@@ -8,15 +8,19 @@ export const test = base.extend<{
   admiralHome: string;
 }>({
   enginePort: async ({}, use) => {
-    const port = parseInt(process.env.E2E_ENGINE_PORT ?? "9721", 10);
-    await use(port);
+    const raw = process.env.E2E_ENGINE_PORT;
+    if (!raw) throw new Error("E2E_ENGINE_PORT not set — global-setup may have failed");
+    await use(parseInt(raw, 10));
   },
   vitePort: async ({}, use) => {
-    const port = parseInt(process.env.E2E_VITE_PORT ?? "1420", 10);
-    await use(port);
+    const raw = process.env.E2E_VITE_PORT;
+    if (!raw) throw new Error("E2E_VITE_PORT not set — global-setup may have failed");
+    await use(parseInt(raw, 10));
   },
   admiralHome: async ({}, use) => {
-    await use(process.env.E2E_ADMIRAL_HOME ?? "");
+    const home = process.env.E2E_ADMIRAL_HOME;
+    if (!home) throw new Error("E2E_ADMIRAL_HOME not set — global-setup may have failed");
+    await use(home);
   },
   baseURL: async ({ vitePort }, use) => {
     await use(`http://localhost:${vitePort}`);
