@@ -1,14 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Session, SessionType, Dispatch } from "@/types";
+import type { Session, SessionType, Dispatch, StreamMessage, CommanderRole } from "@/types";
 
 interface SessionState {
   sessions: Map<string, Session>;
   focusedSessionId: string | null;
   /** Per-session input drafts preserved across component remounts. */
   inputDrafts: Record<string, string>;
-  /** Dispatch sub-agents keyed by dispatch ID, grouped per commander session. */
+  /** Dispatch processes keyed by dispatch ID. */
   dispatches: Map<string, Dispatch>;
+  /** Dispatch logs keyed by dispatch process ID. */
+  dispatchLogs: Map<string, StreamMessage[]>;
 
   registerSession: (session: Session) => void;
   unregisterSession: (id: string) => void;
@@ -16,9 +18,12 @@ interface SessionState {
   setInputDraft: (sessionId: string, value: string) => void;
   addDispatch: (dispatch: Dispatch) => void;
   updateDispatch: (dispatch: Dispatch) => void;
+  addDispatchLog: (dispatchId: string, message: StreamMessage) => void;
 
   /** Get the focused session object. */
   getFocusedSession: () => Session | null;
+  /** Get dispatches for a specific fleet. */
+  getDispatchesForFleet: (fleetId: string) => Dispatch[];
   /** Get dispatches for a specific commander session. */
   getDispatchesForSession: (sessionId: string) => Dispatch[];
 }
@@ -50,6 +55,23 @@ export function createCommanderSession(
   };
 }
 
+/** Create a Dispatch session object. */
+export function createDispatchSession(
+  dispatchId: string,
+  fleetId: string,
+  name: string,
+  parentRole: CommanderRole,
+): Session {
+  return {
+    id: `dispatch-${dispatchId}`,
+    type: "dispatch",
+    fleetId,
+    label: name,
+    hasInput: false,
+    parentSessionId: `${parentRole}-${fleetId}`,
+  };
+}
+
 /** Create a Ship session object. */
 export function createShipSession(
   shipId: string,
@@ -74,6 +96,7 @@ export const useSessionStore = create<SessionState>()(
       focusedSessionId: null,
       inputDrafts: {},
       dispatches: new Map(),
+      dispatchLogs: new Map(),
 
       registerSession: (session) => {
         set((state) => {
@@ -125,18 +148,38 @@ export const useSessionStore = create<SessionState>()(
         });
       },
 
+      addDispatchLog: (dispatchId, message) => {
+        set((state) => {
+          const dispatchLogs = new Map(state.dispatchLogs);
+          const existing = dispatchLogs.get(dispatchId) ?? [];
+          dispatchLogs.set(dispatchId, [...existing, message]);
+          return { dispatchLogs };
+        });
+      },
+
       getFocusedSession: () => {
         const { sessions, focusedSessionId } = get();
         if (!focusedSessionId) return null;
         return sessions.get(focusedSessionId) ?? null;
       },
 
+      getDispatchesForFleet: (fleetId) => {
+        const { dispatches } = get();
+        const results: Dispatch[] = [];
+        for (const d of dispatches.values()) {
+          if (d.fleetId === fleetId) {
+            results.push(d);
+          }
+        }
+        return results;
+      },
+
       getDispatchesForSession: (sessionId) => {
         const { dispatches } = get();
         const results: Dispatch[] = [];
         for (const d of dispatches.values()) {
-          const dispatchSessionId = `${d.parentRole}-${d.fleetId}`;
-          if (dispatchSessionId === sessionId) {
+          const parentSessionId = `${d.parentRole}-${d.fleetId}`;
+          if (parentSessionId === sessionId) {
             results.push(d);
           }
         }

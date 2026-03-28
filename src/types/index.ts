@@ -126,7 +126,7 @@ export interface Ship {
   escorts?: EscortInfo[];
 }
 
-// === Dispatch (Commander sub-agent launched via Task tool) ===
+// === Dispatch (Engine-managed independent CLI process) ===
 export type DispatchStatus = "running" | "completed" | "failed";
 
 export interface Dispatch {
@@ -138,6 +138,11 @@ export interface Dispatch {
   startedAt: number;
   completedAt?: number;
   result?: string;
+}
+
+/** Build a deterministic session ID for dispatch sessions. */
+export function dispatchSessionId(dispatchId: string): string {
+  return `dispatch-${dispatchId}`;
 }
 
 // === Issue ===
@@ -270,19 +275,16 @@ export type ServerMessage =
       data: { fleetId: string };
     }
   | {
-      type: "flagship:dispatch-started";
-      data: { fleetId: string; dispatch: Dispatch };
+      type: "dispatch:stream";
+      data: {
+        id: string;
+        fleetId: string;
+        parentRole: CommanderRole;
+        message: StreamMessage;
+      };
     }
   | {
-      type: "flagship:dispatch-completed";
-      data: { fleetId: string; dispatch: Dispatch };
-    }
-  | {
-      type: "dock:dispatch-started";
-      data: { fleetId: string; dispatch: Dispatch };
-    }
-  | {
-      type: "dock:dispatch-completed";
+      type: "dispatch:completed";
       data: { fleetId: string; dispatch: Dispatch };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }

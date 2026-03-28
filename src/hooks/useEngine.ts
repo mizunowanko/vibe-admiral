@@ -7,9 +7,10 @@ import {
   useSessionStore,
   createCommanderSession,
   createShipSession,
+  createDispatchSession,
   commanderSessionId,
 } from "@/stores/sessionStore";
-import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType } from "@/types";
+import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -193,6 +194,34 @@ export function useEngine() {
           }
           break;
         }
+
+        case "dispatch:stream": {
+          // Register dispatch session on first stream message
+          const dispatchStreamData = msg.data as {
+            id: string;
+            fleetId: string;
+            parentRole: CommanderRole;
+          };
+          const existingSession = useSessionStore.getState().sessions.get(`dispatch-${dispatchStreamData.id}`);
+          if (!existingSession) {
+            const dispatch = useSessionStore.getState().dispatches.get(dispatchStreamData.id);
+            const dispatchName = dispatch?.name ?? "Dispatch";
+            registerSession(
+              createDispatchSession(
+                dispatchStreamData.id,
+                dispatchStreamData.fleetId,
+                dispatchName,
+                dispatchStreamData.parentRole,
+              ),
+            );
+          }
+          // Log routing handled by useDispatchListener
+          break;
+        }
+
+        case "dispatch:completed":
+          // Handled by useDispatchListener
+          break;
 
         case "flagship:stream":
         case "dock:stream":
