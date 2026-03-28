@@ -122,7 +122,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
@@ -231,7 +231,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),

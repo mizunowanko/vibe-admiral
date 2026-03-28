@@ -13,7 +13,7 @@ argument-hint: [description]
 
 1. FIRST run `gh issue list` to review ALL existing issues in the repo
 2. Break down the user's request into well-scoped issues
-3. **If investigation is needed** (code structure, affected files, bug analysis): launch a Dispatch (sub-agent) via Task tool. The Dispatch returns findings only — it does NOT create issues
+3. **If investigation is needed** (code structure, affected files, bug analysis): launch a Dispatch (sub-agent) via Agent tool. The Dispatch returns findings only — it does NOT create issues
 4. Based on Dispatch findings and user input, create issues with `gh issue create` — always include a `type/*` label
 5. Analyze dependencies: which new issues depend on existing or other new issues
 6. Add `depends-on/<number>` labels for each dependency

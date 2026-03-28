@@ -86,7 +86,7 @@ export function parseStreamMessage(
     case "system": {
       const subtype = raw.subtype as string | undefined;
       // Skip hooks, init, and task_notification — not useful for the user.
-      // Task results are already shown via TaskOutput tool_result messages.
+      // Agent results are surfaced via task_notification with chat logs.
       // If a task_notification contains a description, surface it as a compact card.
       if (subtype === "init" || subtype?.startsWith("hook")) {
         return null;

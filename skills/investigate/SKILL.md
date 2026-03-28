@@ -21,7 +21,7 @@ argument-hint: [description or issue-number]
 ## Bug Investigation Template
 
 ```
-Task(description="Dispatch: investigate bug", subagent_type="general-purpose", run_in_background=true, prompt=`
+Agent(description="Dispatch: investigate bug", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent investigating a bug.
 
 Repo: <repo>
@@ -47,7 +47,7 @@ Do NOT create issues or make any changes. Only investigate and report.
 ## Codebase Exploration Template
 
 ```
-Task(description="Dispatch: explore codebase", subagent_type="general-purpose", run_in_background=true, prompt=`
+Agent(description="Dispatch: explore codebase", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent exploring the codebase.
 
 Repo: <repo>
@@ -67,7 +67,7 @@ Output a clear summary. Do NOT create issues or make any changes.
 > **調査順序を厳守**: ソースコードを先に読んではいけない。ログなしの仮説は精度が低い。ログを見れば「実際に何が起きたか」がわかり、仮説の質が格段に上がる。ソースコードは仮説の**検証**に使うもので、仮説の**生成**に使うものではない。
 
 ```
-Task(description="Dispatch: diagnose Ship error", subagent_type="general-purpose", run_in_background=true, prompt=`
+Agent(description="Dispatch: diagnose Ship error", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent diagnosing a Ship error.
 
 Repo: <repo>
