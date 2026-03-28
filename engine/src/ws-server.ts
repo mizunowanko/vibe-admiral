@@ -531,6 +531,24 @@ export class EngineServer {
         `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — backoff will apply on next retry`,
       );
       this.shipManager.setLastRateLimitAt(id, Date.now());
+
+      // Notify frontend with a non-error status so users know a retry is
+      // happening instead of seeing a scary red error message. (#712)
+      const ship = this.shipManager.getShip(id);
+      if (ship) {
+        this.broadcast({
+          type: "ship:stream",
+          data: {
+            id,
+            message: {
+              type: "system" as const,
+              subtype: "rate-limit-status" as const,
+              content: "Rate limit detected — retrying automatically...",
+              timestamp: Date.now(),
+            },
+          },
+        });
+      }
     });
 
     this.processManager.on("error", (id: string, error: Error) => {

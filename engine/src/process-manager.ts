@@ -434,8 +434,12 @@ export class ProcessManager extends EventEmitter {
         console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
         if (isRetryableError(text)) {
           this.emit("rate-limit", id);
+          // Don't emit "error" for retryable errors — the retry mechanism
+          // handles recovery. Emitting "error" here would broadcast the
+          // transient failure to the frontend, confusing users. (#712)
+        } else {
+          this.emit("error", id, new Error(text));
         }
-        this.emit("error", id, new Error(text));
         stderrBuffer = "";
       }
     });
