@@ -84,6 +84,35 @@ curl -s http://localhost:9721/api/restart -X POST
 - Ship phases persist in DB and survive the restart
 - **Safety**: Always confirm with the human user before calling this endpoint
 
+### 11. commander-notify — Send Heads-Up Notification to Another Commander
+
+```bash
+curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/commander-notify \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "from": "flagship",
+    "to": "dock",
+    "fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'",
+    "summary": "Ship #42 が planning-gate で 3 回連続 reject されている",
+    "shipId": "ship-uuid",
+    "issueNumber": 42,
+    "severity": "warning",
+    "needsInvestigation": true
+  }'
+```
+
+- `from` (required): Sender role — `"flagship"` or `"dock"`
+- `to` (required): Target role — `"dock"` or `"flagship"` (must differ from `from`)
+- `fleetId` (required): Fleet ID
+- `summary` (required): Problem description
+- `severity` (required): `"info"`, `"warning"`, or `"urgent"`
+- `needsInvestigation` (required): Whether Dispatch investigation is recommended
+- `shipId` (optional): Related Ship ID
+- `issueNumber` (optional): Related Issue number
+- Returns 200 if delivered, 503 if target Commander is not running
+
+**Use case**: Flagship discovers a Ship problem → sends heads-up to Dock → Dock creates/triages an Issue. This keeps Flagship focused on Ship management while Dock handles Issue management.
+
 ## Error Handling
 
 All endpoints return structured JSON:

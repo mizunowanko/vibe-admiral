@@ -6,7 +6,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { DispatchManager } from "./dispatch-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole } from "./types.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole, HeadsUpNotification, HeadsUpSeverity } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
 
@@ -38,6 +38,7 @@ interface ApiDeps {
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
+  deliverHeadsUp: (notification: HeadsUpNotification) => boolean;
   requestRestart: () => void;
 }
 
@@ -114,6 +115,32 @@ function validatePRReviewResultRequest(body: unknown): FlagshipRequest | string 
     (result as Extract<FlagshipRequest, { request: "pr-review-result" }>).comments = b.comments;
   }
   return result;
+}
+
+const VALID_SEVERITIES = new Set<HeadsUpSeverity>(["info", "warning", "urgent"]);
+
+function validateHeadsUpRequest(body: unknown): HeadsUpNotification | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (b.from !== "dock" && b.from !== "flagship") return 'from must be "dock" or "flagship"';
+  if (b.to !== "dock" && b.to !== "flagship") return 'to must be "dock" or "flagship"';
+  if (b.from === b.to) return "from and to must be different";
+  if (typeof b.fleetId !== "string" || !b.fleetId) return "fleetId is required";
+  if (typeof b.summary !== "string" || !b.summary) return "summary is required";
+  if (!VALID_SEVERITIES.has(b.severity as HeadsUpSeverity)) return 'severity must be "info", "warning", or "urgent"';
+  if (typeof b.needsInvestigation !== "boolean") return "needsInvestigation must be a boolean";
+
+  const notification: HeadsUpNotification = {
+    from: b.from,
+    to: b.to,
+    fleetId: b.fleetId,
+    summary: b.summary,
+    severity: b.severity as HeadsUpSeverity,
+    needsInvestigation: b.needsInvestigation,
+  };
+  if (typeof b.shipId === "string") notification.shipId = b.shipId;
+  if (typeof b.issueNumber === "number" && Number.isInteger(b.issueNumber)) notification.issueNumber = b.issueNumber;
+  return notification;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -692,6 +719,35 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         const dispatchManager = deps.getDispatchManager();
         const dispatches = dispatchManager.getDispatchesByFleet(fleetId).map((d) => dispatchManager.toDispatch(d));
         sendJson(res, 200, { ok: true, dispatches } as ApiResponse & { dispatches: unknown[] });
+        return;
+      }
+
+      // === Commander Notification API ===
+
+      // POST /api/commander-notify — Commander-to-Commander heads-up notification
+      if (route === "commander-notify" && req.method === "POST") {
+        const rawBody = await readBody(req);
+        let body: unknown;
+        try {
+          body = rawBody ? JSON.parse(rawBody) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: "Invalid JSON body" });
+          return;
+        }
+
+        const notification = validateHeadsUpRequest(body);
+        if (typeof notification === "string") {
+          sendJson(res, 400, { ok: false, error: notification });
+          return;
+        }
+
+        const delivered = deps.deliverHeadsUp(notification);
+        if (!delivered) {
+          sendJson(res, 503, { ok: false, error: `Target commander (${notification.to}) is not running for fleet ${notification.fleetId}` });
+          return;
+        }
+
+        sendJson(res, 200, { ok: true });
         return;
       }
 
