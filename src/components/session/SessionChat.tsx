@@ -34,6 +34,7 @@ const RENDERED_SYSTEM_SUBTYPES = new Set([
   "lookout-alert",
   "commander-status",
   "escort-log",
+  "dispatch-log",
   "rate-limit-status",
 ]);
 

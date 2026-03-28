@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAdmiralHome } from "./admiral-home.js";
 
@@ -414,11 +415,9 @@ export class ProcessManager extends EventEmitter {
 
           // Persist Ship log: skip system init/hook messages (noisy, may contain env info)
           if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
-            try {
-              appendFileSync(logFilePath, line + "\n");
-            } catch {
+            appendFile(logFilePath, line + "\n").catch(() => {
               // Best-effort: don't crash on write failure
-            }
+            });
           }
         } catch {
           // Non-JSON output, ignore
