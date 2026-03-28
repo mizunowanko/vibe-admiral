@@ -210,7 +210,8 @@ export type StreamMessageSubtype =
   | "task-notification"
   | "dispatch-log"
   | "escort-log"
-  | "rate-limit-status";
+  | "rate-limit-status"
+  | "heads-up";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -381,3 +382,17 @@ export interface PersistedCommanderSession {
 
 /** @deprecated Use PersistedCommanderSession instead. */
 export type PersistedBridgeSession = PersistedCommanderSession;
+
+// === Heads-Up Notification (Commander-to-Commander) ===
+export type HeadsUpSeverity = "info" | "warning" | "urgent";
+
+export interface HeadsUpNotification {
+  from: CommanderRole;
+  to: CommanderRole;
+  fleetId: string;
+  summary: string;
+  shipId?: string;
+  issueNumber?: number;
+  severity: HeadsUpSeverity;
+  needsInvestigation: boolean;
+}
