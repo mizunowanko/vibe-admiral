@@ -433,11 +433,41 @@ export class EscortManager {
         console.error(`[escort-manager] Failed to persist phase revert for Ship ${parentShipId.slice(0, 8)}...:`, err);
       }
     } else {
-      console.error(`[escort-manager] XState rejected ESCORT_DIED for Ship ${parentShipId.slice(0, 8)}... (current: ${result?.currentPhase})`);
+      // XState rejected the transition — force DB to match XState to prevent divergence
+      console.error(`[escort-manager] XState rejected ESCORT_DIED for Ship ${parentShipId.slice(0, 8)}... (current: ${result?.currentPhase}) — forcing DB sync`);
+      const xstatePhase = result?.currentPhase;
+      if (xstatePhase) {
+        try {
+          db.persistPhaseTransition(parentShipId, currentPhase as Phase, xstatePhase, "escort", {
+            gate_result: "rejected",
+            feedback: `${feedback} (XState rejected ESCORT_DIED, forcing DB sync to ${xstatePhase})`,
+          });
+          this.shipManager.syncPhaseFromDb(parentShipId);
+        } catch (err) {
+          console.error(`[escort-manager] Failed to force DB sync for Ship ${parentShipId.slice(0, 8)}...:`, err);
+        }
+      }
     }
 
     // Clear gate check state
     this.shipManager.clearGateCheck(parentShipId);
+
+    // Check if Escort fail count has exceeded the limit — auto-stop the Ship
+    const MAX_ESCORT_FAILS = 3;
+    const context = this.actorManager?.getContext(parentShipId);
+    if (context && context.escortFailCount >= MAX_ESCORT_FAILS) {
+      console.error(
+        `[escort-manager] Ship #${parentShip.issueNumber} (${parentShipId.slice(0, 8)}...) hit Escort fail limit ` +
+        `(${context.escortFailCount}/${MAX_ESCORT_FAILS} consecutive failures) — auto-stopping to prevent infinite loop`,
+      );
+      this.actorManager?.send(parentShipId, { type: "STOP" });
+      this.actorManager?.send(parentShipId, { type: "ESCORT_FAIL_LIMIT" });
+      this.shipManager.updatePhase(parentShipId, "stopped", `Auto-stopped: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}`);
+
+      const stopMessage = `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) auto-stopped: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}. Manual intervention required.`;
+      this.onEscortDeathCallback?.(parentShipId, stopMessage);
+      return;
+    }
 
     // Notify Flagship
     const message = `Escort died without verdict for Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) during ${currentPhase}. Phase reverted to ${prevPhase}. (exit code=${code})`;
