@@ -25,10 +25,10 @@ Emergency code modification mode where Bridge delegates a Dispatch sub-agent to 
 
 ## Hotfix Dispatch Template
 
-When a user requests a hotfix, launch a Dispatch sub-agent using the Task tool:
+When a user requests a hotfix, launch a Dispatch sub-agent using the Agent tool:
 
 ```
-Task(description="Dispatch: hotfix", subagent_type="general-purpose", prompt=`
+Agent(description="Dispatch: hotfix", subagent_type="general-purpose", prompt=`
 You are a Dispatch agent performing an emergency hotfix.
 
 Repo: <repo-path>

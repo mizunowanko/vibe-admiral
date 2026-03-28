@@ -309,7 +309,7 @@ export class EngineServer {
             });
           } else if (
             parsed.type === "tool_use" &&
-            parsed.tool === "Task"
+            parsed.tool === "Agent"
           ) {
             // Dispatch sub-agent launched — register and notify frontend
             const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
@@ -479,8 +479,9 @@ export class EngineServer {
         return;
       }
       console.warn(
-        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — will stop and await manual retry`,
+        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — backoff will apply on next retry`,
       );
+      this.shipManager.setLastRateLimitAt(id, Date.now());
     });
 
     this.processManager.on("error", (id: string, error: Error) => {
