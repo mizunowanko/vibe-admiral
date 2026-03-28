@@ -65,6 +65,7 @@ export class EscortManager {
     extraPrompt?: string,
     gatePrompt?: string,
     shipCustomInstructionsText?: string,
+    extraEnv?: Record<string, string>,
   ): Promise<string | null> {
     // Prevent duplicate Escorts for the same parent Ship
     const existingEscortId = this.escorts.get(parentShipId);
@@ -92,7 +93,7 @@ export class EscortManager {
 
       if (existingEscort?.sessionId) {
         // Resume previous Escort session — preserves context from prior gate reviews
-        const escortId = await this.resumeEscort(existingEscort, parentShip, gatePhase ?? "plan-gate", extraPrompt, gatePrompt);
+        const escortId = await this.resumeEscort(existingEscort, parentShip, gatePhase ?? "plan-gate", extraPrompt, gatePrompt, extraEnv);
         this.escorts.set(parentShipId, escortId);
 
         console.log(
@@ -103,7 +104,7 @@ export class EscortManager {
       }
 
       // First gate or no sessionId — launch a fresh Escort
-      const escortId = await this.sortieEscort(parentShip, gatePhase, extraPrompt, gatePrompt);
+      const escortId = await this.sortieEscort(parentShip, gatePhase, extraPrompt, gatePrompt, extraEnv);
       this.escorts.set(parentShipId, escortId);
 
       console.log(
@@ -141,6 +142,7 @@ export class EscortManager {
     gatePhase?: GatePhase,
     extraPrompt?: string,
     gatePrompt?: string,
+    extraEnv?: Record<string, string>,
   ): Promise<string> {
     const escortId = randomUUID();
     const db = this.getDatabase();
@@ -171,6 +173,7 @@ export class EscortManager {
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
       ...(gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: gatePrompt } : {}),
+      ...extraEnv,
     };
 
     const gateContext = gatePhase
@@ -199,6 +202,7 @@ export class EscortManager {
     gatePhase: GatePhase,
     extraPrompt?: string,
     gatePrompt?: string,
+    extraEnv?: Record<string, string>,
   ): Promise<string> {
     if (!existingEscort.sessionId) {
       throw new Error(`Cannot resume Escort ${existingEscort.id.slice(0, 8)}... — no sessionId`);
@@ -216,6 +220,7 @@ export class EscortManager {
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
       ...(gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: gatePrompt } : {}),
+      ...extraEnv,
     };
 
     // Resume with gate context message

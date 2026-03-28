@@ -31,6 +31,7 @@ interface ApiDeps {
     customInstructions?: CustomInstructions;
     gates?: import("./types.js").FleetGateSettings;
     gatePrompts?: Partial<Record<import("./types.js").GateType, string>>;
+    qaRequiredPaths?: string[];
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
@@ -257,6 +258,46 @@ async function handleShipRoute(
     const metadata = (body.metadata as Record<string, unknown>) ?? {};
     const triggeredBy = (body.triggeredBy as string) ?? "ship";
 
+    // Extract qaRequired from plan-gate metadata (Ship determines this during planning)
+    if (targetPhase === "plan-gate" && typeof metadata.qaRequired === "boolean") {
+      shipManager.setQaRequired(shipId, metadata.qaRequired);
+    }
+
+    // Fallback guard: if Ship requests qa-gate with qaRequired=false,
+    // check actual changed files against fleet's qaRequiredPaths.
+    // If match found, force qaRequired=true before XState evaluates canSkipQA.
+    if (targetPhase === "qa-gate") {
+      const currentShip = db.getShipById(shipId);
+      if (currentShip && !currentShip.qaRequired) {
+        const fleets = await deps.loadFleets();
+        const fleet = fleets.find((f) => f.id === currentShip.fleetId);
+        if (fleet?.qaRequiredPaths?.length) {
+          try {
+            const { execSync } = await import("node:child_process");
+            const changedFiles = execSync("git diff --name-only main...HEAD", {
+              cwd: currentShip.worktreePath,
+              encoding: "utf-8",
+              timeout: 10000,
+            }).trim().split("\n").filter(Boolean);
+
+            const { matchesGlob } = await import("node:path");
+            const hasMatch = changedFiles.some((file) =>
+              fleet.qaRequiredPaths!.some((pattern) => matchesGlob(file, pattern))
+            );
+            if (hasMatch) {
+              console.log(
+                `[api-server] qaRequiredPaths match found for Ship ${shipId.slice(0, 8)}... — overriding qaRequired to true`,
+              );
+              shipManager.setQaRequired(shipId, true);
+            }
+          } catch (err) {
+            console.warn(`[api-server] Failed to check qaRequiredPaths for Ship ${shipId.slice(0, 8)}...:`, err);
+            // Non-fatal: proceed with existing qaRequired value
+          }
+        }
+      }
+    }
+
     // Determine the XState event based on target phase
     const actorManager = deps.getActorManager();
     let xstateEvent: import("./ship-machine.js").ShipMachineEvent;
@@ -358,7 +399,19 @@ async function handleShipRoute(
 
       // Pass fleet's gate prompt for this gate type to Escort via env var
       const gatePrompt = fleet?.gatePrompts?.[gateType];
-      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText);
+
+      // Build extra env vars for Escort (qaRequiredPaths, qaRequired)
+      const escortExtraEnv: Record<string, string> = {};
+      if (fleet?.qaRequiredPaths?.length) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(fleet.qaRequiredPaths);
+      }
+      // Pass parent Ship's qaRequired to acceptance-test-gate Escort
+      const refreshedShip = db.getShipById(shipId);
+      if (refreshedShip) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
+      }
+
+      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];

@@ -150,6 +150,9 @@ export function FleetSettings() {
   const [gates, setGates] = useState<FleetGateSettings>(
     selectedFleet?.gates ?? {},
   );
+  const [qaRequiredPaths, setQaRequiredPaths] = useState<string[]>(
+    selectedFleet?.qaRequiredPaths ?? [],
+  );
 
   const isNew = !selectedFleet;
 
@@ -165,6 +168,7 @@ export function FleetSettings() {
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
     setCustomInstructions(selectedFleet?.customInstructions ?? {});
     setGates(selectedFleet?.gates ?? {});
+    setQaRequiredPaths(selectedFleet?.qaRequiredPaths ?? []);
   }, [selectedFleet]);
 
   const saveRepos = (nextRepos: FleetRepo[]) => {
@@ -191,6 +195,7 @@ export function FleetSettings() {
       shipRulePaths,
       customInstructions,
       gates,
+      qaRequiredPaths,
     });
   };
 
@@ -404,6 +409,15 @@ export function FleetSettings() {
                 );
               })}
             </div>
+          )}
+
+          {/* QA Required Paths — only shown when editing */}
+          {!isNew && (
+            <PathListEditor
+              label="QA Required Paths"
+              paths={qaRequiredPaths}
+              onChange={setQaRequiredPaths}
+            />
           )}
 
           {/* Skill Sources — only shown when editing */}

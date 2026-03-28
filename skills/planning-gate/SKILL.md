@@ -17,6 +17,7 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
 - `VIBE_ADMIRAL_SHIP_ID`: レビュー対象の Ship ID
 - `VIBE_ADMIRAL_MAIN_REPO`: リポジトリ（owner/repo）
 - `VIBE_ADMIRAL_ENGINE_PORT`: Engine API ポート（default: 9721）
+- `VIBE_ADMIRAL_QA_REQUIRED_PATHS`: qaRequired 強制パス（JSON 配列、未設定時はチェックスキップ）
 
 ## Procedure
 
@@ -25,6 +26,7 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
    SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
    ENGINE_PORT="${VIBE_ADMIRAL_ENGINE_PORT:-9721}"
+   QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    ```
 
 2. Ship の調査ログを確認（コンテキスト理解のため）:
@@ -61,6 +63,19 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
 
 6. 最新の Implementation Plan コメントを読む
 
+6. **qaRequired パスチェック**:
+
+   `QA_REQUIRED_PATHS` が設定されている場合、Implementation Plan の「### Changes」セクションに記載されたファイルパスを `QA_REQUIRED_PATHS` のパターンと突き合わせる。
+
+   - `QA_REQUIRED_PATHS` は JSON 配列（例: `["src/components/**", "src/styles/**"]`）
+   - Plan 内の変更ファイル一覧を抽出し、各ファイルがいずれかのパターンに glob マッチするか確認する
+   - **マッチするファイルがあり、かつ Plan が `qaRequired: false` と判断している場合** → REJECT する
+     - フィードバック例: "qaRequired must be true: planned changes include files matching qaRequiredPaths patterns (e.g., src/components/foo.tsx matches src/components/**). Update the QA Requirement section to qaRequired: true."
+   - マッチするファイルがあり Plan が `qaRequired: true` → 問題なし、レビュー続行
+   - マッチするファイルがない → 問題なし、レビュー続行
+   - `QA_REQUIRED_PATHS` が未設定 → チェックスキップ、レビュー続行
+
+
 7. レビュー:
    - Plan が Issue の要件を全てカバーしているか
    - 実現可能で適切なスコープか
@@ -71,6 +86,13 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
 
    <詳細なレビュー>
+
+   ### qaRequired Path Check
+   <QA_REQUIRED_PATHS が設定されている場合のみ記載>
+   - Configured patterns: <パターン一覧>
+   - Planned files matching: <マッチしたファイル一覧 or "none">
+   - Plan's qaRequired: <true or false>
+   - Check result: <PASS or FAIL (with reason)>
 
    **Verdict: APPROVE** (or REJECT)"
    ```
@@ -96,3 +118,4 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
 - Focus on completeness and feasibility, not style
 - For re-reviews: verify previous feedback was addressed. Do NOT repeat same rejection if fixed
 - Base decisions on actual plan content, not stale information
+- qaRequired path check failure is a **mandatory rejection** — cannot be overridden by reviewer judgment
