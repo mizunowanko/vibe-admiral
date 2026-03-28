@@ -84,6 +84,9 @@ export class FleetDatabase {
     if (version < 7) {
       this.applyV7();
     }
+    if (version < 8) {
+      this.applyV8();
+    }
   }
 
   private applyV1(): void {
@@ -371,6 +374,70 @@ export class FleetDatabase {
     } finally {
       this.db.pragma("foreign_keys = ON");
     }
+  }
+
+  private applyV8(): void {
+    // V8: Rename phase values from verbose names to display-name-based names.
+    // planning → plan, implementing → coding, acceptance-test → qa
+    // Also renames gate phases accordingly.
+    this.db.exec(`
+      UPDATE ships SET phase = CASE phase
+        WHEN 'planning' THEN 'plan'
+        WHEN 'planning-gate' THEN 'plan-gate'
+        WHEN 'implementing' THEN 'coding'
+        WHEN 'implementing-gate' THEN 'coding-gate'
+        WHEN 'acceptance-test' THEN 'qa'
+        WHEN 'acceptance-test-gate' THEN 'qa-gate'
+        ELSE phase
+      END
+      WHERE phase IN ('planning', 'planning-gate', 'implementing', 'implementing-gate', 'acceptance-test', 'acceptance-test-gate');
+
+      UPDATE phases SET phase = CASE phase
+        WHEN 'planning' THEN 'plan'
+        WHEN 'planning-gate' THEN 'plan-gate'
+        WHEN 'implementing' THEN 'coding'
+        WHEN 'implementing-gate' THEN 'coding-gate'
+        WHEN 'acceptance-test' THEN 'qa'
+        WHEN 'acceptance-test-gate' THEN 'qa-gate'
+        ELSE phase
+      END
+      WHERE phase IN ('planning', 'planning-gate', 'implementing', 'implementing-gate', 'acceptance-test', 'acceptance-test-gate');
+
+      UPDATE phase_transitions SET from_phase = CASE from_phase
+        WHEN 'planning' THEN 'plan'
+        WHEN 'planning-gate' THEN 'plan-gate'
+        WHEN 'implementing' THEN 'coding'
+        WHEN 'implementing-gate' THEN 'coding-gate'
+        WHEN 'acceptance-test' THEN 'qa'
+        WHEN 'acceptance-test-gate' THEN 'qa-gate'
+        ELSE from_phase
+      END
+      WHERE from_phase IN ('planning', 'planning-gate', 'implementing', 'implementing-gate', 'acceptance-test', 'acceptance-test-gate');
+
+      UPDATE phase_transitions SET to_phase = CASE to_phase
+        WHEN 'planning' THEN 'plan'
+        WHEN 'planning-gate' THEN 'plan-gate'
+        WHEN 'implementing' THEN 'coding'
+        WHEN 'implementing-gate' THEN 'coding-gate'
+        WHEN 'acceptance-test' THEN 'qa'
+        WHEN 'acceptance-test-gate' THEN 'qa-gate'
+        ELSE to_phase
+      END
+      WHERE to_phase IN ('planning', 'planning-gate', 'implementing', 'implementing-gate', 'acceptance-test', 'acceptance-test-gate');
+
+      UPDATE escorts SET phase = CASE phase
+        WHEN 'planning' THEN 'plan'
+        WHEN 'planning-gate' THEN 'plan-gate'
+        WHEN 'implementing' THEN 'coding'
+        WHEN 'implementing-gate' THEN 'coding-gate'
+        WHEN 'acceptance-test' THEN 'qa'
+        WHEN 'acceptance-test-gate' THEN 'qa-gate'
+        ELSE phase
+      END
+      WHERE phase IN ('planning', 'planning-gate', 'implementing', 'implementing-gate', 'acceptance-test', 'acceptance-test-gate');
+
+      INSERT INTO schema_version (version) VALUES (8);
+    `);
   }
 
   /** Ensure a repo row exists and return its ID. */

@@ -1,30 +1,54 @@
-import type { Phase } from "@/types";
+import type { Phase, GateType } from "@/types";
 
 export interface StatusConfig {
-  label: string;
   color: string;
   textColor: string;
   animate?: boolean;
 }
 
 export const STATUS_CONFIG: Record<Phase, StatusConfig> = {
-  planning: { label: "Plan", color: "bg-indigo-500/20 text-indigo-400", textColor: "text-indigo-400", animate: true },
-  "planning-gate": { label: "Planning (Review)", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  implementing: { label: "Coding", color: "bg-violet-500/20 text-violet-400", textColor: "text-violet-400", animate: true },
-  "implementing-gate": { label: "Coding (Review)", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  "acceptance-test": { label: "QA", color: "bg-amber-500/20 text-amber-400", textColor: "text-amber-400", animate: true },
-  "acceptance-test-gate": { label: "QA (Review)", color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  merging: { label: "Merging", color: "bg-emerald-500/20 text-emerald-400", textColor: "text-emerald-400", animate: true },
-  done: { label: "Done", color: "bg-green-500/20 text-green-400", textColor: "text-green-400" },
-  stopped: { label: "Stopped", color: "bg-gray-500/20 text-gray-400", textColor: "text-gray-400" },
+  plan: { color: "bg-indigo-500/20 text-indigo-400", textColor: "text-indigo-400", animate: true },
+  "plan-gate": { color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
+  coding: { color: "bg-violet-500/20 text-violet-400", textColor: "text-violet-400", animate: true },
+  "coding-gate": { color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
+  qa: { color: "bg-amber-500/20 text-amber-400", textColor: "text-amber-400", animate: true },
+  "qa-gate": { color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
+  merging: { color: "bg-emerald-500/20 text-emerald-400", textColor: "text-emerald-400", animate: true },
+  done: { color: "bg-green-500/20 text-green-400", textColor: "text-green-400" },
+  stopped: { color: "bg-gray-500/20 text-gray-400", textColor: "text-gray-400" },
 };
 
 /** Config for the derived "process dead" state (not a real phase). */
 export const PROCESS_DEAD_CONFIG: StatusConfig = {
-  label: "Error",
   color: "bg-red-500/20 text-red-400",
   textColor: "text-red-400",
 };
+
+/** Convert a phase name to display text (capitalize first letter of each segment).
+ *  e.g., "plan" → "Plan", "plan-gate" → "Plan (Review)", "qa" → "QA" */
+export function phaseDisplayName(phase: Phase | string): string {
+  if (phase === "qa" || phase === "QA") return "QA";
+  if (phase.endsWith("-gate")) {
+    const base = phase.slice(0, -5);
+    return `${phaseDisplayName(base)} (Review)`;
+  }
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+
+/** Human-readable labels for gate types. */
+export const GATE_TYPE_LABELS: Record<GateType, string> = {
+  "plan-review": "計画レビュー",
+  "code-review": "コードレビュー",
+  playwright: "QA テスト",
+  "auto-approve": "自動承認",
+};
+
+/** Convert a gate type to display text.
+ *  e.g., "plan-review" → "計画レビュー", unknown → raw value */
+export function gateTypeDisplayName(gateType?: string): string {
+  if (!gateType) return "Gate";
+  return GATE_TYPE_LABELS[gateType as GateType] ?? gateType;
+}
 
 export function getStatusColor(content: string): string {
   if (content.includes("compacting")) return "text-purple-400";

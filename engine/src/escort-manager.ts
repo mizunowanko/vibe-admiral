@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import type { ProcessManager } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FleetDatabase } from "./db.js";
@@ -15,7 +17,7 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
  * session resume, cleanup, and process exit handling.
  *
  * Lifecycle per gate:
- *   1. Ship enters gate phase (e.g., planning-gate)
+ *   1. Ship enters gate phase (e.g., plan-gate)
  *   2. Engine calls launchEscort(parentShipId, gatePhase, gateType)
  *   3. EscortManager creates or resumes an Escort process
  *   4. Escort reviews, submits verdict, and exits
@@ -28,6 +30,8 @@ export class EscortManager {
   private actorManager: ShipActorManager | null = null;
   /** parentShipId → escortId mapping (one Escort per parent Ship). */
   private escorts = new Map<string, string>();
+  /** parentShipId → Ship's customInstructionsText (for restoring after Escort exits). */
+  private shipCustomInstructions = new Map<string, string | undefined>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
 
   constructor(processManager: ProcessManager, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
@@ -54,12 +58,15 @@ export class EscortManager {
    *
    * Returns the escort ID if launched, null if skipped or failed.
    */
-  launchEscort(
+  async launchEscort(
     parentShipId: string,
     gatePhase?: GatePhase,
     _gateType?: GateType,
     extraPrompt?: string,
-  ): string | null {
+    gatePrompt?: string,
+    shipCustomInstructionsText?: string,
+    extraEnv?: Record<string, string>,
+  ): Promise<string | null> {
     // Prevent duplicate Escorts for the same parent Ship
     const existingEscortId = this.escorts.get(parentShipId);
     if (existingEscortId && this.processManager.isRunning(existingEscortId)) {
@@ -77,13 +84,16 @@ export class EscortManager {
 
     const db = this.getDatabase();
 
+    // Store Ship's customInstructions for restoration after Escort exits
+    this.shipCustomInstructions.set(parentShipId, shipCustomInstructionsText);
+
     try {
       // Check for an existing Escort record (from a previous gate) with a sessionId
       const existingEscort = db?.getEscortByShipId(parentShipId);
 
       if (existingEscort?.sessionId) {
         // Resume previous Escort session — preserves context from prior gate reviews
-        const escortId = this.resumeEscort(existingEscort, parentShip, gatePhase ?? "planning-gate");
+        const escortId = await this.resumeEscort(existingEscort, parentShip, gatePhase ?? "plan-gate", extraPrompt, gatePrompt, extraEnv);
         this.escorts.set(parentShipId, escortId);
 
         console.log(
@@ -94,7 +104,7 @@ export class EscortManager {
       }
 
       // First gate or no sessionId — launch a fresh Escort
-      const escortId = this.sortieEscort(parentShip, gatePhase, extraPrompt);
+      const escortId = await this.sortieEscort(parentShip, gatePhase, extraPrompt, gatePrompt, extraEnv);
       this.escorts.set(parentShipId, escortId);
 
       console.log(
@@ -127,11 +137,13 @@ export class EscortManager {
    * Launch a fresh Escort for the first gate.
    * Creates a new Escort record in the escorts table and spawns the process.
    */
-  private sortieEscort(
+  private async sortieEscort(
     parentShip: { id: string; repo: string; issueNumber: number; worktreePath: string },
     gatePhase?: GatePhase,
     extraPrompt?: string,
-  ): string {
+    gatePrompt?: string,
+    extraEnv?: Record<string, string>,
+  ): Promise<string> {
     const escortId = randomUUID();
     const db = this.getDatabase();
 
@@ -140,7 +152,7 @@ export class EscortManager {
       shipId: parentShip.id,
       sessionId: null,
       processPid: null,
-      phase: "planning",
+      phase: "plan",
       createdAt: new Date().toISOString(),
       completedAt: null,
     };
@@ -150,12 +162,18 @@ export class EscortManager {
       db.upsertEscort(escort);
     }
 
+    // Overwrite .claude/rules/custom-instructions.md with Escort's customInstructions
+    // (replaces Ship's instructions that were previously written to this file)
+    await this.deployCustomInstructions(parentShip.worktreePath, extraPrompt);
+
     // Launch via processManager.sortie() with /escort skill + gate phase context
     const escortEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+      ...(gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: gatePrompt } : {}),
+      ...extraEnv,
     };
 
     const gateContext = gatePhase
@@ -178,16 +196,22 @@ export class EscortManager {
    * Resume an existing Escort for a subsequent gate phase.
    * Uses `--resume sessionId` to preserve context from prior gate reviews.
    */
-  private resumeEscort(
+  private async resumeEscort(
     existingEscort: EscortProcess,
     parentShip: { id: string; repo: string; worktreePath: string },
     gatePhase: GatePhase,
-  ): string {
+    extraPrompt?: string,
+    gatePrompt?: string,
+    extraEnv?: Record<string, string>,
+  ): Promise<string> {
     if (!existingEscort.sessionId) {
       throw new Error(`Cannot resume Escort ${existingEscort.id.slice(0, 8)}... — no sessionId`);
     }
 
     const escortId = existingEscort.id;
+
+    // Overwrite .claude/rules/custom-instructions.md with Escort's customInstructions
+    await this.deployCustomInstructions(parentShip.worktreePath, extraPrompt);
 
     // Build Escort env vars
     const escortEnv: Record<string, string> = {
@@ -195,6 +219,8 @@ export class EscortManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+      ...(gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: gatePrompt } : {}),
+      ...extraEnv,
     };
 
     // Resume with gate context message
@@ -206,9 +232,53 @@ export class EscortManager {
       resumeMessage,
       parentShip.worktreePath,
       escortEnv,
+      extraPrompt,
     );
 
     return escortId;
+  }
+
+  /**
+   * Persist customInstructions to `.claude/rules/custom-instructions.md` in the worktree.
+   * Mirrors ShipManager.deployCustomInstructions() — overwrites with Escort-specific
+   * instructions before launch, and restores Ship's instructions after Escort exits.
+   */
+  private async deployCustomInstructions(
+    worktreePath: string,
+    customInstructionsText?: string,
+  ): Promise<void> {
+    const rulesDir = join(worktreePath, ".claude", "rules");
+    const filePath = join(rulesDir, "custom-instructions.md");
+
+    if (!customInstructionsText) {
+      return;
+    }
+
+    await mkdir(rulesDir, { recursive: true });
+    await writeFile(filePath, customInstructionsText, "utf-8");
+  }
+
+  /**
+   * Restore Ship's customInstructions to `.claude/rules/custom-instructions.md`.
+   * Called after Escort exits so the Ship resumes with its own instructions.
+   */
+  private async restoreShipCustomInstructions(parentShipId: string): Promise<void> {
+    const parentShip = this.shipManager.getShip(parentShipId);
+    if (!parentShip) return;
+
+    const shipCi = this.shipCustomInstructions.get(parentShipId);
+    const rulesDir = join(parentShip.worktreePath, ".claude", "rules");
+    const filePath = join(rulesDir, "custom-instructions.md");
+
+    if (shipCi) {
+      await mkdir(rulesDir, { recursive: true });
+      await writeFile(filePath, shipCi, "utf-8");
+    } else {
+      // No Ship CI — remove Escort's file to avoid contamination
+      await unlink(filePath).catch(() => {});
+    }
+
+    this.shipCustomInstructions.delete(parentShipId);
   }
 
   /** Check if an Escort process is currently running for a parent Ship. */
@@ -311,6 +381,11 @@ export class EscortManager {
     const parentShipId = this.findShipIdByEscortId(escortShipId);
     if (!parentShipId) return;
 
+    // Restore Ship's customInstructions (Escort overwrote .claude/rules/custom-instructions.md)
+    this.restoreShipCustomInstructions(parentShipId).catch((err) => {
+      console.warn(`[escort-manager] Failed to restore Ship customInstructions for ${parentShipId.slice(0, 8)}...:`, err);
+    });
+
     // Remove from active process tracking (but preserve DB record for session resume)
     this.escorts.delete(parentShipId);
 
@@ -358,11 +433,41 @@ export class EscortManager {
         console.error(`[escort-manager] Failed to persist phase revert for Ship ${parentShipId.slice(0, 8)}...:`, err);
       }
     } else {
-      console.error(`[escort-manager] XState rejected ESCORT_DIED for Ship ${parentShipId.slice(0, 8)}... (current: ${result?.currentPhase})`);
+      // XState rejected the transition — force DB to match XState to prevent divergence
+      console.error(`[escort-manager] XState rejected ESCORT_DIED for Ship ${parentShipId.slice(0, 8)}... (current: ${result?.currentPhase}) — forcing DB sync`);
+      const xstatePhase = result?.currentPhase;
+      if (xstatePhase) {
+        try {
+          db.persistPhaseTransition(parentShipId, currentPhase as Phase, xstatePhase, "escort", {
+            gate_result: "rejected",
+            feedback: `${feedback} (XState rejected ESCORT_DIED, forcing DB sync to ${xstatePhase})`,
+          });
+          this.shipManager.syncPhaseFromDb(parentShipId);
+        } catch (err) {
+          console.error(`[escort-manager] Failed to force DB sync for Ship ${parentShipId.slice(0, 8)}...:`, err);
+        }
+      }
     }
 
     // Clear gate check state
     this.shipManager.clearGateCheck(parentShipId);
+
+    // Check if Escort fail count has exceeded the limit — auto-stop the Ship
+    const MAX_ESCORT_FAILS = 3;
+    const context = this.actorManager?.getContext(parentShipId);
+    if (context && context.escortFailCount >= MAX_ESCORT_FAILS) {
+      console.error(
+        `[escort-manager] Ship #${parentShip.issueNumber} (${parentShipId.slice(0, 8)}...) hit Escort fail limit ` +
+        `(${context.escortFailCount}/${MAX_ESCORT_FAILS} consecutive failures) — auto-stopping to prevent infinite loop`,
+      );
+      this.actorManager?.send(parentShipId, { type: "STOP" });
+      this.actorManager?.send(parentShipId, { type: "ESCORT_FAIL_LIMIT" });
+      this.shipManager.updatePhase(parentShipId, "stopped", `Auto-stopped: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}`);
+
+      const stopMessage = `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) auto-stopped: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}. Manual intervention required.`;
+      this.onEscortDeathCallback?.(parentShipId, stopMessage);
+      return;
+    }
 
     // Notify Flagship
     const message = `Escort died without verdict for Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) during ${currentPhase}. Phase reverted to ${prevPhase}. (exit code=${code})`;

@@ -1,10 +1,11 @@
 import { memo, useState, useMemo, useRef } from "react";
 import { useSessionStore, commanderSessionId, shipSessionId } from "@/stores/sessionStore";
 import { useShipStore } from "@/stores/shipStore";
+import { useDispatchListener } from "@/hooks/useDispatchListener";
 import { ActiveShipSummary } from "@/components/ship/ActiveShipSummary";
-import { SessionCard } from "./SessionCard";
+import { SessionCard, DispatchCard } from "./SessionCard";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { Ship } from "@/types";
+import type { Ship, Dispatch } from "@/types";
 
 interface SessionCardListProps {
   fleetId: string;
@@ -105,17 +106,54 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
   );
 }
 
+function DispatchSection({
+  dispatches,
+  onFocus,
+}: {
+  dispatches: Dispatch[];
+  onFocus: () => void;
+}) {
+  if (dispatches.length === 0) return null;
+  return (
+    <div className="mt-1.5 grid grid-cols-1 gap-1">
+      {dispatches.map((d) => (
+        <DispatchCard key={d.id} dispatch={d} onClick={onFocus} />
+      ))}
+    </div>
+  );
+}
+
 export const SessionCardList = memo(function SessionCardList({
   fleetId,
 }: SessionCardListProps) {
+  // Listen for dispatch events from both Dock and Flagship, regardless of focus
+  useDispatchListener(fleetId);
+
   const focusedSessionId = useSessionStore((s) => s.focusedSessionId);
   const setFocus = useSessionStore((s) => s.setFocus);
   const sessions = useSessionStore((s) => s.sessions);
+  const dispatches = useSessionStore((s) => s.dispatches);
 
   const dockSessionId = commanderSessionId("dock", fleetId);
   const flagshipSessionId = commanderSessionId("flagship", fleetId);
   const dockSession = sessions.get(dockSessionId);
   const flagshipSession = sessions.get(flagshipSessionId);
+
+  const dockDispatches = useMemo(() => {
+    const result: Dispatch[] = [];
+    for (const d of dispatches.values()) {
+      if (d.parentRole === "dock" && d.fleetId === fleetId) result.push(d);
+    }
+    return result.sort((a, b) => b.startedAt - a.startedAt);
+  }, [dispatches, fleetId]);
+
+  const flagshipDispatches = useMemo(() => {
+    const result: Dispatch[] = [];
+    for (const d of dispatches.values()) {
+      if (d.parentRole === "flagship" && d.fleetId === fleetId) result.push(d);
+    }
+    return result.sort((a, b) => b.startedAt - a.startedAt);
+  }, [dispatches, fleetId]);
 
   return (
     <div className="w-[420px] shrink-0 border-l border-border bg-background/50 flex flex-col min-h-0">
@@ -133,6 +171,10 @@ export const SessionCardList = memo(function SessionCardList({
                 isFocused={focusedSessionId === dockSessionId}
                 onFocus={() => setFocus(dockSessionId)}
               />
+              <DispatchSection
+                dispatches={dockDispatches}
+                onFocus={() => setFocus(dockSessionId)}
+              />
             </div>
           )}
 
@@ -145,6 +187,10 @@ export const SessionCardList = memo(function SessionCardList({
               <SessionCard
                 session={flagshipSession}
                 isFocused={focusedSessionId === flagshipSessionId}
+                onFocus={() => setFocus(flagshipSessionId)}
+              />
+              <DispatchSection
+                dispatches={flagshipDispatches}
                 onFocus={() => setFocus(flagshipSessionId)}
               />
             </div>

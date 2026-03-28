@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { createServer, type Server as HttpServer } from "node:http";
 import { readFile, writeFile, mkdir, stat, readdir, realpath } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -31,7 +32,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -104,8 +105,25 @@ export class EngineServer {
       getShipManager: () => this.shipManager,
       getEscortManager: () => this.escortManager,
       getActorManager: () => this.actorManager,
+      getCommanderHistory: (role, fleetId) => {
+        const manager: CommanderManager = role === "flagship" ? this.flagshipManager : this.dockManager;
+        return manager.getHistoryWithDiskFallback(fleetId);
+      },
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
+      requestRestart: () => {
+        console.log("[engine] Restart requested via API");
+        this.broadcast({ type: "engine:restarting", data: {} });
+        // Write restart marker so the dev-runner knows to restart
+        try {
+          const markerPath = join(import.meta.dirname, "..", "..", ".restart");
+          writeFileSync(markerPath, String(Date.now()));
+        } catch (err) {
+          console.warn("[engine] Failed to write .restart marker:", err);
+        }
+        this.shutdown();
+        process.exit(0);
+      },
       broadcastRequestResult: (fleetId, result) => {
         const resultMessage: StreamMessage = {
           type: "system",
@@ -125,9 +143,16 @@ export class EngineServer {
     this.wss = new WebSocketServer({ noServer: true });
 
     this.httpServer.on("upgrade", (request, socket, head) => {
+      socket.on("error", (err) => {
+        console.warn("[engine] Upgrade socket error:", err);
+      });
       this.wss.handleUpgrade(request, socket, head, (ws) => {
         this.wss.emit("connection", ws, request);
       });
+    });
+
+    this.httpServer.on("error", (err) => {
+      console.error("[engine] HTTP server error:", err);
     });
 
     this.httpServer.listen(port);
@@ -142,6 +167,15 @@ export class EngineServer {
     this.startProcessLivenessCheck();
 
     console.log(`Engine HTTP+WebSocket server running on port ${port}`);
+
+    // Notify frontend if this is a restart (dev-runner sets RESTARTED=1)
+    if (process.env.RESTARTED === "1") {
+      console.log("[engine] Restart detected — notifying frontend");
+      // Delay broadcast to allow WebSocket clients to reconnect
+      setTimeout(() => {
+        this.broadcast({ type: "engine:restarted", data: {} });
+      }, 2000);
+    }
   }
 
   private setupWSS(): void {
@@ -164,6 +198,11 @@ export class EngineServer {
       ws.on("close", () => {
         this.clients.delete(ws);
         console.log("Client disconnected");
+      });
+
+      ws.on("error", (err) => {
+        console.warn("[engine] WebSocket client error:", err);
+        this.clients.delete(ws);
       });
     });
   }
@@ -279,6 +318,69 @@ export class EngineServer {
             this.broadcast({
               type: questionType,
               data: { fleetId, message: questionMessage },
+            });
+          } else if (
+            parsed.type === "tool_use" &&
+            parsed.tool === "Agent"
+          ) {
+            // Dispatch sub-agent launched — register and notify frontend
+            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
+            const toolUseId = parsed.toolUseId as string | undefined;
+            const dispatchName = (toolInput?.description as string) ?? "dispatch";
+            if (toolUseId) {
+              const dispatch = manager.registerDispatch(fleetId, toolUseId, dispatchName);
+              if (dispatch) {
+                this.broadcast({
+                  type: `${role}:dispatch-started`,
+                  data: { fleetId, dispatch },
+                });
+              }
+            }
+            manager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: streamType,
+              data: { fleetId, message: parsed },
+            });
+          } else if (
+            parsed.type === "system" &&
+            (parsed.subtype === "dispatch-log" || parsed.subtype === "task-notification")
+          ) {
+            // Dispatch completed — update status and notify frontend
+            const result = parsed.content;
+            const dispatch = manager.completeLatestDispatch(fleetId, "completed", result);
+            if (dispatch) {
+              this.broadcast({
+                type: `${role}:dispatch-completed`,
+                data: { fleetId, dispatch },
+              });
+            }
+            manager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: streamType,
+              data: { fleetId, message: parsed },
+            });
+          } else if (
+            parsed.type === "tool_result" &&
+            parsed.toolUseId
+          ) {
+            // Fallback: complete dispatch by matching tool_use_id (#703).
+            // This handles cases where task_notification is missing or empty.
+            const dispatch = manager.updateDispatchStatus(
+              fleetId,
+              parsed.toolUseId as string,
+              "completed",
+              parsed.content,
+            );
+            if (dispatch) {
+              this.broadcast({
+                type: `${role}:dispatch-completed`,
+                data: { fleetId, dispatch },
+              });
+            }
+            manager.addToHistory(fleetId, parsed);
+            this.broadcast({
+              type: streamType,
+              data: { fleetId, message: parsed },
             });
           } else if (parsed.type !== "result") {
             manager.addToHistory(fleetId, parsed);
@@ -412,8 +514,9 @@ export class EngineServer {
         return;
       }
       console.warn(
-        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — will stop and await manual retry`,
+        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — backoff will apply on next retry`,
       );
+      this.shipManager.setLastRateLimitAt(id, Date.now());
     });
 
     this.processManager.on("error", (id: string, error: Error) => {
@@ -826,6 +929,7 @@ export class EngineServer {
     if (updates.shipRulePaths !== undefined) fleet.shipRulePaths = updates.shipRulePaths as string[];
     if (updates.customInstructions !== undefined) fleet.customInstructions = updates.customInstructions as CustomInstructions;
     if (updates.gates !== undefined) fleet.gates = updates.gates as FleetGateSettings;
+    if (updates.gatePrompts !== undefined) fleet.gatePrompts = updates.gatePrompts as Partial<Record<GateType, string>>;
     if (updates.maxConcurrentSorties !== undefined) fleet.maxConcurrentSorties = updates.maxConcurrentSorties as number;
     await this.saveFleets(fleets);
   }
@@ -841,7 +945,11 @@ export class EngineServer {
   // Messaging helpers
   private sendTo(ws: WebSocket, msg: Record<string, unknown>): void {
     if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(msg));
+      try {
+        ws.send(JSON.stringify(msg));
+      } catch (err) {
+        console.warn("[engine] sendTo failed:", err);
+      }
     }
   }
 
@@ -849,7 +957,11 @@ export class EngineServer {
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
       if (client.readyState === client.OPEN) {
-        client.send(data);
+        try {
+          client.send(data);
+        } catch (err) {
+          console.warn("[engine] broadcast send failed:", err);
+        }
       }
     }
   }

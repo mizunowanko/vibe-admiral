@@ -19,10 +19,11 @@ export class FlagshipRequestHandler {
     skillSources?: FleetSkillSources,
     shipExtraPrompt?: string,
     maxConcurrentSorties?: number,
+    customInstructionsText?: string,
   ): Promise<string> {
     switch (request.request) {
       case "sortie":
-        return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt, maxConcurrentSorties);
+        return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt, maxConcurrentSorties, customInstructionsText);
       case "ship-status":
         return this.handleShipStatus(fleetId);
       case "ship-stop":
@@ -35,6 +36,8 @@ export class FlagshipRequestHandler {
         return this.handleShipDelete(request);
       case "pr-review-result":
         return this.handlePRReviewResult(request);
+      case "restart":
+        return "[Restart] Use POST /api/restart endpoint directly";
     }
   }
 
@@ -46,6 +49,7 @@ export class FlagshipRequestHandler {
     skillSources?: FleetSkillSources,
     shipExtraPrompt?: string,
     maxConcurrentSorties?: number,
+    customInstructionsText?: string,
   ): Promise<string> {
     // Determine concurrent sortie limit (static, not dynamically adjusted)
     const configuredMax = maxConcurrentSorties ?? 6;
@@ -86,6 +90,13 @@ export class FlagshipRequestHandler {
         continue;
       }
 
+      // Append non-blocking file overlap warnings (informational only)
+      if (guard.warnings?.length) {
+        for (const warning of guard.warnings) {
+          results.push(`⚠️ ${item.repo}#${item.issueNumber}: ${warning}`);
+        }
+      }
+
       // Find local path
       const repoEntry = fleetRepos.find(
         (r) => r.remote === item.repo || r.localPath === item.repo,
@@ -106,6 +117,7 @@ export class FlagshipRequestHandler {
           skillSources,
           shipExtraPrompt,
           item.skill,
+          customInstructionsText,
         );
         launched++;
         results.push(

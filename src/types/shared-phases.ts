@@ -6,35 +6,35 @@
  */
 
 // === Phase (Ship lifecycle) ===
-// Gate is a phase: planning → planning-gate → implementing → implementing-gate
-// → acceptance-test → acceptance-test-gate → merging → done
+// Gate is a phase: plan → plan-gate → coding → coding-gate
+// → qa → qa-gate → merging → done
 // "error" is a derived state: phase ≠ done && process dead.
 export type Phase =
-  | "planning"
-  | "planning-gate"
-  | "implementing"
-  | "implementing-gate"
-  | "acceptance-test"
-  | "acceptance-test-gate"
+  | "plan"
+  | "plan-gate"
+  | "coding"
+  | "coding-gate"
+  | "qa"
+  | "qa-gate"
   | "merging"
   | "done"
   | "stopped";
 
 /** Ordered list of active phases (excludes "stopped"). Used for progress display. */
 export const PHASE_ORDER: readonly Phase[] = [
-  "planning",
-  "planning-gate",
-  "implementing",
-  "implementing-gate",
-  "acceptance-test",
-  "acceptance-test-gate",
+  "plan",
+  "plan-gate",
+  "coding",
+  "coding-gate",
+  "qa",
+  "qa-gate",
   "merging",
 ] as const;
 
 /** Gate phases where Escort review is required. */
-export type GatePhase = "planning-gate" | "implementing-gate" | "acceptance-test-gate";
+export type GatePhase = "plan-gate" | "coding-gate" | "qa-gate";
 
 /** Check if a phase is a gate phase. */
 export function isGatePhase(phase: Phase): phase is GatePhase {
-  return phase === "planning-gate" || phase === "implementing-gate" || phase === "acceptance-test-gate";
+  return phase === "plan-gate" || phase === "coding-gate" || phase === "qa-gate";
 }

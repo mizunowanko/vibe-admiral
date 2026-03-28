@@ -20,9 +20,9 @@ function createTestActor(overrides?: Partial<ShipMachineInput>) {
 
 describe("shipMachine", () => {
   describe("initial state", () => {
-    it("starts in planning", () => {
+    it("starts in plan", () => {
       const actor = createTestActor();
-      expect(actor.getSnapshot().value).toBe("planning");
+      expect(actor.getSnapshot().value).toBe("plan");
       actor.stop();
     });
 
@@ -56,64 +56,64 @@ describe("shipMachine", () => {
     });
   });
 
-  describe("forward transitions: planning → done", () => {
-    it("transitions planning → planning-gate on GATE_ENTER", () => {
+  describe("forward transitions: plan → done", () => {
+    it("transitions plan → plan-gate on GATE_ENTER", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
-      expect(actor.getSnapshot().value).toBe("planning-gate");
+      expect(actor.getSnapshot().value).toBe("plan-gate");
       actor.stop();
     });
 
-    it("transitions planning-gate → implementing on GATE_APPROVED", () => {
-      const actor = createTestActor();
-      actor.send({ type: "GATE_ENTER" });
-      actor.send({ type: "GATE_APPROVED" });
-      expect(actor.getSnapshot().value).toBe("implementing");
-      actor.stop();
-    });
-
-    it("transitions implementing → implementing-gate on GATE_ENTER", () => {
-      const actor = createTestActor();
-      actor.send({ type: "GATE_ENTER" }); // → planning-gate
-      actor.send({ type: "GATE_APPROVED" }); // → implementing
-      actor.send({ type: "GATE_ENTER" }); // → implementing-gate
-      expect(actor.getSnapshot().value).toBe("implementing-gate");
-      actor.stop();
-    });
-
-    it("transitions implementing-gate → acceptance-test on GATE_APPROVED", () => {
+    it("transitions plan-gate → coding on GATE_APPROVED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
-      actor.send({ type: "GATE_ENTER" });
-      actor.send({ type: "GATE_APPROVED" });
-      expect(actor.getSnapshot().value).toBe("acceptance-test");
+      expect(actor.getSnapshot().value).toBe("coding");
       actor.stop();
     });
 
-    it("transitions acceptance-test → acceptance-test-gate on GATE_ENTER (qaRequired=true)", () => {
+    it("transitions coding → coding-gate on GATE_ENTER", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" }); // → plan-gate
+      actor.send({ type: "GATE_APPROVED" }); // → coding
+      actor.send({ type: "GATE_ENTER" }); // → coding-gate
+      expect(actor.getSnapshot().value).toBe("coding-gate");
+      actor.stop();
+    });
+
+    it("transitions coding-gate → qa on GATE_APPROVED", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      expect(actor.getSnapshot().value).toBe("qa");
+      actor.stop();
+    });
+
+    it("transitions qa → qa-gate on GATE_ENTER (qaRequired=true)", () => {
       const actor = createTestActor({ qaRequired: true });
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
-      expect(actor.getSnapshot().value).toBe("acceptance-test-gate");
+      expect(actor.getSnapshot().value).toBe("qa-gate");
       actor.stop();
     });
 
-    it("skips acceptance-test-gate when qaRequired=false", () => {
+    it("skips qa-gate when qaRequired=false", () => {
       const actor = createTestActor({ qaRequired: false });
-      actor.send({ type: "GATE_ENTER" }); // → planning-gate
-      actor.send({ type: "GATE_APPROVED" }); // → implementing
-      actor.send({ type: "GATE_ENTER" }); // → implementing-gate
-      actor.send({ type: "GATE_APPROVED" }); // → acceptance-test
+      actor.send({ type: "GATE_ENTER" }); // → plan-gate
+      actor.send({ type: "GATE_APPROVED" }); // → coding
+      actor.send({ type: "GATE_ENTER" }); // → coding-gate
+      actor.send({ type: "GATE_APPROVED" }); // → qa
       actor.send({ type: "GATE_ENTER" }); // → merging (skip gate)
       expect(actor.getSnapshot().value).toBe("merging");
       actor.stop();
     });
 
-    it("transitions acceptance-test-gate → merging on GATE_APPROVED", () => {
+    it("transitions qa-gate → merging on GATE_APPROVED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
@@ -140,80 +140,80 @@ describe("shipMachine", () => {
   });
 
   describe("gate rejection", () => {
-    it("rejects planning-gate → planning on GATE_REJECTED", () => {
+    it("rejects plan-gate → plan on GATE_REJECTED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
-      expect(actor.getSnapshot().value).toBe("planning-gate");
+      expect(actor.getSnapshot().value).toBe("plan-gate");
       actor.send({ type: "GATE_REJECTED", feedback: "needs more detail" });
-      expect(actor.getSnapshot().value).toBe("planning");
+      expect(actor.getSnapshot().value).toBe("plan");
       expect(actor.getSnapshot().context.gateCheck).toBeNull();
       actor.stop();
     });
 
-    it("rejects implementing-gate → implementing on GATE_REJECTED", () => {
+    it("rejects coding-gate → coding on GATE_REJECTED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
-      expect(actor.getSnapshot().value).toBe("implementing-gate");
+      expect(actor.getSnapshot().value).toBe("coding-gate");
       actor.send({ type: "GATE_REJECTED" });
-      expect(actor.getSnapshot().value).toBe("implementing");
+      expect(actor.getSnapshot().value).toBe("coding");
       actor.stop();
     });
 
-    it("rejects acceptance-test-gate → acceptance-test on GATE_REJECTED", () => {
+    it("rejects qa-gate → qa on GATE_REJECTED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
-      expect(actor.getSnapshot().value).toBe("acceptance-test-gate");
+      expect(actor.getSnapshot().value).toBe("qa-gate");
       actor.send({ type: "GATE_REJECTED" });
-      expect(actor.getSnapshot().value).toBe("acceptance-test");
+      expect(actor.getSnapshot().value).toBe("qa");
       actor.stop();
     });
 
     it("allows re-entry after gate rejection", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
-      actor.send({ type: "GATE_REJECTED" }); // back to planning
+      actor.send({ type: "GATE_REJECTED" }); // back to plan
       actor.send({ type: "GATE_ENTER" }); // re-enter gate
-      expect(actor.getSnapshot().value).toBe("planning-gate");
+      expect(actor.getSnapshot().value).toBe("plan-gate");
       actor.send({ type: "GATE_APPROVED" }); // now approved
-      expect(actor.getSnapshot().value).toBe("implementing");
+      expect(actor.getSnapshot().value).toBe("coding");
       actor.stop();
     });
   });
 
   describe("ESCORT_DIED", () => {
-    it("reverts planning-gate → planning on ESCORT_DIED", () => {
+    it("reverts plan-gate → plan on ESCORT_DIED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "ESCORT_DIED", exitCode: 1 });
-      expect(actor.getSnapshot().value).toBe("planning");
+      expect(actor.getSnapshot().value).toBe("plan");
       expect(actor.getSnapshot().context.gateCheck).toBeNull();
       actor.stop();
     });
 
-    it("reverts implementing-gate → implementing on ESCORT_DIED", () => {
+    it("reverts coding-gate → coding on ESCORT_DIED", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "ESCORT_DIED", exitCode: null });
-      expect(actor.getSnapshot().value).toBe("implementing");
+      expect(actor.getSnapshot().value).toBe("coding");
       actor.stop();
     });
   });
 
   describe("gate entry sets gateCheck", () => {
-    it("sets gateCheck on planning-gate entry", () => {
+    it("sets gateCheck on plan-gate entry", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       const gc = actor.getSnapshot().context.gateCheck;
       expect(gc).not.toBeNull();
-      expect(gc?.gatePhase).toBe("planning-gate");
+      expect(gc?.gatePhase).toBe("plan-gate");
       expect(gc?.gateType).toBe("plan-review");
       expect(gc?.status).toBe("pending");
       actor.stop();
@@ -230,21 +230,21 @@ describe("shipMachine", () => {
   });
 
   describe("STOP / RESUME", () => {
-    it("transitions to stopped from planning", () => {
+    it("transitions to stopped from plan", () => {
       const actor = createTestActor();
       actor.send({ type: "STOP" });
       expect(actor.getSnapshot().value).toBe("stopped");
-      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("planning");
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("plan");
       actor.stop();
     });
 
-    it("transitions to stopped from implementing", () => {
+    it("transitions to stopped from coding", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "STOP" });
       expect(actor.getSnapshot().value).toBe("stopped");
-      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("implementing");
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("coding");
       actor.stop();
     });
 
@@ -253,18 +253,18 @@ describe("shipMachine", () => {
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "STOP" });
       expect(actor.getSnapshot().value).toBe("stopped");
-      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("planning-gate");
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("plan-gate");
       actor.stop();
     });
 
     it("resumes to correct phase from stopped", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
-      actor.send({ type: "GATE_APPROVED" }); // implementing
+      actor.send({ type: "GATE_APPROVED" }); // coding
       actor.send({ type: "STOP" });
       expect(actor.getSnapshot().value).toBe("stopped");
       actor.send({ type: "RESUME" });
-      expect(actor.getSnapshot().value).toBe("implementing");
+      expect(actor.getSnapshot().value).toBe("coding");
       expect(actor.getSnapshot().context.processDead).toBe(false);
       expect(actor.getSnapshot().context.retryCount).toBe(1);
       actor.stop();
@@ -281,17 +281,17 @@ describe("shipMachine", () => {
       actor.stop();
     });
 
-    it("resumes to implementing as default when phaseBeforeStopped is unknown", () => {
+    it("resumes to coding as default when phaseBeforeStopped is unknown", () => {
       // Force phaseBeforeStopped to null by starting fresh and stopping
-      // The actor has phaseBeforeStopped = "planning" by default when stopped from planning
+      // The actor has phaseBeforeStopped = "plan" by default when stopped from plan
       // For this edge case, we need a scenario where phaseBeforeStopped doesn't match any guard
-      // The default guard catches this and resumes to implementing
+      // The default guard catches this and resumes to coding
       const actor = createTestActor();
       // Cannot easily test null phaseBeforeStopped since STOP always sets it
       // But we can verify the default branch works by testing all known phases
-      actor.send({ type: "STOP" }); // from planning
-      actor.send({ type: "RESUME" }); // resumes to planning (matched by guard)
-      expect(actor.getSnapshot().value).toBe("planning");
+      actor.send({ type: "STOP" }); // from plan
+      actor.send({ type: "RESUME" }); // resumes to plan (matched by guard)
+      expect(actor.getSnapshot().value).toBe("plan");
       actor.stop();
     });
 
@@ -311,14 +311,14 @@ describe("shipMachine", () => {
   });
 
   describe("NOTHING_TO_DO", () => {
-    it("transitions planning → done on NOTHING_TO_DO", () => {
+    it("transitions plan → done on NOTHING_TO_DO", () => {
       const actor = createTestActor();
       actor.send({ type: "NOTHING_TO_DO", reason: "No work" });
       expect(actor.getSnapshot().value).toBe("done");
       actor.stop();
     });
 
-    it("transitions implementing → done on NOTHING_TO_DO", () => {
+    it("transitions coding → done on NOTHING_TO_DO", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
@@ -441,9 +441,9 @@ describe("shipMachine", () => {
 
     it("ABANDON is only available in stopped state", () => {
       const actor = createTestActor();
-      // ABANDON in planning should be ignored
+      // ABANDON in plan should be ignored
       actor.send({ type: "ABANDON" });
-      expect(actor.getSnapshot().value).toBe("planning");
+      expect(actor.getSnapshot().value).toBe("plan");
       actor.stop();
     });
   });
@@ -451,8 +451,8 @@ describe("shipMachine", () => {
   describe("SET_PHASE_BEFORE_STOPPED", () => {
     it("updates phaseBeforeStopped context", () => {
       const actor = createTestActor();
-      actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "implementing" });
-      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("implementing");
+      actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "coding" });
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("coding");
       actor.stop();
     });
 
@@ -462,7 +462,7 @@ describe("shipMachine", () => {
       // 2. SET_PHASE_BEFORE_STOPPED syncs from DB
       // 3. RESUME uses the synced value
       const actor = createTestActor();
-      actor.send({ type: "STOP" }); // phaseBeforeStopped = "planning"
+      actor.send({ type: "STOP" }); // phaseBeforeStopped = "plan"
       // Simulate context override from DB
       actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "merging" });
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("merging");
@@ -474,8 +474,8 @@ describe("shipMachine", () => {
 
   describe("phaseBeforeStopped via input", () => {
     it("initializes phaseBeforeStopped from input", () => {
-      const actor = createTestActor({ phaseBeforeStopped: "acceptance-test" });
-      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("acceptance-test");
+      const actor = createTestActor({ phaseBeforeStopped: "qa" });
+      expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("qa");
       actor.stop();
     });
 
@@ -484,14 +484,28 @@ describe("shipMachine", () => {
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBeNull();
       actor.stop();
     });
+
+    it("RESUME with unrecognized phaseBeforeStopped goes to plan, not coding (#689)", () => {
+      const actor = createTestActor();
+      // Stop from plan (sets phaseBeforeStopped to "plan")
+      actor.send({ type: "STOP" });
+      expect(actor.getSnapshot().value).toBe("stopped");
+      // Override phaseBeforeStopped to a value with no matching guard (no "wasDone" guard)
+      // This simulates the edge case where phaseBeforeStopped is unknown/unexpected.
+      actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "done" });
+      // RESUME: no guard matches "done" → default target should be "plan" (not "coding")
+      actor.send({ type: "RESUME" });
+      expect(actor.getSnapshot().value).toBe("plan");
+      actor.stop();
+    });
   });
 });
 
 describe("stateValueToPhase", () => {
   it("maps state values to Phase types", () => {
-    expect(stateValueToPhase("planning")).toBe("planning");
-    expect(stateValueToPhase("planning-gate")).toBe("planning-gate");
-    expect(stateValueToPhase("implementing")).toBe("implementing");
+    expect(stateValueToPhase("plan")).toBe("plan");
+    expect(stateValueToPhase("plan-gate")).toBe("plan-gate");
+    expect(stateValueToPhase("coding")).toBe("coding");
     expect(stateValueToPhase("done")).toBe("done");
     expect(stateValueToPhase("stopped")).toBe("stopped");
   });
@@ -499,14 +513,14 @@ describe("stateValueToPhase", () => {
 
 describe("phaseToGateEvent", () => {
   it("returns GATE_ENTER for gate phases", () => {
-    expect(phaseToGateEvent("planning-gate")).toEqual({ type: "GATE_ENTER" });
-    expect(phaseToGateEvent("implementing-gate")).toEqual({ type: "GATE_ENTER" });
-    expect(phaseToGateEvent("acceptance-test-gate")).toEqual({ type: "GATE_ENTER" });
+    expect(phaseToGateEvent("plan-gate")).toEqual({ type: "GATE_ENTER" });
+    expect(phaseToGateEvent("coding-gate")).toEqual({ type: "GATE_ENTER" });
+    expect(phaseToGateEvent("qa-gate")).toEqual({ type: "GATE_ENTER" });
   });
 
   it("returns null for non-gate phases", () => {
-    expect(phaseToGateEvent("planning")).toBeNull();
-    expect(phaseToGateEvent("implementing")).toBeNull();
+    expect(phaseToGateEvent("plan")).toBeNull();
+    expect(phaseToGateEvent("coding")).toBeNull();
     expect(phaseToGateEvent("merging")).toBeNull();
     expect(phaseToGateEvent("done")).toBeNull();
   });

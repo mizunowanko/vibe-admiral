@@ -19,7 +19,7 @@ function createMockShipProcess(overrides?: Partial<ShipProcess>): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test issue",
-    phase: "implementing",
+    phase: "coding",
     isCompacting: false,
     branchName: "feature/42-test",
     worktreePath: "/tmp/worktree",
@@ -57,36 +57,67 @@ describe("ShipActorManager", () => {
     it("creates an actor and tracks it", () => {
       manager.createActor(DEFAULT_INPUT);
       expect(manager.hasActor("ship-1")).toBe(true);
-      expect(manager.getPhase("ship-1")).toBe("planning");
+      expect(manager.getPhase("ship-1")).toBe("plan");
       manager.stopAll();
     });
 
     it("stops existing actor on re-create (re-sortie)", () => {
       manager.createActor(DEFAULT_INPUT);
-      expect(manager.getPhase("ship-1")).toBe("planning");
+      expect(manager.getPhase("ship-1")).toBe("plan");
       // Send event to advance state
       manager.send("ship-1", { type: "GATE_ENTER" });
-      expect(manager.getPhase("ship-1")).toBe("planning-gate");
-      // Re-create should reset to planning
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
+      // Re-create should reset to plan
       manager.createActor(DEFAULT_INPUT);
-      expect(manager.getPhase("ship-1")).toBe("planning");
+      expect(manager.getPhase("ship-1")).toBe("plan");
       manager.stopAll();
     });
   });
 
   describe("restoreActor", () => {
-    it("restores actor and returns effective DB phase", () => {
-      const ship = createMockShipProcess({ phase: "implementing" });
+    it("restores actor and replays to DB phase", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.hasActor("ship-1")).toBe(true);
-      // getPhase should return DB phase, not XState state
-      expect(manager.getPhase("ship-1")).toBe("implementing");
+      // XState should be replayed to "coding", not stuck at "plan"
+      expect(manager.getPhase("ship-1")).toBe("coding");
       manager.stopAll();
     });
 
-    it("restores actor for stopped phase", () => {
-      const ship = createMockShipProcess({ phase: "stopped" });
+    it("replays to plan-gate phase", () => {
+      const ship = createMockShipProcess({ phase: "plan-gate" });
       manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
+      manager.stopAll();
+    });
+
+    it("replays to qa phase", () => {
+      const ship = createMockShipProcess({ phase: "qa" });
+      manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("qa");
+      manager.stopAll();
+    });
+
+    it("replays to merging phase", () => {
+      const ship = createMockShipProcess({ phase: "merging" });
+      manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("merging");
+      manager.stopAll();
+    });
+
+    it("restores actor for stopped phase with phaseBeforeStopped", () => {
+      const ship = createMockShipProcess({ phase: "stopped" });
+      manager.restoreActor(ship, "coding");
+      expect(manager.getPhase("ship-1")).toBe("stopped");
+      // Verify the actor is in stopped state and can resume to coding
+      manager.send("ship-1", { type: "RESUME" });
+      expect(manager.getPhase("ship-1")).toBe("coding");
+      manager.stopAll();
+    });
+
+    it("restores stopped actor when phaseBeforeStopped is plan", () => {
+      const ship = createMockShipProcess({ phase: "stopped" });
+      manager.restoreActor(ship, "plan");
       expect(manager.getPhase("ship-1")).toBe("stopped");
       manager.stopAll();
     });
@@ -98,22 +129,30 @@ describe("ShipActorManager", () => {
       expect(manager.hasActor("ship-1")).toBe(false);
     });
 
-    it("does not fire onPhaseChange during restoration", () => {
-      const ship = createMockShipProcess({ phase: "implementing" });
+    it("does not fire onPhaseChange during replay", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
+      // Side effects should be suppressed during replay
       expect(sideEffects.onPhaseChange).not.toHaveBeenCalled();
       manager.stopAll();
     });
 
-    it("clears effective phase after a real transition", () => {
-      const ship = createMockShipProcess({ phase: "implementing" });
+    it("transitions correctly after restore (GATE_ENTER from coding → coding-gate)", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
-      expect(manager.getPhase("ship-1")).toBe("implementing");
-      // Send a real event that transitions the XState actor
+      expect(manager.getPhase("ship-1")).toBe("coding");
+      // This is the key fix: GATE_ENTER should now go to coding-gate, not plan-gate
       manager.send("ship-1", { type: "GATE_ENTER" });
-      // Now getPhase should return the XState state (planning-gate because
-      // XState started at planning and GATE_ENTER → planning-gate)
-      expect(manager.getPhase("ship-1")).toBe("planning-gate");
+      expect(manager.getPhase("ship-1")).toBe("coding-gate");
+      manager.stopAll();
+    });
+
+    it("fires onPhaseChange for transitions after restore", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
+      manager.restoreActor(ship);
+      (sideEffects.onPhaseChange as ReturnType<typeof vi.fn>).mockClear();
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(sideEffects.onPhaseChange).toHaveBeenCalledWith("ship-1", "coding-gate");
       manager.stopAll();
     });
   });
@@ -123,7 +162,7 @@ describe("ShipActorManager", () => {
       manager.createActor(DEFAULT_INPUT);
       const result = manager.send("ship-1", { type: "GATE_ENTER" });
       expect(result).toBe(true);
-      expect(manager.getPhase("ship-1")).toBe("planning-gate");
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
       manager.stopAll();
     });
 
@@ -140,7 +179,7 @@ describe("ShipActorManager", () => {
 
     it("returns current phase for active actor", () => {
       manager.createActor(DEFAULT_INPUT);
-      expect(manager.getPhase("ship-1")).toBe("planning");
+      expect(manager.getPhase("ship-1")).toBe("plan");
       manager.stopAll();
     });
   });
@@ -169,10 +208,10 @@ describe("ShipActorManager", () => {
       expect(manager.getPhase("ship-1")).toBeUndefined();
     });
 
-    it("clears effective phase on stop", () => {
-      const ship = createMockShipProcess({ phase: "implementing" });
+    it("clears replayed actor on stop", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
-      expect(manager.getPhase("ship-1")).toBe("implementing");
+      expect(manager.getPhase("ship-1")).toBe("coding");
       manager.stopActor("ship-1");
       expect(manager.getPhase("ship-1")).toBeUndefined();
     });
@@ -210,22 +249,22 @@ describe("ShipActorManager", () => {
       const result = manager.requestTransition("ship-1", { type: "GATE_ENTER" });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.fromPhase).toBe("planning");
-        expect(result.toPhase).toBe("planning-gate");
+        expect(result.fromPhase).toBe("plan");
+        expect(result.toPhase).toBe("plan-gate");
       }
       manager.stopAll();
     });
 
     it("returns failure when XState rejects the event", () => {
       manager.createActor(DEFAULT_INPUT);
-      // planning state does not accept GATE_APPROVED — only GATE_ENTER
+      // plan state does not accept GATE_APPROVED — only GATE_ENTER
       const result = manager.requestTransition("ship-1", { type: "GATE_APPROVED" });
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.currentPhase).toBe("planning");
+        expect(result.currentPhase).toBe("plan");
       }
       // Phase should not have changed
-      expect(manager.getPhase("ship-1")).toBe("planning");
+      expect(manager.getPhase("ship-1")).toBe("plan");
       manager.stopAll();
     });
 
@@ -239,16 +278,16 @@ describe("ShipActorManager", () => {
 
     it("supports gate rejection (gate → previous work phase)", () => {
       manager.createActor(DEFAULT_INPUT);
-      // Advance to planning-gate
+      // Advance to plan-gate
       manager.send("ship-1", { type: "GATE_ENTER" });
-      expect(manager.getPhase("ship-1")).toBe("planning-gate");
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
 
       // Reject the gate
       const result = manager.requestTransition("ship-1", { type: "GATE_REJECTED", feedback: "needs work" });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.fromPhase).toBe("planning-gate");
-        expect(result.toPhase).toBe("planning");
+        expect(result.fromPhase).toBe("plan-gate");
+        expect(result.toPhase).toBe("plan");
       }
       manager.stopAll();
     });
@@ -256,7 +295,7 @@ describe("ShipActorManager", () => {
     it("supports ESCORT_DIED event (gate → previous work phase)", () => {
       manager.createActor(DEFAULT_INPUT);
       manager.send("ship-1", { type: "GATE_ENTER" });
-      expect(manager.getPhase("ship-1")).toBe("planning-gate");
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
 
       const result = manager.requestTransition("ship-1", {
         type: "ESCORT_DIED",
@@ -265,8 +304,8 @@ describe("ShipActorManager", () => {
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.fromPhase).toBe("planning-gate");
-        expect(result.toPhase).toBe("planning");
+        expect(result.fromPhase).toBe("plan-gate");
+        expect(result.toPhase).toBe("plan");
       }
       manager.stopAll();
     });
@@ -276,21 +315,50 @@ describe("ShipActorManager", () => {
       const result = manager.requestTransition("ship-1", { type: "NOTHING_TO_DO", reason: "issue resolved" });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.fromPhase).toBe("planning");
+        expect(result.fromPhase).toBe("plan");
         expect(result.toPhase).toBe("done");
       }
       manager.stopAll();
     });
 
-    it("prevents skipping phases (e.g. planning → merging)", () => {
+    it("prevents skipping phases (e.g. plan → merging)", () => {
       manager.createActor(DEFAULT_INPUT);
-      // COMPLETE event from planning should not transition (merging → done is valid, but planning → done via COMPLETE is not)
+      // COMPLETE event from plan should not transition (merging → done is valid, but plan → done via COMPLETE is not)
       const result = manager.requestTransition("ship-1", { type: "COMPLETE" });
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.currentPhase).toBe("planning");
+        expect(result.currentPhase).toBe("plan");
       }
       manager.stopAll();
+    });
+  });
+
+  describe("assertPhaseConsistency", () => {
+    it("returns true when XState phase matches DB phase", () => {
+      manager.createActor(DEFAULT_INPUT);
+      expect(manager.assertPhaseConsistency("ship-1", "plan")).toBe(true);
+      manager.stopAll();
+    });
+
+    it("returns false and logs error on phase mismatch", () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      // XState is in "plan", but DB says "coding" — mismatch
+      expect(manager.assertPhaseConsistency("ship-1", "coding")).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Phase consistency MISMATCH"),
+      );
+      errorSpy.mockRestore();
+      manager.stopAll();
+    });
+
+    it("returns false when actor does not exist", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(manager.assertPhaseConsistency("nonexistent", "plan")).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("no actor for Ship"),
+      );
+      warnSpy.mockRestore();
     });
   });
 
@@ -298,7 +366,7 @@ describe("ShipActorManager", () => {
     it("fires onPhaseChange when actor transitions", () => {
       manager.createActor(DEFAULT_INPUT);
       manager.send("ship-1", { type: "GATE_ENTER" });
-      expect(sideEffects.onPhaseChange).toHaveBeenCalledWith("ship-1", "planning-gate");
+      expect(sideEffects.onPhaseChange).toHaveBeenCalledWith("ship-1", "plan-gate");
       manager.stopAll();
     });
 

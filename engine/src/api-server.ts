@@ -6,7 +6,8 @@ import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
-import { isGatePhase, DEFAULT_GATE_TYPES, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { resolveGateType } from "./gate-config.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
@@ -19,17 +20,23 @@ interface ApiDeps {
   getShipManager: () => ShipManager;
   getEscortManager: () => EscortManager;
   getActorManager: () => ShipActorManager;
+  getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
   loadFleets: () => Promise<Array<{
     id: string;
+    name: string;
     repos: FleetRepo[];
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
     shipRulePaths?: string[];
     customInstructions?: CustomInstructions;
+    gates?: import("./types.js").FleetGateSettings;
+    gatePrompts?: Partial<Record<import("./types.js").GateType, string>>;
+    qaRequiredPaths?: string[];
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
+  requestRestart: () => void;
 }
 
 interface ApiResponse {
@@ -127,6 +134,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   repoRemotes: string[];
   skillSources?: FleetSkillSources;
   shipExtraPrompt?: string;
+  customInstructionsText?: string;
   maxConcurrentSorties?: number;
 } | string> {
   const fleets = await deps.loadFleets();
@@ -139,7 +147,8 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   } else if (fleets.length === 0) {
     return "No fleets configured";
   } else {
-    return "Multiple fleets exist — fleetId is required";
+    const fleetList = fleets.map((f) => `  - ${f.id} (${f.name})`).join("\n");
+    return `Multiple fleets exist — fleetId is required. Available fleets:\n${fleetList}`;
   }
   const fleetRepos = fleet.repos;
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);
@@ -155,6 +164,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     repoRemotes,
     skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
+    customInstructionsText: ciText,
     maxConcurrentSorties: fleet.maxConcurrentSorties,
   };
 }
@@ -248,6 +258,46 @@ async function handleShipRoute(
     const metadata = (body.metadata as Record<string, unknown>) ?? {};
     const triggeredBy = (body.triggeredBy as string) ?? "ship";
 
+    // Extract qaRequired from plan-gate metadata (Ship determines this during planning)
+    if (targetPhase === "plan-gate" && typeof metadata.qaRequired === "boolean") {
+      shipManager.setQaRequired(shipId, metadata.qaRequired);
+    }
+
+    // Fallback guard: if Ship requests qa-gate with qaRequired=false,
+    // check actual changed files against fleet's qaRequiredPaths.
+    // If match found, force qaRequired=true before XState evaluates canSkipQA.
+    if (targetPhase === "qa-gate") {
+      const currentShip = db.getShipById(shipId);
+      if (currentShip && !currentShip.qaRequired) {
+        const fleets = await deps.loadFleets();
+        const fleet = fleets.find((f) => f.id === currentShip.fleetId);
+        if (fleet?.qaRequiredPaths?.length) {
+          try {
+            const { execSync } = await import("node:child_process");
+            const changedFiles = execSync("git diff --name-only main...HEAD", {
+              cwd: currentShip.worktreePath,
+              encoding: "utf-8",
+              timeout: 10000,
+            }).trim().split("\n").filter(Boolean);
+
+            const { matchesGlob } = await import("node:path");
+            const hasMatch = changedFiles.some((file) =>
+              fleet.qaRequiredPaths!.some((pattern) => matchesGlob(file, pattern))
+            );
+            if (hasMatch) {
+              console.log(
+                `[api-server] qaRequiredPaths match found for Ship ${shipId.slice(0, 8)}... — overriding qaRequired to true`,
+              );
+              shipManager.setQaRequired(shipId, true);
+            }
+          } catch (err) {
+            console.warn(`[api-server] Failed to check qaRequiredPaths for Ship ${shipId.slice(0, 8)}...:`, err);
+            // Non-fatal: proceed with existing qaRequired value
+          }
+        }
+      }
+    }
+
     // Determine the XState event based on target phase
     const actorManager = deps.getActorManager();
     let xstateEvent: import("./ship-machine.js").ShipMachineEvent;
@@ -287,7 +337,32 @@ async function handleShipRoute(
     // Handle gate-specific side effects: launch Escort on-demand for each gate
     if (isGatePhase(result.toPhase)) {
       const gatePhase = result.toPhase as GatePhase;
-      const gateType = DEFAULT_GATE_TYPES[gatePhase];
+
+      // Resolve gate type from fleet settings (supports disabled / auto-approve / override)
+      const fleets = await deps.loadFleets();
+      const fleet = fleets.find((f) => f.id === ship.fleetId);
+      const gateType = resolveGateType(gatePhase, fleet?.gates);
+
+      // Gate disabled or auto-approve: skip Escort, auto-transition to next phase
+      if (gateType === null || gateType === "auto-approve") {
+        const reason = gateType === null ? "gate disabled" : "auto-approve";
+        console.log(`[api-server] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
+        const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
+        if (autoResult.success) {
+          try {
+            db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
+              gate_result: "approved",
+              feedback: `Auto-approved: ${reason}`,
+            });
+          } catch (err) {
+            console.error(`[api-server] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
+          }
+          shipManager.syncPhaseFromDb(shipId);
+        }
+        sendJson(res, 200, { ok: true, phase: autoResult.success ? autoResult.toPhase : result.toPhase });
+        return;
+      }
+
       shipManager.setGateCheck(shipId, gatePhase, gateType);
 
       // Re-deploy skills so Escort picks up any changes made by the Ship
@@ -306,18 +381,37 @@ async function handleShipRoute(
       // and are resumed with --resume sessionId for the next gate.
       const escortManager = deps.getEscortManager();
 
-      // Build Escort custom instructions from fleet settings
+      // Build Escort custom instructions and gate prompt from fleet settings
       let escortExtraPrompt: string | undefined;
+      let shipCustomInstructionsText: string | undefined;
       {
-        const fleets = await deps.loadFleets();
-        const fleet = fleets.find((f) => f.id === ship.fleetId);
         const ci = fleet?.customInstructions;
-        const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
-        if (ciParts.length > 0) {
-          escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+        const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
+        if (escortCiParts.length > 0) {
+          escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
+        }
+        // Build Ship's CI text for restoration after Escort exits
+        const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
+        if (shipCiParts.length > 0) {
+          shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
         }
       }
-      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt);
+
+      // Pass fleet's gate prompt for this gate type to Escort via env var
+      const gatePrompt = fleet?.gatePrompts?.[gateType];
+
+      // Build extra env vars for Escort (qaRequiredPaths, qaRequired)
+      const escortExtraEnv: Record<string, string> = {};
+      if (fleet?.qaRequiredPaths?.length) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(fleet.qaRequiredPaths);
+      }
+      // Pass parent Ship's qaRequired to acceptance-test-gate Escort
+      const refreshedShip = db.getShipById(shipId);
+      if (refreshedShip) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
+      }
+
+      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];
@@ -520,6 +614,38 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         return;
       }
 
+      // GET /api/commander-logs — Commander chat history (for Dock↔Flagship cross-read)
+      if (route === "commander-logs" && req.method === "GET") {
+        const role = url.searchParams.get("role");
+        if (role !== "flagship" && role !== "dock") {
+          sendJson(res, 400, { ok: false, error: 'role query parameter is required and must be "flagship" or "dock"' });
+          return;
+        }
+        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        const fleets = await deps.loadFleets();
+        let resolvedFleetId: string;
+        if (fleetId) {
+          if (!fleets.find((f) => f.id === fleetId)) {
+            sendJson(res, 400, { ok: false, error: `Fleet not found: ${fleetId}` });
+            return;
+          }
+          resolvedFleetId = fleetId;
+        } else if (fleets.length === 1) {
+          resolvedFleetId = fleets[0]!.id;
+        } else if (fleets.length === 0) {
+          sendJson(res, 400, { ok: false, error: "No fleets configured" });
+          return;
+        } else {
+          sendJson(res, 400, { ok: false, error: "Multiple fleets exist — fleetId is required" });
+          return;
+        }
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 500);
+        const logs = await deps.getCommanderHistory(role, resolvedFleetId);
+        const trimmed = logs.slice(-limit);
+        sendJson(res, 200, { ok: true, logs: trimmed, role, fleetId: resolvedFleetId } as ApiResponse & { logs: unknown[]; role: string; fleetId: string });
+        return;
+      }
+
       // === Flagship API endpoints (legacy routes) ===
 
       // GET /api/ship-status
@@ -538,6 +664,14 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         );
         deps.broadcastRequestResult(ctx.fleetId, result);
         sendJson(res, 200, { ok: true, result });
+        return;
+      }
+
+      // POST /api/restart — Restart Engine + Frontend
+      if (route === "restart" && req.method === "POST") {
+        sendJson(res, 200, { ok: true, result: "Restart initiated" });
+        // Trigger restart asynchronously after response is sent
+        setImmediate(() => deps.requestRestart());
         return;
       }
 
@@ -610,6 +744,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         ctx.skillSources,
         ctx.shipExtraPrompt,
         ctx.maxConcurrentSorties,
+        ctx.customInstructionsText,
       );
 
       deps.broadcastRequestResult(ctx.fleetId, result);

@@ -69,73 +69,103 @@ describe("EscortManager", () => {
   });
 
   describe("launchEscort", () => {
-    it("launches a new Escort via processManager.sortie for first gate", () => {
-      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+    it("launches a new Escort via processManager.sortie for first gate", async () => {
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
       expect(escortId).not.toBeNull();
       expect(mockDb.upsertEscort).toHaveBeenCalled();
       expect(mockProcessManager.sortie).toHaveBeenCalled();
+
+      const sortieCall = mockProcessManager.sortie.mock.calls[0]!;
+      expect(sortieCall[0]).toBe(escortId); // id
+      expect(sortieCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
+      expect(sortieCall[2]).toBe(42); // issueNumber
+      expect(sortieCall[3]).toEqual(expect.stringContaining("plan-gate")); // prompt
+      expect(sortieCall[4]).toBe("/escort"); // skill
+      expect(sortieCall[5]).toEqual(
+        expect.objectContaining({
+          VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
+          VIBE_ADMIRAL_SHIP_ID: escortId,
+          VIBE_ADMIRAL_PARENT_SHIP_ID: "ship-001",
+        }),
+      ); // env
     });
 
-    it("resumes existing Escort with sessionId for subsequent gates", () => {
+    it("resumes existing Escort with sessionId for subsequent gates", async () => {
       mockDb.getEscortByShipId.mockReturnValue({
         id: "escort-001",
         shipId: "ship-001",
         sessionId: "session-abc",
         processPid: null,
-        phase: "planning",
+        phase: "plan",
         createdAt: new Date().toISOString(),
         completedAt: null,
       });
 
-      const escortId = escortManager.launchEscort("ship-001", "implementing-gate");
+      const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
 
       expect(escortId).toBe("escort-001");
       expect(mockProcessManager.resumeSession).toHaveBeenCalledWith(
         "escort-001",
         "session-abc",
-        expect.stringContaining("implementing-gate"),
+        expect.stringContaining("coding-gate"),
         "/repo/.worktrees/feature/42-test",
         expect.any(Object),
+        undefined,
       );
     });
 
-    it("prevents duplicate Escorts for the same parent Ship", () => {
+    it("prevents duplicate Escorts for the same parent Ship", async () => {
       // First launch succeeds
-      const first = escortManager.launchEscort("ship-001", "planning-gate");
+      const first = await escortManager.launchEscort("ship-001", "plan-gate");
       expect(first).not.toBeNull();
 
       // Second launch is blocked because the Escort process is running
       mockProcessManager.isRunning.mockReturnValue(true);
-      const second = escortManager.launchEscort("ship-001", "planning-gate");
+      const second = await escortManager.launchEscort("ship-001", "plan-gate");
       expect(second).toBeNull();
     });
 
-    it("allows re-launch after previous Escort has exited", () => {
+    it("allows re-launch after previous Escort has exited", async () => {
       // First launch
-      const firstId = escortManager.launchEscort("ship-001", "planning-gate");
+      const firstId = await escortManager.launchEscort("ship-001", "plan-gate");
       expect(firstId).not.toBeNull();
 
       // Escort exits
       mockProcessManager.isRunning.mockReturnValue(false);
-      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "implementing" });
+      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "coding" });
       escortManager.onEscortExit(firstId!, 0);
 
       // Re-launch should succeed
-      const secondId = escortManager.launchEscort("ship-001", "implementing-gate");
+      const secondId = await escortManager.launchEscort("ship-001", "coding-gate");
       expect(secondId).not.toBeNull();
+
+      // Verify the re-launched sortie has correct arguments
+      const lastCall = mockProcessManager.sortie.mock.calls.at(-1)!;
+      expect(lastCall[0]).toBe(secondId); // id
+      expect(lastCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
+      expect(lastCall[2]).toBe(42); // issueNumber
+      expect(lastCall[3]).toEqual(expect.stringContaining("coding-gate")); // prompt
+      expect(lastCall[4]).toBe("/escort"); // skill
+      expect(lastCall[5]).toEqual(
+        expect.objectContaining({
+          VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
+          VIBE_ADMIRAL_SHIP_ID: secondId,
+          VIBE_ADMIRAL_PARENT_SHIP_ID: "ship-001",
+        }),
+      ); // env
     });
 
-    it("returns null if parent Ship not found", () => {
+    it("returns null if parent Ship not found", async () => {
       mockShipManager.getShip.mockReturnValue(undefined);
-      const result = escortManager.launchEscort("non-existent", "planning-gate");
+      const result = await escortManager.launchEscort("non-existent", "plan-gate");
       expect(result).toBeNull();
     });
   });
 
   describe("isEscortRunning", () => {
-    it("returns true when Escort process is running", () => {
-      escortManager.launchEscort("ship-001", "planning-gate");
+    it("returns true when Escort process is running", async () => {
+      await escortManager.launchEscort("ship-001", "plan-gate");
       mockProcessManager.isRunning.mockReturnValue(true);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(true);
@@ -145,8 +175,8 @@ describe("EscortManager", () => {
       expect(escortManager.isEscortRunning("ship-001")).toBe(false);
     });
 
-    it("returns false when Escort process has died", () => {
-      escortManager.launchEscort("ship-001", "planning-gate");
+    it("returns false when Escort process has died", async () => {
+      await escortManager.launchEscort("ship-001", "plan-gate");
       mockProcessManager.isRunning.mockReturnValue(false);
 
       expect(escortManager.isEscortRunning("ship-001")).toBe(false);
@@ -158,7 +188,7 @@ describe("EscortManager", () => {
         shipId: "ship-001",
         sessionId: null,
         processPid: null,
-        phase: "planning",
+        phase: "plan",
         createdAt: new Date().toISOString(),
         completedAt: null,
       });
@@ -170,8 +200,8 @@ describe("EscortManager", () => {
   });
 
   describe("killEscort", () => {
-    it("kills the running Escort and removes tracking", () => {
-      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+    it("kills the running Escort and removes tracking", async () => {
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
       const killed = escortManager.killEscort("ship-001");
 
@@ -185,8 +215,8 @@ describe("EscortManager", () => {
   });
 
   describe("isEscortProcess", () => {
-    it("returns true for active Escort in memory", () => {
-      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+    it("returns true for active Escort in memory", async () => {
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
       expect(escortManager.isEscortProcess(escortId!)).toBe(true);
     });
 
@@ -196,7 +226,7 @@ describe("EscortManager", () => {
         shipId: "ship-001",
         sessionId: null,
         processPid: null,
-        phase: "planning",
+        phase: "plan",
         createdAt: new Date().toISOString(),
         completedAt: null,
       });
@@ -209,8 +239,8 @@ describe("EscortManager", () => {
   });
 
   describe("findShipIdByEscortId", () => {
-    it("finds the parent Ship ID for an active Escort", () => {
-      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+    it("finds the parent Ship ID for an active Escort", async () => {
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
       const shipId = escortManager.findShipIdByEscortId(escortId!);
       expect(shipId).toBe("ship-001");
     });
@@ -221,7 +251,7 @@ describe("EscortManager", () => {
         shipId: "ship-001",
         sessionId: null,
         processPid: null,
-        phase: "planning",
+        phase: "plan",
         createdAt: new Date().toISOString(),
         completedAt: null,
       });
@@ -242,15 +272,15 @@ describe("EscortManager", () => {
   });
 
   describe("onEscortExit", () => {
-    it("cleans up tracking state on exit", () => {
-      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+    it("cleans up tracking state on exit", async () => {
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
       // Parent already moved past gate (verdict submitted)
-      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "implementing" });
+      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "coding" });
       escortManager.onEscortExit(escortId!, 0);
 
       // Should allow re-launch
-      const newEscortId = escortManager.launchEscort("ship-001", "implementing-gate");
+      const newEscortId = await escortManager.launchEscort("ship-001", "coding-gate");
       expect(newEscortId).not.toBeNull();
     });
 
@@ -263,6 +293,7 @@ describe("EscortManager", () => {
       let mockActorManager: {
         send: ReturnType<typeof vi.fn>;
         requestTransition: ReturnType<typeof vi.fn>;
+        getContext: ReturnType<typeof vi.fn>;
       };
       let deathHandler: ReturnType<typeof vi.fn>;
 
@@ -270,6 +301,7 @@ describe("EscortManager", () => {
         mockActorManager = {
           send: vi.fn().mockReturnValue(true),
           requestTransition: vi.fn(),
+          getContext: vi.fn().mockReturnValue({ escortFailCount: 0 }),
         };
         deathHandler = vi.fn();
 
@@ -277,19 +309,19 @@ describe("EscortManager", () => {
         escortManager.setEscortDeathHandler(deathHandler as unknown as Parameters<EscortManager["setEscortDeathHandler"]>[0]);
       });
 
-      it("reverts gate phase via XState requestTransition and persists to DB", () => {
-        const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+      it("reverts gate phase via XState requestTransition and persists to DB", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
         // Parent ship is in gate phase
         mockDb.getShipById.mockReturnValue({
           ...makeShip(),
-          phase: "planning-gate",
+          phase: "plan-gate",
           issueTitle: "Test issue",
         });
         mockActorManager.requestTransition.mockReturnValue({
           success: true,
-          fromPhase: "planning-gate",
-          toPhase: "planning",
+          fromPhase: "plan-gate",
+          toPhase: "plan",
         });
 
         escortManager.onEscortExit(escortId!, 1);
@@ -302,8 +334,8 @@ describe("EscortManager", () => {
 
         expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
           "ship-001",
-          "planning-gate",
-          "planning",
+          "plan-gate",
+          "plan",
           "escort",
           expect.objectContaining({ gate_result: "rejected" }),
         );
@@ -313,32 +345,40 @@ describe("EscortManager", () => {
         expect(deathHandler).toHaveBeenCalled();
       });
 
-      it("does not persist to DB when XState rejects ESCORT_DIED", () => {
-        const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+      it("forces DB sync when XState rejects ESCORT_DIED", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
         mockDb.getShipById.mockReturnValue({
           ...makeShip(),
-          phase: "planning-gate",
+          phase: "plan-gate",
           issueTitle: "Test issue",
         });
         mockActorManager.requestTransition.mockReturnValue({
           success: false,
-          currentPhase: "implementing",
+          currentPhase: "coding",
         });
 
         escortManager.onEscortExit(escortId!, 1);
 
         expect(mockActorManager.requestTransition).toHaveBeenCalled();
-        expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
+        // Now forces DB sync to match XState phase even on rejection
+        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
+          "ship-001",
+          "plan-gate",
+          "coding",
+          "escort",
+          expect.objectContaining({ feedback: expect.stringContaining("forcing DB sync") }),
+        );
+        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
       });
 
-      it("skips XState when parent is no longer in gate phase", () => {
-        const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+      it("skips XState when parent is no longer in gate phase", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
         // Parent already moved past gate (verdict was submitted)
         mockDb.getShipById.mockReturnValue({
           ...makeShip(),
-          phase: "implementing",
+          phase: "coding",
         });
 
         escortManager.onEscortExit(escortId!, 0);
@@ -355,7 +395,7 @@ describe("EscortManager", () => {
       const deathHandler = vi.fn();
       escortManager.setEscortDeathHandler(deathHandler);
 
-      escortManager.notifyLaunchFailure("ship-001", "planning-gate", "test reason");
+      escortManager.notifyLaunchFailure("ship-001", "plan-gate", "test reason");
 
       expect(deathHandler).toHaveBeenCalledWith(
         "ship-001",
@@ -372,20 +412,20 @@ describe("EscortManager", () => {
       escortManager.setEscortDeathHandler(deathHandler);
       mockShipManager.getShip.mockReturnValue(undefined);
 
-      escortManager.notifyLaunchFailure("non-existent", "planning-gate", "reason");
+      escortManager.notifyLaunchFailure("non-existent", "plan-gate", "reason");
 
       expect(deathHandler).not.toHaveBeenCalled();
     });
 
     it("is a no-op when no handler is set", () => {
       // No handler set — should not throw
-      escortManager.notifyLaunchFailure("ship-001", "planning-gate", "reason");
+      escortManager.notifyLaunchFailure("ship-001", "plan-gate", "reason");
     });
   });
 
   describe("cleanupForDoneShip", () => {
-    it("kills Escort process and marks DB record as done", () => {
-      const escortId = escortManager.launchEscort("ship-001", "planning-gate");
+    it("kills Escort process and marks DB record as done", async () => {
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
       escortManager.cleanupForDoneShip("ship-001");
 
@@ -403,7 +443,7 @@ describe("EscortManager", () => {
         shipId: "ship-001",
         sessionId: null,
         processPid: null,
-        phase: "planning",
+        phase: "plan",
         createdAt: new Date().toISOString(),
         completedAt: null,
       });
@@ -428,14 +468,14 @@ describe("EscortManager", () => {
   });
 
   describe("killAll", () => {
-    it("kills all running Escorts", () => {
+    it("kills all running Escorts", async () => {
       // Launch two Escorts for different Ships
       mockShipManager.getShip
         .mockReturnValueOnce(makeShip({ id: "ship-001" }))
         .mockReturnValueOnce(makeShip({ id: "ship-002", issueNumber: 43 }));
 
-      escortManager.launchEscort("ship-001", "planning-gate");
-      escortManager.launchEscort("ship-002", "planning-gate");
+      await escortManager.launchEscort("ship-001", "plan-gate");
+      await escortManager.launchEscort("ship-002", "plan-gate");
 
       escortManager.killAll();
 

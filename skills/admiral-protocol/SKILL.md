@@ -72,6 +72,18 @@ curl -s http://localhost:9721/api/pr-review-result \
 - `verdict`: `"approve"` or `"request-changes"`
 - `comments` (optional): Review comments string
 
+### 6. restart — Restart Engine + Frontend
+
+```bash
+curl -s http://localhost:9721/api/restart -X POST
+```
+
+- Triggers a graceful restart of Engine and Frontend (Vite dev server)
+- Engine broadcasts `engine:restarting` to all WebSocket clients, then shuts down
+- The dev-runner automatically restarts both processes
+- Ship phases persist in DB and survive the restart
+- **Safety**: Always confirm with the human user before calling this endpoint
+
 ## Error Handling
 
 All endpoints return structured JSON:
@@ -95,11 +107,11 @@ Flagship can check `ok` field or HTTP status code to detect failures.
 ```bash
 curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
   -H 'Content-Type: application/json' \
-  -d '{"phase": "planning-gate", "metadata": {"planCommentUrl": "..."}}'
+  -d '{"phase": "plan-gate", "metadata": {"planCommentUrl": "..."}}'
 ```
 
 - Engine validates the transition (forward-only, gate-reject exception)
-- Returns `{ "ok": true, "phase": "planning-gate" }` or `{ "ok": false, "error": "..." }`
+- Returns `{ "ok": true, "phase": "plan-gate" }` or `{ "ok": false, "error": "..." }`
 
 ### 7. phase — Poll current phase
 
@@ -107,7 +119,7 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
 curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase
 ```
 
-- Returns `{ "ok": true, "phase": "implementing" }`
+- Returns `{ "ok": true, "phase": "coding" }`
 
 ### 8. gate-verdict — Escort submits gate result
 
@@ -141,12 +153,12 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
 
 Gate checks are handled via Engine REST API:
 
-1. Ship calls `POST /api/ship/:id/phase-transition` to enter gate phase (e.g. `planning` → `planning-gate`)
+1. Ship calls `POST /api/ship/:id/phase-transition` to enter gate phase (e.g. `plan` → `plan-gate`)
 2. Engine detects gate phase, launches Escort process with appropriate gate skill
 3. Escort performs review, records on GitHub, calls `POST /api/ship/:id/gate-verdict`
 4. Ship polls `GET /api/ship/:id/phase` for phase changes
-5. On approval: Engine transitions to next work phase (e.g. `planning-gate` → `implementing`)
-6. On rejection: Engine reverts to previous phase (e.g. `planning-gate` → `planning`); Ship reads feedback via `GET /api/ship/:id/phase-transition-log`
+5. On approval: Engine transitions to next work phase (e.g. `plan-gate` → `coding`)
+6. On rejection: Engine reverts to previous phase (e.g. `plan-gate` → `plan`); Ship reads feedback via `GET /api/ship/:id/phase-transition-log`
 
 ### Gate Polling Pattern (REST API)
 ```bash

@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Anchor, Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { STATUS_CONFIG, PROCESS_DEAD_CONFIG } from "@/lib/ship-status";
+import { STATUS_CONFIG, PROCESS_DEAD_CONFIG, phaseDisplayName, gateTypeDisplayName } from "@/lib/ship-status";
 import type { Session, Ship } from "@/types";
 
 interface SessionHeaderProps {
@@ -83,20 +83,8 @@ function ShipSessionHeader({
             {statusConfig.animate && (
               <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
             )}
-            {statusConfig.label}
+            {ship.processDead ? "Error" : phaseDisplayName(ship.phase)}
           </Badge>
-          {ship.isCompacting && (
-            <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Compact
-            </Badge>
-          )}
-          {ship.gateCheck?.status === "pending" && (
-            <Badge className="text-[10px] px-1.5 py-0 bg-sky-500/20 text-sky-400">
-              <span className="mr-0.5 inline-block h-1 w-1 rounded-full bg-current animate-pulse" />
-              Gate
-            </Badge>
-          )}
         </div>
         <p className="text-xs font-medium truncate">
           {ship.issueTitle || `Issue #${ship.issueNumber}`}
@@ -145,10 +133,10 @@ function ShipSessionHeader({
                       : "text-green-400",
                 )}
               >
-                Gate: {ship.gateCheck.gatePhase}
+                Gate: {phaseDisplayName(ship.gateCheck.gatePhase)}
               </span>
               <span className="text-muted-foreground">
-                {ship.gateCheck.gateType} | {ship.gateCheck.status}
+                {gateTypeDisplayName(ship.gateCheck.gateType)} | {ship.gateCheck.status.charAt(0).toUpperCase() + ship.gateCheck.status.slice(1)}
               </span>
             </div>
             {ship.gateCheck.feedback && (

@@ -24,7 +24,7 @@ See `engine/src/process-manager.ts` for the implementation.
   - `EnterPlanMode` / `ExitPlanMode`: In `-p` (prompt) mode, plan mode causes the CLI to exit after `ExitPlanMode` without performing the implementation. There is no human to approve the plan in non-interactive mode.
   - `AskUserQuestion`: Ships and Escorts run non-interactively with stdin ignored.
 
-- **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput`
+- **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent`
   - Commanders are restricted to read-only and analysis tools (no Write/Edit).
   - `AskUserQuestion` is allowed; the Engine intercepts it, forwards to the frontend, and returns the answer via stdin `tool_result`.
 
@@ -40,6 +40,7 @@ Set the following environment variables for all Ship, Escort, and session resume
 - `VIBE_ADMIRAL_SHIP_ID` — The Ship's unique ID (set by Engine at sortie/retry)
 - `VIBE_ADMIRAL_MAIN_REPO` — The fleet's main repository (owner/repo)
 - `VIBE_ADMIRAL_ENGINE_PORT` — Engine API port (default: 9721)
+- `VIBE_ADMIRAL_FLEET_ID` — The Fleet's UUID. Set for all Units (Commander, Ship, Escort). Commanders use this to include `fleetId` in Engine API calls (e.g., `POST /api/sortie`)
 
 Ships and Escorts communicate with Engine exclusively via REST API (`curl`). They do NOT access the database directly.
 

@@ -4,10 +4,18 @@ import type { ShipManager } from "./ship-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { StatusManager } from "./status-manager.js";
+import type { Phase } from "./types.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
 const execFileAsync = promisify(execFile);
+
+export interface SortieGuardResult {
+  ok: boolean;
+  reason?: string;
+  /** Non-blocking warnings (e.g., file overlap with active Ships). */
+  warnings?: string[];
+}
 
 /** The only active status label is "status/sortied". */
 export const ACTIVE_STATUS_LABELS = new Set([
@@ -46,7 +54,7 @@ export class StateSync {
   async sortieGuard(
     repo: string,
     issueNumber: number,
-  ): Promise<{ ok: boolean; reason?: string }> {
+  ): Promise<SortieGuardResult> {
     // 1. Check if a Ship is already running for this issue
     const existing = this.shipManager.getShipByIssue(repo, issueNumber);
     if (existing) {
@@ -78,7 +86,108 @@ export class StateSync {
       };
     }
 
-    return { ok: true };
+    // 3. Best-effort file overlap detection with active Ships (non-blocking)
+    const warnings = await this.detectFileOverlap(repo, issueNumber);
+
+    return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
+  }
+
+  /**
+   * Detect potential file overlap between a new issue and active Ships.
+   * Uses `gh pr diff --name-only` on active Ships' PRs and compares with
+   * the new issue's body for file name hints. Best-effort: errors are swallowed.
+   */
+  private async detectFileOverlap(
+    repo: string,
+    issueNumber: number,
+  ): Promise<string[]> {
+    const warnings: string[] = [];
+    try {
+      // Get active ships in the same repo (excluding done/stopped)
+      const activeShips = this.shipManager.getAllShips().filter(
+        (s) =>
+          s.repo === repo &&
+          s.phase !== "done" &&
+          s.phase !== "stopped" &&
+          s.issueNumber !== issueNumber,
+      );
+      if (activeShips.length === 0) return [];
+
+      // Collect changed files from active Ships' PRs
+      const shipFiles = new Map<number, string[]>(); // issueNumber -> files
+      await Promise.all(
+        activeShips.map(async (ship) => {
+          try {
+            const { stdout } = await execFileAsync("gh", [
+              "pr", "diff",
+              "--name-only",
+              "--repo", repo,
+              ship.branchName,
+            ]);
+            const files = stdout.trim().split("\n").filter(Boolean);
+            if (files.length > 0) {
+              shipFiles.set(ship.issueNumber, files);
+            }
+          } catch {
+            // PR may not exist yet — skip
+          }
+        }),
+      );
+      if (shipFiles.size === 0) return [];
+
+      // Extract file name hints from the new issue body (best-effort)
+      const issueBody = await this.getIssueBody(repo, issueNumber);
+      if (!issueBody) return [];
+
+      // Match code-like references: backtick-wrapped file paths or .ts/.tsx/.js/.jsx/.md extensions
+      const filePattern = /`([^`]*\.[a-z]{1,4})`|(\b[\w/.-]+\.(?:ts|tsx|js|jsx|md|json)\b)/g;
+      const mentionedFiles = new Set<string>();
+      let match;
+      while ((match = filePattern.exec(issueBody)) !== null) {
+        const file = match[1] || match[2];
+        if (file) {
+          // Extract just the filename (last segment) for fuzzy matching
+          const basename = file.split("/").pop()!;
+          mentionedFiles.add(basename);
+          mentionedFiles.add(file);
+        }
+      }
+      if (mentionedFiles.size === 0) return [];
+
+      // Compare: find overlapping files
+      for (const [shipIssue, files] of shipFiles) {
+        const overlapping = files.filter((f) => {
+          const basename = f.split("/").pop()!;
+          return mentionedFiles.has(basename) || mentionedFiles.has(f);
+        });
+        if (overlapping.length > 0) {
+          const fileList = overlapping.slice(0, 5).join(", ");
+          const suffix = overlapping.length > 5 ? ` (+${overlapping.length - 5} more)` : "";
+          warnings.push(
+            `Potential file overlap with Ship #${shipIssue}: ${fileList}${suffix}`,
+          );
+        }
+      }
+    } catch (err) {
+      // Best-effort: don't block sortie on detection failure
+      console.warn(
+        `[state-sync] File overlap detection failed for #${issueNumber}:`,
+        err,
+      );
+    }
+    return warnings;
+  }
+
+  private async getIssueBody(
+    repo: string,
+    issueNumber: number,
+  ): Promise<string | null> {
+    try {
+      const issue = await github.getIssue(repo, issueNumber);
+      return issue.body || null;
+    } catch {
+      return null;
+    }
   }
 
   async rollbackLabel(
@@ -221,12 +330,22 @@ export class StateSync {
       this.shipManager.notifyProcessDead(shipId);
 
       // --- PR existence fallback ---
-      // If the Ship is in "implementing" phase and a PR exists for the branch,
+      // If the Ship is in "coding" phase and a PR exists for the branch,
       // the Ship likely created a PR but died before calling the phase-transition API.
-      // Auto-transition to implementing-gate so the Escort can review the PR.
-      if (ship.phase === "implementing") {
-        const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
-        if (prFallbackApplied) return;
+      // Auto-transition to coding-gate so the Escort can review the PR.
+      // Guard: skip if Escort has already failed in this gate (escortFailCount > 0),
+      // to prevent coding ↔ coding-gate infinite loop when Escort keeps crashing.
+      if (ship.phase === "coding") {
+        const context = this.actorManager?.getContext(shipId);
+        if (context && context.escortFailCount > 0) {
+          console.warn(
+            `[state-sync] PR fallback suppressed for Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...): ` +
+            `escortFailCount=${context.escortFailCount} — Escort has been failing in this gate`,
+          );
+        } else {
+          const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
+          if (prFallbackApplied) return;
+        }
       }
 
       // Check if the issue was already closed (PR merged) on GitHub.
@@ -259,8 +378,8 @@ export class StateSync {
   }
 
   /**
-   * PR existence fallback: if a Ship died in "implementing" phase but a PR
-   * already exists for the branch, auto-transition to implementing-gate
+   * PR existence fallback: if a Ship died in "coding" phase but a PR
+   * already exists for the branch, auto-transition to coding-gate
    * so the Escort can review the PR.
    * Returns true if the fallback was applied.
    */
@@ -284,13 +403,13 @@ export class StateSync {
 
       const pr = JSON.parse(trimmed) as { number: number; url: string };
       console.log(
-        `[state-sync] Ship #${issueNumber} (${shipId.slice(0, 8)}...) died in implementing phase ` +
-        `but PR #${pr.number} exists — auto-transitioning to implementing-gate`,
+        `[state-sync] Ship #${issueNumber} (${shipId.slice(0, 8)}...) died in coding phase ` +
+        `but PR #${pr.number} exists — auto-transitioning to coding-gate`,
       );
 
-      // Transition: implementing → implementing-gate via XState GATE_ENTER event
+      // Transition: coding → coding-gate via XState GATE_ENTER event
       this.actorManager?.send(shipId, { type: "GATE_ENTER" });
-      this.shipManager.updatePhase(shipId, "implementing-gate", `PR fallback: PR #${pr.number} found`);
+      this.shipManager.updatePhase(shipId, "coding-gate", `PR fallback: PR #${pr.number} found`);
 
       // Store PR URL so the Escort can find it
       this.shipManager.setPrUrl(shipId, pr.url);
@@ -450,7 +569,15 @@ export class StateSync {
       }
     }
 
-    // 3. Restored ships with no running process remain in their phase.
+    // 3. Validate XState/DB phase consistency after restoration (#689).
+    // Non-blocking: logs warnings but does not alter state.
+    for (const ship of this.shipManager.getAllShips()) {
+      if (ship.phase !== "done") {
+        this.actorManager?.assertPhaseConsistency(ship.id, ship.phase as Phase);
+      }
+    }
+
+    // 4. Restored ships with no running process remain in their phase.
     // The UI will show them as "process dead" based on the derived state.
     // Notify for each so Bridge gets the process-dead notification.
     for (const ship of this.shipManager.getAllShips()) {

@@ -144,7 +144,7 @@ describe("ProcessManager", () => {
           "--output-format",
           "stream-json",
           "--allowedTools",
-          "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+          "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
           "--append-system-prompt",
           "system prompt",
           "--add-dir",

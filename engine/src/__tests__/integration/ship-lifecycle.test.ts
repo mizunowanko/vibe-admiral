@@ -75,7 +75,7 @@ function makeShip(overrides: Partial<ShipProcess> = {}): ShipProcess {
     repo: "owner/repo",
     issueNumber: 42,
     issueTitle: "Test issue",
-    phase: "planning",
+    phase: "plan",
     isCompacting: false,
     branchName: "feature/42-test-issue",
     worktreePath: "/repo/.worktrees/feature/42-test-issue",
@@ -151,7 +151,7 @@ describe("Ship lifecycle (integration)", () => {
       expect(ship.repo).toBe("owner/repo");
       expect(ship.issueNumber).toBe(42);
       expect(ship.issueTitle).toBe("Test issue");
-      expect(ship.phase).toBe("planning");
+      expect(ship.phase).toBe("plan");
       expect(ship.branchName).toBe("feature/42-test-issue");
 
       // Ship should be persisted in DB
@@ -239,35 +239,35 @@ describe("Ship lifecycle (integration)", () => {
     });
 
     it("updatePhase changes phase in DB and notifies handler", () => {
-      shipManager.updatePhase(shipId, "implementing");
+      shipManager.updatePhase(shipId, "coding");
 
       const ship = shipManager.getShip(shipId);
-      expect(ship!.phase).toBe("implementing");
+      expect(ship!.phase).toBe("coding");
 
       // Handler should be notified
       expect(phaseChanges).toHaveLength(1);
-      expect(phaseChanges[0]!.phase).toBe("implementing");
+      expect(phaseChanges[0]!.phase).toBe("coding");
     });
 
     it("does not notify when phase doesn't change", () => {
-      // Phase is already "planning" from sortie
-      shipManager.updatePhase(shipId, "planning");
+      // Phase is already "plan" from sortie
+      shipManager.updatePhase(shipId, "plan");
 
       expect(phaseChanges).toHaveLength(0);
     });
 
     it("records phase transition in audit log", () => {
-      shipManager.updatePhase(shipId, "planning-gate");
+      shipManager.updatePhase(shipId, "plan-gate");
 
       // Check phase_transitions table directly
       const raw = db["db"].prepare(
         "SELECT from_phase, to_phase FROM phase_transitions WHERE ship_id = ?",
       ).all(shipId) as Array<{ from_phase: string; to_phase: string }>;
 
-      // Should have the transition from planning to planning-gate
-      const transition = raw.find((r) => r.to_phase === "planning-gate");
+      // Should have the transition from plan to plan-gate
+      const transition = raw.find((r) => r.to_phase === "plan-gate");
       expect(transition).toBeDefined();
-      expect(transition!.from_phase).toBe("planning");
+      expect(transition!.from_phase).toBe("plan");
     });
 
     it("sets completedAt timestamp when phase becomes done", () => {
@@ -280,12 +280,12 @@ describe("Ship lifecycle (integration)", () => {
 
     it("syncPhaseFromDb reads DB and notifies without writing", () => {
       // Directly update DB (simulate REST API transition)
-      db.updateShipPhase(shipId, "implementing");
+      db.updateShipPhase(shipId, "coding");
 
       shipManager.syncPhaseFromDb(shipId);
 
       expect(phaseChanges).toHaveLength(1);
-      expect(phaseChanges[0]!.phase).toBe("implementing");
+      expect(phaseChanges[0]!.phase).toBe("coding");
     });
   });
 
@@ -299,17 +299,17 @@ describe("Ship lifecycle (integration)", () => {
     });
 
     it("setGateCheck stores pending gate state in runtime", () => {
-      shipManager.setGateCheck(shipId, "planning-gate", "plan-review");
+      shipManager.setGateCheck(shipId, "plan-gate", "plan-review");
 
       const ship = shipManager.getShip(shipId);
       expect(ship!.gateCheck).not.toBeNull();
-      expect(ship!.gateCheck!.gatePhase).toBe("planning-gate");
+      expect(ship!.gateCheck!.gatePhase).toBe("plan-gate");
       expect(ship!.gateCheck!.gateType).toBe("plan-review");
       expect(ship!.gateCheck!.status).toBe("pending");
     });
 
     it("clearGateCheck removes gate state", () => {
-      shipManager.setGateCheck(shipId, "planning-gate", "plan-review");
+      shipManager.setGateCheck(shipId, "plan-gate", "plan-review");
       shipManager.clearGateCheck(shipId);
 
       const ship = shipManager.getShip(shipId);
@@ -384,7 +384,7 @@ describe("Ship lifecycle (integration)", () => {
       expect(ship!.processDead).toBe(true);
 
       // Phase should remain unchanged
-      expect(ship!.phase).toBe("planning");
+      expect(ship!.phase).toBe("plan");
 
       // Should trigger notification with "Process dead" detail
       expect(phaseChanges).toHaveLength(1);
@@ -460,6 +460,40 @@ describe("Ship lifecycle (integration)", () => {
       ship = shipManager.getShip(shipId);
       expect(ship!.retryCount).toBe(2);
     });
+
+    it("preserves current phase for non-stopped process-dead ship with session (#689)", () => {
+      // Ship is in "plan" phase (initial), set sessionId, kill process
+      shipManager.setSessionId(shipId, "sess-plan");
+      processManager.kill(shipId);
+
+      // retryShip should preserve "plan", NOT fall back to "coding"
+      const retried = shipManager.retryShip(shipId);
+      expect(retried).not.toBeNull();
+      const ship = shipManager.getShip(shipId);
+      expect(ship!.phase).toBe("plan");
+    });
+
+    it("sends ship:updated notification even when phase does not change (#683)", () => {
+      // Simulate: ship is in "coding" phase but process died
+      shipManager.updatePhase(shipId, "coding");
+      processManager.kill(shipId);
+      shipManager.notifyProcessDead(shipId);
+      phaseChanges.length = 0; // clear previous notifications
+
+      // Resume the ship — phase stays "coding" but processDead changes
+      shipManager.retryShip(shipId);
+
+      // Should have at least one notification with "Ship resumed"
+      const resumeNotification = phaseChanges.find(
+        (c) => c.detail === "Ship resumed",
+      );
+      expect(resumeNotification).toBeDefined();
+      expect(resumeNotification!.phase).toBe("coding");
+
+      // processDead should be cleared
+      const ship = shipManager.getShip(shipId);
+      expect(ship!.processDead).toBe(false);
+    });
   });
 
   describe("ship queries", () => {
@@ -520,14 +554,14 @@ describe("Ship lifecycle (integration)", () => {
   describe("restoreFromDisk", () => {
     it("restores active ships from DB and creates runtime entries", async () => {
       // Pre-populate DB with an active ship
-      db.upsertShip(makeShip({ id: "restored-ship", phase: "implementing" }));
+      db.upsertShip(makeShip({ id: "restored-ship", phase: "coding" }));
 
       const restored = await shipManager.restoreFromDisk();
       expect(restored).toBe(1);
 
       const ship = shipManager.getShip("restored-ship");
       expect(ship).toBeDefined();
-      expect(ship!.phase).toBe("implementing");
+      expect(ship!.phase).toBe("coding");
     });
 
     it("skips ships that already have runtime entries", async () => {
@@ -550,7 +584,7 @@ describe("Ship lifecycle (integration)", () => {
     });
 
     it("does not purge active ships", async () => {
-      db.upsertShip(makeShip({ id: "active-ship", phase: "implementing" }));
+      db.upsertShip(makeShip({ id: "active-ship", phase: "coding" }));
 
       const purged = shipManager.purgeOrphanShips();
       expect(purged).toBe(0);

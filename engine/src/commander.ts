@@ -2,7 +2,7 @@ import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile } from "
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import { getAdmiralHome } from "./admiral-home.js";
-import type { StreamMessage, PersistedCommanderSession, CommanderRole } from "./types.js";
+import type { StreamMessage, PersistedCommanderSession, CommanderRole, Dispatch, DispatchStatus } from "./types.js";
 
 const MAX_HISTORY = 500;
 
@@ -19,6 +19,8 @@ export interface CommanderSession {
   pendingToolUseId: string | null;
   /** Timestamp (ms epoch) when AskUserQuestion was received (null when no question pending). */
   questionAskedAt: number | null;
+  /** Active and completed Dispatch sub-agents, keyed by toolUseId. */
+  dispatches: Map<string, Dispatch>;
 }
 
 /**
@@ -67,8 +69,11 @@ export class CommanderManager {
       history: restoredHistory,
       pendingToolUseId: null,
       questionAskedAt: null,
+      dispatches: new Map(),
     };
     this.sessions.set(fleetId, session);
+
+    const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
 
     if (session.sessionId) {
       this.processManager.resumeCommander(
@@ -77,6 +82,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
+        commanderEnv,
       );
     } else {
       this.processManager.launchCommander(
@@ -84,6 +90,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
+        commanderEnv,
       );
     }
     return sessionId;
@@ -202,6 +209,64 @@ export class CommanderManager {
       }
     }
     return results;
+  }
+
+  // --- Dispatch tracking ---
+
+  /** Register a new Dispatch when an Agent tool_use is detected. */
+  registerDispatch(fleetId: string, toolUseId: string, name: string): Dispatch | null {
+    const session = this.sessions.get(fleetId);
+    if (!session) return null;
+    const dispatch: Dispatch = {
+      id: toolUseId,
+      parentRole: this.role,
+      fleetId,
+      name,
+      status: "running",
+      startedAt: Date.now(),
+    };
+    session.dispatches.set(toolUseId, dispatch);
+    return dispatch;
+  }
+
+  /** Update a Dispatch status (e.g. on task_notification). */
+  updateDispatchStatus(fleetId: string, dispatchId: string, status: DispatchStatus, result?: string): Dispatch | null {
+    const session = this.sessions.get(fleetId);
+    if (!session) return null;
+    const dispatch = session.dispatches.get(dispatchId);
+    if (!dispatch) return null;
+    dispatch.status = status;
+    if (status === "completed" || status === "failed") {
+      dispatch.completedAt = Date.now();
+    }
+    if (result !== undefined) {
+      dispatch.result = result;
+    }
+    return dispatch;
+  }
+
+  /** Complete the most recent running Dispatch for a fleet. */
+  completeLatestDispatch(fleetId: string, status: DispatchStatus, result?: string): Dispatch | null {
+    const session = this.sessions.get(fleetId);
+    if (!session) return null;
+    // Find the most recently started running dispatch
+    let latest: Dispatch | null = null;
+    for (const d of session.dispatches.values()) {
+      if (d.status === "running") {
+        if (!latest || d.startedAt > latest.startedAt) {
+          latest = d;
+        }
+      }
+    }
+    if (!latest) return null;
+    return this.updateDispatchStatus(fleetId, latest.id, status, result);
+  }
+
+  /** Get all dispatches for a fleet. */
+  getDispatches(fleetId: string): Dispatch[] {
+    const session = this.sessions.get(fleetId);
+    if (!session) return [];
+    return Array.from(session.dispatches.values());
   }
 
   stop(fleetId: string): void {

@@ -47,8 +47,14 @@ export interface Fleet {
   shipRulePaths?: string[];
   /** Per-actor custom instructions (system prompts) injected at launch time. */
   customInstructions?: CustomInstructions;
+  /** Custom Escort prompts per gate type. Overrides default gate skill behavior. */
+  gatePrompts?: Partial<Record<GateType, string>>;
+  /** Glob patterns for paths that force qaRequired=true when changed. Passed to Escorts via env var. */
+  qaRequiredPaths?: string[];
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
+  /** Gate settings: which gate phases are enabled and their types. */
+  gates?: FleetGateSettings;
   createdAt: string;
 }
 
@@ -74,8 +80,14 @@ export interface Session {
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 
 // === Gate ===
-export type GateType = "plan-review" | "code-review" | "playwright";
+export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 export type GateStatus = "pending" | "approved" | "rejected";
+
+/** Per-gate configuration: true = default type, false = disabled, or a specific GateType. */
+export type GateConfig = boolean | GateType;
+
+/** Fleet-level gate settings. Omitted gate phases use defaults. */
+export type FleetGateSettings = Partial<Record<GatePhase, GateConfig>>;
 
 export interface GateCheckState {
   gatePhase: GatePhase;
@@ -112,6 +124,20 @@ export interface Ship {
   createdAt: string;
   /** Escort information attached by the API (only present when escorts exist). */
   escorts?: EscortInfo[];
+}
+
+// === Dispatch (Commander sub-agent launched via Task tool) ===
+export type DispatchStatus = "running" | "completed" | "failed";
+
+export interface Dispatch {
+  id: string;
+  parentRole: CommanderRole;
+  fleetId: string;
+  name: string;
+  status: DispatchStatus;
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
 }
 
 // === Issue ===
@@ -201,6 +227,7 @@ export type ClientMessage =
         shipRulePaths?: string[];
         customInstructions?: CustomInstructions;
         maxConcurrentSorties?: number;
+        gates?: FleetGateSettings;
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
@@ -241,6 +268,22 @@ export type ServerMessage =
   | {
       type: "dock:question-timeout";
       data: { fleetId: string };
+    }
+  | {
+      type: "flagship:dispatch-started";
+      data: { fleetId: string; dispatch: Dispatch };
+    }
+  | {
+      type: "flagship:dispatch-completed";
+      data: { fleetId: string; dispatch: Dispatch };
+    }
+  | {
+      type: "dock:dispatch-started";
+      data: { fleetId: string; dispatch: Dispatch };
+    }
+  | {
+      type: "dock:dispatch-completed";
+      data: { fleetId: string; dispatch: Dispatch };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | {
@@ -302,4 +345,6 @@ export type ServerMessage =
         entries: Array<{ name: string; isDirectory: boolean }>;
       };
     }
+  | { type: "engine:restarting"; data: Record<string, never> }
+  | { type: "engine:restarted"; data: Record<string, never> }
   | { type: "error"; data: { source: string; message: string } };

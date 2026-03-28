@@ -60,6 +60,8 @@ interface ShipRuntime {
   lastStartedAt: number | null;
   /** Count of consecutive rapid deaths (process exiting shortly after start). */
   rapidDeathCount: number;
+  /** Timestamp (ms epoch) when the Ship last hit a rate limit. Used for backoff on retry. */
+  lastRateLimitAt: number | null;
 }
 
 export class ShipManager {
@@ -118,6 +120,7 @@ export class ShipManager {
     skillSources?: FleetSkillSources,
     extraPrompt?: string,
     skill?: string,
+    customInstructionsText?: string,
   ): Promise<ShipProcess> {
     // Collect re-sortie context from previous Ship BEFORE deleting it.
     // This preserves phase history & workflow state for the new Ship.
@@ -156,6 +159,11 @@ export class ShipManager {
 
     // 5b. Write minimal CLAUDE.md for external repos (overrides vibe-admiral's CLAUDE.md)
     await this.deployCLAUDEmd(repoRoot, worktreePath);
+
+    // 5c. Persist customInstructions to .claude/rules/ so they survive context compaction.
+    // Claude Code always reloads .claude/rules/*.md on every turn, unlike --append-system-prompt
+    // which may be lost when the CLI compacts context mid-session.
+    await this.deployCustomInstructions(worktreePath, customInstructionsText);
 
     // 6. Remove stale .claude work files from previous sortie (or inherited from main)
     const staleFiles = [
@@ -202,7 +210,7 @@ export class ShipManager {
       repo,
       issueNumber,
       issueTitle: issue.title,
-      phase: "planning",
+      phase: "plan",
       isCompacting: false,
       branchName,
       worktreePath,
@@ -237,6 +245,7 @@ export class ShipManager {
       retryCount: 0,
       lastStartedAt: Date.now(),
       rapidDeathCount: 0,
+      lastRateLimitAt: null,
     });
 
     // 9. Build extra context for Ship
@@ -271,10 +280,11 @@ export class ShipManager {
       VIBE_ADMIRAL_MAIN_REPO: repo,
       VIBE_ADMIRAL_SHIP_ID: shipId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
+      VIBE_ADMIRAL_FLEET_ID: fleetId,
     };
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
 
-    this.updatePhase(shipId, "planning");
+    this.updatePhase(shipId, "plan");
     this.onShipCreated?.(shipId);
     return ship;
   }
@@ -338,12 +348,12 @@ export class ShipManager {
 
     // 4. Map last phase to suggested /implement step
     const phaseToStep: Record<string, number> = {
-      planning: 3,
-      "planning-gate": 3,
-      implementing: 5,
-      "implementing-gate": 5,
-      "acceptance-test": 11,
-      "acceptance-test-gate": 11,
+      plan: 3,
+      "plan-gate": 3,
+      coding: 5,
+      "coding-gate": 5,
+      qa: 11,
+      "qa-gate": 11,
       merging: 15,
     };
     const suggestedStep = lastPhase ? phaseToStep[lastPhase] ?? 3 : 3;
@@ -394,7 +404,7 @@ export class ShipManager {
       repo: parentShip.repo,
       issueNumber: parentShip.issueNumber,
       issueTitle: parentShip.issueTitle,
-      phase: "planning",
+      phase: "plan",
       isCompacting: false,
       branchName: parentShip.branchName,
       worktreePath: parentShip.worktreePath,
@@ -428,6 +438,7 @@ export class ShipManager {
       retryCount: 0,
       lastStartedAt: Date.now(),
       rapidDeathCount: 0,
+      lastRateLimitAt: null,
     });
 
     // Create XState Actor
@@ -449,6 +460,7 @@ export class ShipManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
+      VIBE_ADMIRAL_FLEET_ID: parentShip.fleetId,
     };
 
     const gateContext = gatePhase
@@ -499,6 +511,7 @@ export class ShipManager {
       VIBE_ADMIRAL_SHIP_ID: escortId,
       VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
       VIBE_ADMIRAL_PARENT_SHIP_ID: existingEscort.parentShipId!,
+      VIBE_ADMIRAL_FLEET_ID: existingEscort.fleetId,
     };
 
     // Resume with gate context message
@@ -797,6 +810,17 @@ export class ShipManager {
     if (rt) rt.rapidDeathCount = 0;
   }
 
+  /** Record that a Ship hit a rate limit. */
+  setLastRateLimitAt(shipId: string, timestamp: number): void {
+    const rt = this.ensureRuntime(shipId);
+    if (rt) rt.lastRateLimitAt = timestamp;
+  }
+
+  /** Get the timestamp of the last rate limit hit, or null. */
+  getLastRateLimitAt(shipId: string): number | null {
+    return this.runtime.get(shipId)?.lastRateLimitAt ?? null;
+  }
+
   /**
    * Check whether a file exists (non-throwing).
    */
@@ -924,6 +948,29 @@ export class ShipManager {
   }
 
   /**
+   * Persist customInstructions to `.claude/rules/custom-instructions.md` in the worktree.
+   * Claude Code always reloads `.claude/rules/*.md` on every turn, so this content
+   * survives context compaction — unlike `--append-system-prompt` which may be lost.
+   * If no customInstructions are provided, remove any stale file from a previous sortie.
+   */
+  private async deployCustomInstructions(
+    worktreePath: string,
+    customInstructionsText?: string,
+  ): Promise<void> {
+    const rulesDir = join(worktreePath, ".claude", "rules");
+    const filePath = join(rulesDir, "custom-instructions.md");
+
+    if (!customInstructionsText) {
+      // Clean up stale file if it exists
+      await unlink(filePath).catch(() => {});
+      return;
+    }
+
+    await mkdir(rulesDir, { recursive: true });
+    await writeFile(filePath, customInstructionsText, "utf-8");
+  }
+
+  /**
    * For external repos, replace the inherited CLAUDE.md with a minimal Ship template.
    * Worktrees inherit CLAUDE.md from the git tree they branch from. When the
    * worktree's main repo (the repo that owns the .worktrees/ directory) differs
@@ -998,11 +1045,46 @@ export class ShipManager {
     return purged;
   }
 
+  /** Base backoff delay (ms) for rate-limited retries. */
+  private static readonly RATE_LIMIT_BACKOFF_BASE_MS = 30_000;
+
+  /** Maximum backoff delay (ms) for rate-limited retries. */
+  private static readonly RATE_LIMIT_BACKOFF_MAX_MS = 120_000;
+
+  /** Window (ms) within which a rate limit hit triggers backoff on retry. */
+  private static readonly RATE_LIMIT_WINDOW_MS = 300_000; // 5 minutes
+
+  /**
+   * Compute backoff delay for a rate-limited Ship.
+   * Returns 0 if no backoff is needed (no recent rate limit).
+   */
+  private computeRateLimitBackoff(shipId: string): number {
+    const rt = this.runtime.get(shipId);
+    if (!rt?.lastRateLimitAt) return 0;
+
+    const elapsed = Date.now() - rt.lastRateLimitAt;
+    if (elapsed > ShipManager.RATE_LIMIT_WINDOW_MS) {
+      // Rate limit was too long ago — no backoff needed
+      rt.lastRateLimitAt = null;
+      return 0;
+    }
+
+    // Exponential backoff based on rapid death count: 30s, 60s, 120s
+    const factor = Math.pow(2, rt.rapidDeathCount);
+    return Math.min(
+      ShipManager.RATE_LIMIT_BACKOFF_BASE_MS * factor,
+      ShipManager.RATE_LIMIT_BACKOFF_MAX_MS,
+    );
+  }
+
   /**
    * Retry a dead Ship. If the Ship has a sessionId, resume the session.
    * Otherwise, re-sortie from scratch.
    * Retryable condition: phase !== "done" && process is dead.
    * Returns the resumed/re-launched ShipProcess, or null if not retryable.
+   *
+   * When a rate limit was recently detected, the actual spawn is delayed
+   * with exponential backoff (30s → 60s → 120s) to let the API recover.
    */
   retryShip(
     shipId: string,
@@ -1016,6 +1098,8 @@ export class ShipManager {
     if (ship.phase === "done" || this.processManager.isRunning(shipId)) {
       return null;
     }
+
+    const backoffMs = this.computeRateLimitBackoff(shipId);
 
     const rt = this.ensureRuntime(shipId);
     if (rt) {
@@ -1046,28 +1130,62 @@ export class ShipManager {
     // Send RESUME event to Actor (transitions from stopped to previous phase)
     this.actorManager?.send(shipId, { type: "RESUME" });
 
-    if (ship.sessionId) {
-      // Resume existing session
-      this.processManager.resumeSession(
-        shipId,
-        ship.sessionId,
-        "The previous session was interrupted. Continue from where you left off.",
-        ship.worktreePath,
-        shipEnv,
+    // Notify frontend immediately — processDead changed from true to false,
+    // but updatePhase() inside doSpawn() won't fire if the phase hasn't changed.
+    // This mirrors notifyProcessDead() which notifies without changing the phase.
+    this.onPhaseChange?.(shipId, ship.phase, "Ship resumed");
+
+    const doSpawn = () => {
+      // Clear rate limit flag after successful backoff wait
+      if (backoffMs > 0) {
+        const rtNow = this.runtime.get(shipId);
+        if (rtNow) {
+          rtNow.lastRateLimitAt = null;
+          rtNow.lastStartedAt = Date.now();
+        }
+      }
+
+      if (ship.sessionId) {
+        // Resume existing session — re-inject extraPrompt as appendSystemPrompt
+        // so customInstructions survive the session resume.
+        this.processManager.resumeSession(
+          shipId,
+          ship.sessionId,
+          "The previous session was interrupted. Continue from where you left off.",
+          ship.worktreePath,
+          shipEnv,
+          extraPrompt,
+        );
+        // For stopped ships, restore to the phase before STOP.
+        // For non-stopped ships (process died without formal STOP, e.g. rate limit),
+        // preserve the current DB phase — do NOT fall back to "coding" which would
+        // skip gate phases and cause XState/DB split-brain (#689).
+        const previousPhase = ship.phase === "stopped"
+          ? (this.fleetDb?.getPhaseBeforeStopped(shipId) ?? ship.phase)
+          : ship.phase;
+        this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
+      } else {
+        // No session to resume — re-sortie
+        this.processManager.sortie(
+          shipId,
+          ship.worktreePath,
+          ship.issueNumber,
+          extraPrompt,
+          skill,
+          shipEnv,
+        );
+        this.updatePhase(shipId, "plan", "Re-sortied");
+      }
+    };
+
+    if (backoffMs > 0) {
+      console.log(
+        `[ship-manager] Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...) rate limit backoff: ` +
+        `waiting ${Math.round(backoffMs / 1000)}s before retry`,
       );
-      const previousPhase = this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "implementing";
-      this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
+      setTimeout(doSpawn, backoffMs);
     } else {
-      // No session to resume — re-sortie
-      this.processManager.sortie(
-        shipId,
-        ship.worktreePath,
-        ship.issueNumber,
-        extraPrompt,
-        skill,
-        shipEnv,
-      );
-      this.updatePhase(shipId, "planning", "Re-sortied");
+      doSpawn();
     }
 
     return this.getShip(shipId) ?? null;
@@ -1173,6 +1291,7 @@ export class ShipManager {
           retryCount: 0,
           lastStartedAt: null,
           rapidDeathCount: 0,
+          lastRateLimitAt: null,
         });
 
         // Restore XState Actor for this Ship
@@ -1229,6 +1348,7 @@ export class ShipManager {
         retryCount: 0,
         lastStartedAt: null,
         rapidDeathCount: 0,
+        lastRateLimitAt: null,
       };
       this.runtime.set(shipId, rt);
     }

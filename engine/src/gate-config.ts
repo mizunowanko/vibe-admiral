@@ -11,9 +11,9 @@ import { DEFAULT_GATE_TYPES, GATE_NEXT_PHASE } from "./types.js";
  * All defined gate phases. Order matters for display.
  */
 export const GATE_PHASES: readonly GatePhase[] = [
-  "planning-gate",
-  "implementing-gate",
-  "acceptance-test-gate",
+  "plan-gate",
+  "coding-gate",
+  "qa-gate",
 ] as const;
 
 /**

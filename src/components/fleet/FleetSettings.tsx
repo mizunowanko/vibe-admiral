@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { Textarea } from "@/components/ui/textarea";
-import type { FleetRepo, FleetSkillSources, CustomInstructions } from "@/types";
+import type { FleetRepo, FleetSkillSources, CustomInstructions, GatePhase, GateType, FleetGateSettings } from "@/types";
 
 function PathListEditor({
   label,
@@ -70,6 +70,52 @@ function PathListEditor({
   );
 }
 
+/** Gate phase display configuration. */
+const GATE_PHASE_CONFIG: {
+  phase: GatePhase;
+  label: string;
+  defaultType: GateType;
+  availableTypes: GateType[];
+  description: Record<GateType, string>;
+}[] = [
+  {
+    phase: "plan-gate",
+    label: "Planning Gate",
+    defaultType: "plan-review",
+    availableTypes: ["plan-review", "auto-approve"],
+    description: {
+      "plan-review": "Escort reviews the implementation plan before coding begins.",
+      "auto-approve": "Automatically approves — no review.",
+      "code-review": "",
+      "playwright": "",
+    },
+  },
+  {
+    phase: "coding-gate",
+    label: "Implementing Gate",
+    defaultType: "code-review",
+    availableTypes: ["code-review", "auto-approve"],
+    description: {
+      "code-review": "Escort reviews the PR for code quality and correctness.",
+      "auto-approve": "Automatically approves — no review.",
+      "plan-review": "",
+      "playwright": "",
+    },
+  },
+  {
+    phase: "qa-gate",
+    label: "Acceptance Test Gate",
+    defaultType: "playwright",
+    availableTypes: ["code-review", "playwright", "auto-approve"],
+    description: {
+      "playwright": "Escort runs Playwright E2E tests to verify UI behavior.",
+      "code-review": "Escort reviews the code instead of running E2E tests.",
+      "auto-approve": "Automatically approves — no review.",
+      "plan-review": "",
+    },
+  },
+];
+
 export function FleetSettings() {
   const selectedFleet = useFleetStore((s) => s.selectedFleet);
   const createFleet = useFleetStore((s) => s.createFleet);
@@ -101,6 +147,12 @@ export function FleetSettings() {
   const [customInstructions, setCustomInstructions] = useState<CustomInstructions>(
     selectedFleet?.customInstructions ?? {},
   );
+  const [gates, setGates] = useState<FleetGateSettings>(
+    selectedFleet?.gates ?? {},
+  );
+  const [qaRequiredPaths, setQaRequiredPaths] = useState<string[]>(
+    selectedFleet?.qaRequiredPaths ?? [],
+  );
 
   const isNew = !selectedFleet;
 
@@ -115,6 +167,8 @@ export function FleetSettings() {
     setDockRulePaths(selectedFleet?.dockRulePaths ?? []);
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
     setCustomInstructions(selectedFleet?.customInstructions ?? {});
+    setGates(selectedFleet?.gates ?? {});
+    setQaRequiredPaths(selectedFleet?.qaRequiredPaths ?? []);
   }, [selectedFleet]);
 
   const saveRepos = (nextRepos: FleetRepo[]) => {
@@ -140,6 +194,8 @@ export function FleetSettings() {
       dockRulePaths,
       shipRulePaths,
       customInstructions,
+      gates,
+      qaRequiredPaths,
     });
   };
 
@@ -271,6 +327,97 @@ export function FleetSettings() {
                 className="w-24"
               />
             </div>
+          )}
+
+          {/* Gate Settings — only shown when editing */}
+          {!isNew && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium">Gate Settings</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Configure which review gates are active and their type for
+                  each workflow phase.
+                </p>
+              </div>
+              {GATE_PHASE_CONFIG.map(({ phase, label, defaultType, availableTypes, description }) => {
+                const config = gates[phase];
+                const enabled = config !== false;
+                const currentType: GateType =
+                  config === undefined || config === true
+                    ? defaultType
+                    : config === false
+                      ? defaultType
+                      : config;
+
+                return (
+                  <div
+                    key={phase}
+                    className="rounded-md border border-border p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium">{label}</label>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        onClick={() => {
+                          setGates({
+                            ...gates,
+                            [phase]: enabled ? false : true,
+                          });
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                          enabled ? "bg-primary" : "bg-muted"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-sm transition-transform ${
+                            enabled ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    {enabled && (
+                      <>
+                        <select
+                          value={currentType}
+                          onChange={(e) => {
+                            setGates({
+                              ...gates,
+                              [phase]: e.target.value as GateType,
+                            });
+                          }}
+                          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs"
+                        >
+                          {availableTypes.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">
+                          {description[currentType]}
+                        </p>
+                      </>
+                    )}
+                    {!enabled && (
+                      <p className="text-xs text-muted-foreground">
+                        Disabled — ships will skip this gate automatically.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* QA Required Paths — only shown when editing */}
+          {!isNew && (
+            <PathListEditor
+              label="QA Required Paths"
+              paths={qaRequiredPaths}
+              onChange={setQaRequiredPaths}
+            />
           )}
 
           {/* Skill Sources — only shown when editing */}

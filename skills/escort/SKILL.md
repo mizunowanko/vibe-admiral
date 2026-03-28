@@ -23,15 +23,15 @@ The Engine will resume this session (with `--resume`) for the next gate, preserv
 all context from prior reviews.
 
 ```
-Gate 1 (planning-gate):
+Gate 1 (plan-gate):
   Escort launched fresh → plan review → verdict → exit
   sessionId saved by Engine
 
-Gate 2 (implementing-gate):
+Gate 2 (coding-gate):
   Escort resumed (--resume sessionId) → code review → verdict → exit
   sessionId updated
 
-Gate 3 (acceptance-test-gate):
+Gate 3 (qa-gate):
   Escort resumed (--resume sessionId) → QA → verdict → exit
 ```
 
@@ -52,7 +52,7 @@ phase, something is wrong — log an error and exit.
 
 ## Planning Gate Review
 
-When `PHASE` is `planning-gate`:
+When `PHASE` is `plan-gate`:
 
 1. Read the Issue and its comments to find the Implementation Plan comment:
    ```bash
@@ -76,7 +76,7 @@ When `PHASE` is `planning-gate`:
 
 ## Implementing Gate Review
 
-When `PHASE` is `implementing-gate`:
+When `PHASE` is `coding-gate`:
 
 1. Get the PR URL from the parent Ship or find it via gh:
    ```bash
@@ -90,7 +90,7 @@ When `PHASE` is `implementing-gate`:
 
 3. Check for:
    - Code quality and consistency
-   - **Alignment with the approved plan** (you reviewed the plan in planning-gate — leverage that context)
+   - **Alignment with the approved plan** (you reviewed the plan in plan-gate — leverage that context)
    - Test coverage
    - No security issues
 
@@ -105,14 +105,14 @@ When `PHASE` is `implementing-gate`:
 
 ## Acceptance Test Gate Review
 
-When `PHASE` is `acceptance-test-gate`:
+When `PHASE` is `qa-gate`:
 
 ### Step 0: QA Required Check
 
-Check if QA is required by reading the planning-gate transition metadata:
+Check if QA is required by reading the plan-gate transition metadata:
 ```bash
 TRANSITIONS=$(curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/phase-transition-log?limit=50")
-QA_REQUIRED=$(echo "$TRANSITIONS" | grep -o '"toPhase":"planning-gate"[^}]*"metadata":{[^}]*"qaRequired":[^,}]*' | grep -o '"qaRequired":[^,}]*' | cut -d: -f2 | head -1)
+QA_REQUIRED=$(echo "$TRANSITIONS" | grep -o '"toPhase":"plan-gate"[^}]*"metadata":{[^}]*"qaRequired":[^,}]*' | grep -o '"qaRequired":[^,}]*' | cut -d: -f2 | head -1)
 QA_REQUIRED="${QA_REQUIRED:-true}"
 ```
 

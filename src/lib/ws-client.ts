@@ -2,8 +2,10 @@ import type { ClientMessage, ServerMessage } from "@/types";
 
 type MessageHandler = (msg: ServerMessage) => void;
 
-const ENGINE_PORT = import.meta.env.VITE_ENGINE_PORT ?? "9721";
-const ENGINE_URL = `ws://localhost:${ENGINE_PORT}`;
+function getEngineWsUrl(): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws`;
+}
 
 type ConnectHandler = () => void;
 
@@ -22,7 +24,7 @@ export class WSClient {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
     try {
-      this.ws = new WebSocket(ENGINE_URL);
+      this.ws = new WebSocket(getEngineWsUrl());
 
       this.ws.onopen = () => {
         this._connected = true;
