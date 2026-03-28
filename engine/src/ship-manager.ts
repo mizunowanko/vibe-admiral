@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { access, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { ProcessManager } from "./process-manager.js";
 import { parseStreamMessage } from "./stream-parser.js";
@@ -1255,7 +1256,90 @@ export class ShipManager {
     // Merge and sort by timestamp, then take the last N messages
     const all = [...shipMsgs, ...escortMsgs];
     all.sort((a, b) => ((a.timestamp as number) ?? 0) - ((b.timestamp as number) ?? 0));
+
+    // If disk had no messages, try loading from DB (worktree may have been deleted)
+    if (all.length === 0) {
+      return this.loadShipLogsFromDb(shipId, maxLines);
+    }
+
     return all.slice(-maxLines);
+  }
+
+  /**
+   * Load Ship logs from the database (fallback when worktree is deleted).
+   */
+  private loadShipLogsFromDb(shipId: string, maxLines: number): StreamMessage[] {
+    if (!this.fleetDb) return [];
+
+    const rows = this.fleetDb.getChatLogs(shipId);
+    if (rows.length === 0) return [];
+
+    const allMsgs: StreamMessage[] = [];
+    for (const row of rows) {
+      try {
+        const decompressed = gunzipSync(row.data).toString("utf-8");
+        const lines = decompressed.trimEnd().split("\n").filter(Boolean);
+        for (const line of lines) {
+          try {
+            const parsed = parseStreamMessage(JSON.parse(line));
+            if (parsed) {
+              if (row.logType === "escort" && parsed.type === "assistant") {
+                parsed.meta = { ...parsed.meta, category: "escort-log" };
+              }
+              allMsgs.push(parsed);
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      } catch {
+        console.warn(`[ship-manager] Failed to decompress chat log for ${shipId} (${row.logType})`);
+      }
+    }
+
+    allMsgs.sort((a, b) => ((a.timestamp as number) ?? 0) - ((b.timestamp as number) ?? 0));
+    return allMsgs.slice(-maxLines);
+  }
+
+  /**
+   * Persist Ship chat logs (ship-log.jsonl + escort-log.jsonl) to the database.
+   * Reads the JSONL files from the worktree, gzip-compresses them, and stores in DB.
+   * Called before worktree deletion to ensure logs survive.
+   */
+  async persistChatLogs(shipId: string): Promise<void> {
+    if (!this.fleetDb) return;
+
+    const ship = this.getShip(shipId);
+    if (!ship?.worktreePath) return;
+
+    // Skip if already persisted
+    if (this.fleetDb.hasChatLogs(shipId)) return;
+
+    const claudeDir = join(ship.worktreePath, ".claude");
+    const logFiles: Array<{ path: string; logType: "ship" | "escort" }> = [
+      { path: join(claudeDir, "ship-log.jsonl"), logType: "ship" },
+      { path: join(claudeDir, "escort-log.jsonl"), logType: "escort" },
+    ];
+
+    for (const { path, logType } of logFiles) {
+      try {
+        const fileStat = await stat(path);
+        if (fileStat.size === 0) continue;
+
+        const content = await readFile(path);
+        const lineCount = content.toString("utf-8").trimEnd().split("\n").filter(Boolean).length;
+        const compressed = gzipSync(content);
+
+        this.fleetDb.saveChatLog(shipId, logType, compressed, lineCount, fileStat.size);
+        console.log(
+          `[ship-manager] Persisted ${logType} chat log for ${shipId}: ${lineCount} messages, ${fileStat.size} → ${compressed.length} bytes`,
+        );
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.warn(`[ship-manager] Failed to persist ${logType} chat log for ${shipId}:`, err);
+        }
+      }
+    }
   }
 
   /**

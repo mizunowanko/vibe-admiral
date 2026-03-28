@@ -87,6 +87,9 @@ export class FleetDatabase {
     if (version < 8) {
       this.applyV8();
     }
+    if (version < 9) {
+      this.applyV9();
+    }
   }
 
   private applyV1(): void {
@@ -440,6 +443,25 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV9(): void {
+    // V9: Add chat_logs table for persisting Ship/Escort chat logs after worktree deletion.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ship_id TEXT NOT NULL REFERENCES ships(id),
+        log_type TEXT NOT NULL DEFAULT 'ship',
+        data BLOB NOT NULL,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        byte_size INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chat_logs_ship_id ON chat_logs (ship_id);
+
+      INSERT INTO schema_version (version) VALUES (9);
+    `);
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -777,6 +799,42 @@ export class FleetDatabase {
     }
 
     return terminalShips.length;
+  }
+
+  // === Chat Log DB methods ===
+
+  /** Persist a compressed chat log for a ship. */
+  saveChatLog(
+    shipId: string,
+    logType: "ship" | "escort",
+    compressedData: Buffer,
+    messageCount: number,
+    rawByteSize: number,
+  ): void {
+    this.db.prepare(`
+      INSERT INTO chat_logs (ship_id, log_type, data, message_count, byte_size)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(shipId, logType, compressedData, messageCount, rawByteSize);
+  }
+
+  /** Load compressed chat logs for a ship from the database. */
+  getChatLogs(shipId: string): Array<{ logType: string; data: Buffer; messageCount: number }> {
+    const rows = this.db.prepare(
+      "SELECT log_type, data, message_count FROM chat_logs WHERE ship_id = ?",
+    ).all(shipId) as Array<{ log_type: string; data: Buffer; message_count: number }>;
+    return rows.map((row) => ({
+      logType: row.log_type,
+      data: row.data,
+      messageCount: row.message_count,
+    }));
+  }
+
+  /** Check if chat logs exist for a ship. */
+  hasChatLogs(shipId: string): boolean {
+    const row = this.db.prepare(
+      "SELECT 1 FROM chat_logs WHERE ship_id = ? LIMIT 1",
+    ).get(shipId) as { 1: number } | undefined;
+    return !!row;
   }
 
   /** Close the database connection. */
