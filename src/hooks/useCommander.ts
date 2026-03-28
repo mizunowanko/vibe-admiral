@@ -52,7 +52,7 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
                 // Collect messages the user added optimistically after we
                 // requested history — these won't be in the server payload yet.
                 const optimistic = prev.filter(
-                  (m) => (m.timestamp ?? 0) >= requestedAt && m.type === "user",
+                  (m) => (m.timestamp ?? 0) >= requestedAt && (m.type === "user" || m.type === "assistant"),
                 );
                 if (optimistic.length === 0) return history;
                 // Deduplicate: if the history already contains a message with
