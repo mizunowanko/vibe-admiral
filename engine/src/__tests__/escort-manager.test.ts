@@ -387,6 +387,175 @@ describe("EscortManager", () => {
         expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
         expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
       });
+
+      it("auto-approves when Escort dies with approve gate-intent", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
+
+        // Parent ship still in coding-gate
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "coding-gate",
+          issueTitle: "Test issue",
+        });
+
+        // Escort declared approve intent before dying
+        escortManager.setGateIntent("ship-001", {
+          verdict: "approve",
+          declaredAt: new Date().toISOString(),
+        });
+
+        mockActorManager.requestTransition.mockReturnValue({
+          success: true,
+          fromPhase: "coding-gate",
+          toPhase: "qa",
+        });
+
+        escortManager.onEscortExit(escortId!, 1);
+
+        // Should send GATE_APPROVED (not ESCORT_DIED)
+        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
+          type: "GATE_APPROVED",
+        });
+
+        // Should persist as approved with fallback flag
+        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
+          "ship-001",
+          "coding-gate",
+          "qa",
+          "escort",
+          expect.objectContaining({
+            gate_result: "approved",
+            fallback: true,
+          }),
+        );
+
+        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
+        expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
+        // Should NOT notify death handler (auto-approved successfully)
+        expect(deathHandler).not.toHaveBeenCalled();
+      });
+
+      it("reverts normally when Escort dies with reject gate-intent", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
+
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "coding-gate",
+          issueTitle: "Test issue",
+        });
+
+        // Escort declared reject intent
+        escortManager.setGateIntent("ship-001", {
+          verdict: "reject",
+          feedback: "Tests missing",
+          declaredAt: new Date().toISOString(),
+        });
+
+        mockActorManager.requestTransition.mockReturnValue({
+          success: true,
+          fromPhase: "coding-gate",
+          toPhase: "coding",
+        });
+
+        escortManager.onEscortExit(escortId!, 1);
+
+        // Should send ESCORT_DIED (not GATE_APPROVED)
+        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
+          type: "ESCORT_DIED",
+          exitCode: 1,
+          feedback: expect.stringContaining("exited unexpectedly"),
+        });
+
+        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
+          "ship-001",
+          "coding-gate",
+          "coding",
+          "escort",
+          expect.objectContaining({ gate_result: "rejected" }),
+        );
+      });
+
+      it("reverts normally when no gate-intent is stored", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
+
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "coding-gate",
+          issueTitle: "Test issue",
+        });
+
+        // No gate-intent set
+
+        mockActorManager.requestTransition.mockReturnValue({
+          success: true,
+          fromPhase: "coding-gate",
+          toPhase: "coding",
+        });
+
+        escortManager.onEscortExit(escortId!, 1);
+
+        // Should send ESCORT_DIED
+        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
+          type: "ESCORT_DIED",
+          exitCode: 1,
+          feedback: expect.stringContaining("exited unexpectedly"),
+        });
+      });
+
+      it("clears gate-intent on successful verdict (non-gate phase)", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
+
+        // Set intent
+        escortManager.setGateIntent("ship-001", {
+          verdict: "approve",
+          declaredAt: new Date().toISOString(),
+        });
+
+        // Verdict was already submitted (phase moved past gate)
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "qa",
+        });
+
+        escortManager.onEscortExit(escortId!, 0);
+
+        // Intent should be cleared
+        expect(escortManager.getGateIntent("ship-001")).toBeUndefined();
+      });
+
+      it("falls through to revert when XState rejects fallback GATE_APPROVED", async () => {
+        const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
+
+        mockDb.getShipById.mockReturnValue({
+          ...makeShip(),
+          phase: "coding-gate",
+          issueTitle: "Test issue",
+        });
+
+        escortManager.setGateIntent("ship-001", {
+          verdict: "approve",
+          declaredAt: new Date().toISOString(),
+        });
+
+        // XState rejects GATE_APPROVED
+        mockActorManager.requestTransition
+          .mockReturnValueOnce({ success: false, currentPhase: "coding-gate" })
+          // Falls through to ESCORT_DIED which succeeds
+          .mockReturnValueOnce({ success: true, fromPhase: "coding-gate", toPhase: "coding" });
+
+        escortManager.onEscortExit(escortId!, 1);
+
+        // Should have tried GATE_APPROVED first, then ESCORT_DIED
+        expect(mockActorManager.requestTransition).toHaveBeenCalledTimes(2);
+        expect(mockActorManager.requestTransition).toHaveBeenNthCalledWith(1, "ship-001", {
+          type: "GATE_APPROVED",
+        });
+        expect(mockActorManager.requestTransition).toHaveBeenNthCalledWith(2, "ship-001", {
+          type: "ESCORT_DIED",
+          exitCode: 1,
+          feedback: expect.stringContaining("exited unexpectedly"),
+        });
+      });
     });
   });
 
