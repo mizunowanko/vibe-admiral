@@ -75,18 +75,49 @@ describe("ShipActorManager", () => {
   });
 
   describe("restoreActor", () => {
-    it("restores actor and returns effective DB phase", () => {
+    it("restores actor and replays to DB phase", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.hasActor("ship-1")).toBe(true);
-      // getPhase should return DB phase, not XState state
+      // XState should be replayed to "coding", not stuck at "plan"
       expect(manager.getPhase("ship-1")).toBe("coding");
       manager.stopAll();
     });
 
-    it("restores actor for stopped phase", () => {
-      const ship = createMockShipProcess({ phase: "stopped" });
+    it("replays to plan-gate phase", () => {
+      const ship = createMockShipProcess({ phase: "plan-gate" });
       manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
+      manager.stopAll();
+    });
+
+    it("replays to qa phase", () => {
+      const ship = createMockShipProcess({ phase: "qa" });
+      manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("qa");
+      manager.stopAll();
+    });
+
+    it("replays to merging phase", () => {
+      const ship = createMockShipProcess({ phase: "merging" });
+      manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("merging");
+      manager.stopAll();
+    });
+
+    it("restores actor for stopped phase with phaseBeforeStopped", () => {
+      const ship = createMockShipProcess({ phase: "stopped" });
+      manager.restoreActor(ship, "coding");
+      expect(manager.getPhase("ship-1")).toBe("stopped");
+      // Verify the actor is in stopped state and can resume to coding
+      manager.send("ship-1", { type: "RESUME" });
+      expect(manager.getPhase("ship-1")).toBe("coding");
+      manager.stopAll();
+    });
+
+    it("restores stopped actor when phaseBeforeStopped is plan", () => {
+      const ship = createMockShipProcess({ phase: "stopped" });
+      manager.restoreActor(ship, "plan");
       expect(manager.getPhase("ship-1")).toBe("stopped");
       manager.stopAll();
     });
@@ -98,22 +129,30 @@ describe("ShipActorManager", () => {
       expect(manager.hasActor("ship-1")).toBe(false);
     });
 
-    it("does not fire onPhaseChange during restoration", () => {
+    it("does not fire onPhaseChange during replay", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
+      // Side effects should be suppressed during replay
       expect(sideEffects.onPhaseChange).not.toHaveBeenCalled();
       manager.stopAll();
     });
 
-    it("clears effective phase after a real transition", () => {
+    it("transitions correctly after restore (GATE_ENTER from coding → coding-gate)", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.getPhase("ship-1")).toBe("coding");
-      // Send a real event that transitions the XState actor
+      // This is the key fix: GATE_ENTER should now go to coding-gate, not plan-gate
       manager.send("ship-1", { type: "GATE_ENTER" });
-      // Now getPhase should return the XState state (plan-gate because
-      // XState started at plan and GATE_ENTER → plan-gate)
-      expect(manager.getPhase("ship-1")).toBe("plan-gate");
+      expect(manager.getPhase("ship-1")).toBe("coding-gate");
+      manager.stopAll();
+    });
+
+    it("fires onPhaseChange for transitions after restore", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
+      manager.restoreActor(ship);
+      (sideEffects.onPhaseChange as ReturnType<typeof vi.fn>).mockClear();
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(sideEffects.onPhaseChange).toHaveBeenCalledWith("ship-1", "coding-gate");
       manager.stopAll();
     });
   });
@@ -169,7 +208,7 @@ describe("ShipActorManager", () => {
       expect(manager.getPhase("ship-1")).toBeUndefined();
     });
 
-    it("clears effective phase on stop", () => {
+    it("clears replayed actor on stop", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.getPhase("ship-1")).toBe("coding");

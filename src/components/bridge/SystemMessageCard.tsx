@@ -4,17 +4,7 @@ import type {
   LookoutAlertType,
 } from "@/types";
 import { cn } from "@/lib/utils";
-
-const GATE_TYPE_LABELS: Record<string, string> = {
-  "plan-review": "計画レビュー",
-  "code-review": "コードレビュー",
-  playwright: "QA テスト",
-  human: "人間承認",
-};
-
-function gateLabel(gateType?: string): string {
-  return gateType ? (GATE_TYPE_LABELS[gateType] ?? gateType) : "Gate";
-}
+import { gateTypeDisplayName } from "@/lib/ship-status";
 
 const ALERT_TYPE_LABELS: Record<LookoutAlertType, string> = {
   "no-output-stall": "no output",
@@ -77,7 +67,7 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
   let label: string;
   switch (subtype) {
     case "gate-check-request":
-      label = `${issueRef} ${gateLabel(meta.gateType)}開始`;
+      label = `${issueRef} ${gateTypeDisplayName(meta.gateType)}開始`;
       break;
     case "pr-review-request":
       label = meta.prNumber

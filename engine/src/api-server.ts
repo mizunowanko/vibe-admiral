@@ -23,6 +23,7 @@ interface ApiDeps {
   getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
   loadFleets: () => Promise<Array<{
     id: string;
+    name: string;
     repos: FleetRepo[];
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
@@ -133,6 +134,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   repoRemotes: string[];
   skillSources?: FleetSkillSources;
   shipExtraPrompt?: string;
+  customInstructionsText?: string;
   maxConcurrentSorties?: number;
 } | string> {
   const fleets = await deps.loadFleets();
@@ -145,7 +147,8 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   } else if (fleets.length === 0) {
     return "No fleets configured";
   } else {
-    return "Multiple fleets exist — fleetId is required";
+    const fleetList = fleets.map((f) => `  - ${f.id} (${f.name})`).join("\n");
+    return `Multiple fleets exist — fleetId is required. Available fleets:\n${fleetList}`;
   }
   const fleetRepos = fleet.repos;
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);
@@ -161,6 +164,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     repoRemotes,
     skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
+    customInstructionsText: ciText,
     maxConcurrentSorties: fleet.maxConcurrentSorties,
   };
 }
@@ -379,11 +383,17 @@ async function handleShipRoute(
 
       // Build Escort custom instructions and gate prompt from fleet settings
       let escortExtraPrompt: string | undefined;
+      let shipCustomInstructionsText: string | undefined;
       {
         const ci = fleet?.customInstructions;
-        const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
-        if (ciParts.length > 0) {
-          escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+        const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
+        if (escortCiParts.length > 0) {
+          escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
+        }
+        // Build Ship's CI text for restoration after Escort exits
+        const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
+        if (shipCiParts.length > 0) {
+          shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
         }
       }
 
@@ -401,7 +411,7 @@ async function handleShipRoute(
         escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
       }
 
-      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, escortExtraEnv);
+      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];
@@ -734,6 +744,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         ctx.skillSources,
         ctx.shipExtraPrompt,
         ctx.maxConcurrentSorties,
+        ctx.customInstructionsText,
       );
 
       deps.broadcastRequestResult(ctx.fleetId, result);

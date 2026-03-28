@@ -103,6 +103,7 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // See .claude/rules/cli-subprocess.md for full rationale.
     //
@@ -121,7 +122,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
@@ -133,6 +134,7 @@ export class ProcessManager extends EventEmitter {
       env: {
         ...process.env,
         VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -147,8 +149,9 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
-    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt);
+    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   sendMessage(
@@ -217,6 +220,7 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     const args = [
       "--resume",
@@ -227,7 +231,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
@@ -239,6 +243,7 @@ export class ProcessManager extends EventEmitter {
       env: {
         ...process.env,
         VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -254,8 +259,9 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
-    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt);
+    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   resumeSession(
@@ -264,23 +270,33 @@ export class ProcessManager extends EventEmitter {
     message: string,
     cwd: string,
     extraEnv?: Record<string, string>,
+    appendSystemPrompt?: string,
   ): ChildProcess {
     // Same stdio/disallowedTools constraints as sortie().
     // See .claude/rules/cli-subprocess.md for full rationale.
+    const args = [
+      "--resume",
+      sessionId,
+      "-p",
+      message,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--disallowedTools",
+      "EnterPlanMode,ExitPlanMode,AskUserQuestion",
+    ];
+
+    // Re-inject system prompt so customInstructions survive session resume.
+    // The original --append-system-prompt from sortie() is part of the stored session,
+    // but re-applying it provides defense-in-depth against content loss.
+    if (appendSystemPrompt) {
+      args.push("--append-system-prompt", appendSystemPrompt);
+    }
+
     const proc = spawn(
       "claude",
-      [
-        "--resume",
-        sessionId,
-        "-p",
-        message,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--disallowedTools",
-        "EnterPlanMode,ExitPlanMode,AskUserQuestion",
-      ],
+      args,
       {
         cwd,
         env: {

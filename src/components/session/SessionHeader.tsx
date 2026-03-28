@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Anchor, Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { STATUS_CONFIG, PROCESS_DEAD_CONFIG, phaseDisplayName } from "@/lib/ship-status";
+import { STATUS_CONFIG, PROCESS_DEAD_CONFIG, phaseDisplayName, gateTypeDisplayName } from "@/lib/ship-status";
 import type { Session, Ship } from "@/types";
 
 interface SessionHeaderProps {
@@ -133,10 +133,10 @@ function ShipSessionHeader({
                       : "text-green-400",
                 )}
               >
-                Gate: {ship.gateCheck.gatePhase}
+                Gate: {phaseDisplayName(ship.gateCheck.gatePhase)}
               </span>
               <span className="text-muted-foreground">
-                {ship.gateCheck.gateType} | {ship.gateCheck.status}
+                {gateTypeDisplayName(ship.gateCheck.gateType)} | {ship.gateCheck.status.charAt(0).toUpperCase() + ship.gateCheck.status.slice(1)}
               </span>
             </div>
             {ship.gateCheck.feedback && (
