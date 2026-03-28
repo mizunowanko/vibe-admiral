@@ -576,10 +576,12 @@ export class StateSync {
     }
 
     // 3. Validate XState/DB phase consistency after restoration (#689).
-    // Non-blocking: logs warnings but does not alter state.
+    // Auto-repair mismatches by reconciling XState to DB phase (#694).
     for (const ship of this.shipManager.getAllShips()) {
       if (ship.phase !== "done") {
-        this.actorManager?.assertPhaseConsistency(ship.id, ship.phase as Phase);
+        if (!this.actorManager?.assertPhaseConsistency(ship.id, ship.phase as Phase)) {
+          this.actorManager?.reconcilePhase(ship.id, ship.phase as Phase);
+        }
       }
     }
 
