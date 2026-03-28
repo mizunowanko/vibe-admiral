@@ -532,7 +532,23 @@ export class EngineServer {
         );
         this.shipManager.setLastRateLimitAt(id, Date.now());
       }
-      // Notify frontend for status indicator (not chat message) (#699)
+      // Notify Ship's own chat with a non-error status (#712)
+      const ship = this.shipManager.getShip(id);
+      if (ship) {
+        this.broadcast({
+          type: "ship:stream",
+          data: {
+            id,
+            message: {
+              type: "system" as const,
+              subtype: "rate-limit-status" as const,
+              content: "Rate limit detected — retrying automatically...",
+              timestamp: Date.now(),
+            },
+          },
+        });
+      }
+      // Notify frontend for global status indicator banner (#699)
       this.broadcast({ type: "rate-limit:detected", data: { processId: id } });
     });
 

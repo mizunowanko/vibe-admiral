@@ -98,6 +98,17 @@ export const SessionMessage = memo(function SessionMessage({
     );
   }
 
+  // Rate-limit status — soft amber pill instead of scary red error (#712)
+  if (isSystem && message.subtype === "rate-limit-status") {
+    return (
+      <div className="flex w-full justify-center">
+        <div className="rounded px-3 py-1 text-xs font-mono text-amber-400/80 bg-amber-500/10">
+          {message.content ?? "Rate limit — retrying..."}
+        </div>
+      </div>
+    );
+  }
+
   // Delegate to shared ChatMessage for all other types
   return <ChatMessage message={message} repeatCount={repeatCount} context={context} />;
 });
