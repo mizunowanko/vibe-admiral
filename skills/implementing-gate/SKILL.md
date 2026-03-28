@@ -60,13 +60,14 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
    - テストカバレッジ
    - re-review の場合、前回の指摘が修正されているか
 
-8. **GitHub にレビュー結果を記録**:
-   - 承認: `gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>"`
-   - 拒否: `gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "<detailed feedback>"`
+8. **Gate intent を宣言**（verdict 前のフォールバック用。プロセスが verdict 前に死んでも Engine が intent に基づいて自動承認できる）:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-intent \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "<approve or reject>"}'
+   ```
 
-   > **注意**: Ship と Escort は同じ GitHub アカウントで動作するため、`gh pr review --approve` / `--request-changes` は「自分の PR を自分でレビューできない」制約で失敗する。PR コメント / Issue コメントを使用する。
-
-9. Engine REST API で gate verdict を送信:
+9. **Engine REST API で gate verdict を送信**（GitHub コメントより先に実行 — プロセス終了による verdict 喪失を防止）:
 
    承認の場合:
    ```bash
@@ -81,6 +82,12 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
      -H 'Content-Type: application/json' \
      -d '{"verdict": "reject", "feedback": "<修正すべき点>"}'
    ```
+
+10. **GitHub にレビュー結果を記録**（verdict 送信後に実行 — プロセスが死んでも verdict は保全済み）:
+   - 承認: `gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>"`
+   - 拒否: `gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "<detailed feedback>"`
+
+   > **注意**: Ship と Escort は同じ GitHub アカウントで動作するため、`gh pr review --approve` / `--request-changes` は「自分の PR を自分でレビューできない」制約で失敗する。PR コメント / Issue コメントを使用する。
 
 ## Review Guidelines
 

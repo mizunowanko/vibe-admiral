@@ -5,7 +5,7 @@ import type { ProcessManager } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
-import type { EscortProcess, GatePhase, GateType, Phase } from "./types.js";
+import type { EscortProcess, GatePhase, GateType, GateIntent, Phase } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
 /**
@@ -32,6 +32,8 @@ export class EscortManager {
   private escorts = new Map<string, string>();
   /** parentShipId → Ship's customInstructionsText (for restoring after Escort exits). */
   private shipCustomInstructions = new Map<string, string | undefined>();
+  /** parentShipId → Escort's pre-verdict intent declaration (fallback if Escort dies before verdict). */
+  private gateIntents = new Map<string, GateIntent>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
 
   constructor(processManager: ProcessManager, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
@@ -47,6 +49,29 @@ export class EscortManager {
   /** Set callback for Escort death notifications (sent to Flagship). */
   setEscortDeathHandler(handler: (shipId: string, message: string) => void): void {
     this.onEscortDeathCallback = handler;
+  }
+
+  /**
+   * Store Escort's pre-verdict intent declaration.
+   * Called via gate-intent API before the actual gate-verdict.
+   * If the Escort dies before submitting the verdict, this intent
+   * is used as a fallback in onEscortExit().
+   */
+  setGateIntent(parentShipId: string, intent: GateIntent): void {
+    this.gateIntents.set(parentShipId, intent);
+    console.log(
+      `[escort-manager] Gate intent declared for Ship ${parentShipId.slice(0, 8)}...: ${intent.verdict}`,
+    );
+  }
+
+  /** Get stored gate intent for a parent Ship. */
+  getGateIntent(parentShipId: string): GateIntent | undefined {
+    return this.gateIntents.get(parentShipId);
+  }
+
+  /** Clear stored gate intent (called after verdict is submitted or on cleanup). */
+  clearGateIntent(parentShipId: string): void {
+    this.gateIntents.delete(parentShipId);
   }
 
   /**
@@ -404,10 +429,46 @@ export class EscortManager {
       // Phase already moved past gate — verdict was submitted successfully.
       // This is the normal path in the on-demand model.
       this.shipManager.clearGateCheck(parentShipId);
+      this.clearGateIntent(parentShipId);
       return;
     }
 
-    // Escort died without submitting verdict while parent is in gate phase — treat as rejection
+    // Escort died without submitting verdict while parent is in gate phase.
+    // Check for a pre-declared gate intent — if the Escort declared "approve"
+    // before dying, honour that intent instead of reverting (fallback mechanism).
+    const intent = this.gateIntents.get(parentShipId);
+    this.clearGateIntent(parentShipId);
+
+    if (intent?.verdict === "approve") {
+      console.log(
+        `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict, but gate-intent was "approve" — auto-approving for Ship ${parentShipId.slice(0, 8)}...`,
+      );
+
+      const approveResult = this.actorManager?.requestTransition(parentShipId, {
+        type: "GATE_APPROVED",
+      });
+
+      if (approveResult?.success) {
+        try {
+          db.persistPhaseTransition(parentShipId, approveResult.fromPhase, approveResult.toPhase, "escort", {
+            gate_result: "approved",
+            fallback: true,
+            reason: `Escort died (code=${code}) but had declared approve intent — auto-approved`,
+          });
+          this.shipManager.syncPhaseFromDb(parentShipId);
+          this.shipManager.clearGateCheck(parentShipId);
+        } catch (err) {
+          console.error(`[escort-manager] Failed to persist fallback approval for Ship ${parentShipId.slice(0, 8)}...:`, err);
+        }
+        return;
+      }
+      // If XState rejected the auto-approve (e.g., phase already changed), fall through to revert logic
+      console.warn(
+        `[escort-manager] XState rejected fallback GATE_APPROVED for Ship ${parentShipId.slice(0, 8)}... (current: ${approveResult?.currentPhase}) — falling through to revert`,
+      );
+    }
+
+    // No approve intent or fallback failed — treat as rejection (original behaviour)
     const prevPhase = GATE_PREV_PHASE[currentPhase as GatePhase];
     console.warn(
       `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict — reverting Ship ${parentShipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
