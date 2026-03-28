@@ -230,6 +230,88 @@ export class ShipActorManager {
   }
 
   /**
+   * Reconcile XState actor to match the DB phase by destroying and re-creating
+   * the actor with event replay. This fixes split-brain where XState and DB
+   * have diverged (e.g., DB persist failed after XState transition, or
+   * gate reject updated DB but not XState).
+   *
+   * Returns true if reconciliation was performed, false if phases already match
+   * or reconciliation was not possible (no actor, terminal phase).
+   *
+   * @see https://github.com/mizunowanko/vibe-admiral/issues/694
+   */
+  reconcilePhase(shipId: string, dbPhase: Phase): boolean {
+    const actorPhase = this.getPhase(shipId);
+
+    // No actor — nothing to reconcile
+    if (actorPhase === undefined) {
+      console.warn(
+        `[ship-actor-manager] reconcilePhase: no actor for Ship ${shipId.slice(0, 8)}... — skipping`,
+      );
+      return false;
+    }
+
+    // Already in sync
+    if (actorPhase === dbPhase) return false;
+
+    // Terminal phases cannot be replayed to
+    if (dbPhase === "done") {
+      console.warn(
+        `[ship-actor-manager] reconcilePhase: DB phase is "done" for Ship ${shipId.slice(0, 8)}... — stopping actor`,
+      );
+      this.stopActor(shipId);
+      return true;
+    }
+
+    console.warn(
+      `[ship-actor-manager] reconcilePhase: repairing Ship ${shipId.slice(0, 8)}... ` +
+      `XState=${actorPhase} → DB=${dbPhase}`,
+    );
+
+    // Preserve context from old actor for re-creation
+    const oldContext = this.getContext(shipId);
+
+    // Stop the out-of-sync actor
+    this.stopActor(shipId);
+
+    // Re-create with the same input and replay to DB phase
+    const input: ShipMachineInput = {
+      shipId,
+      fleetId: oldContext?.fleetId ?? "",
+      repo: oldContext?.repo ?? "",
+      issueNumber: oldContext?.issueNumber ?? 0,
+      worktreePath: oldContext?.worktreePath ?? "",
+      branchName: oldContext?.branchName ?? "",
+      sessionId: oldContext?.sessionId ?? null,
+      prUrl: oldContext?.prUrl ?? null,
+      qaRequired: oldContext?.qaRequired ?? true,
+      phaseBeforeStopped: oldContext?.phaseBeforeStopped ?? null,
+    };
+
+    const actor = createActor(shipMachine, { input });
+    this.setupSubscription(shipId, actor, { suppressInitial: true });
+    actor.start();
+    this.actors.set(shipId, actor);
+
+    this.replayToPhase(shipId, actor, dbPhase, oldContext?.phaseBeforeStopped ?? null);
+
+    // Verify replay succeeded
+    const newPhase = this.getPhase(shipId);
+    if (newPhase !== dbPhase) {
+      console.error(
+        `[ship-actor-manager] reconcilePhase: replay failed for Ship ${shipId.slice(0, 8)}... ` +
+        `expected=${dbPhase}, got=${newPhase}`,
+      );
+      return false;
+    }
+
+    console.log(
+      `[ship-actor-manager] reconcilePhase: Ship ${shipId.slice(0, 8)}... repaired to ${dbPhase}`,
+    );
+    return true;
+  }
+
+  /**
    * Replay events to advance the XState actor from "plan" to the target phase.
    * Side effects are suppressed during replay.
    */
