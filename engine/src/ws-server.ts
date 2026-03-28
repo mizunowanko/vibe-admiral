@@ -33,10 +33,12 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, HeadsUpNotification } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification } from "./types.js";
+import { applyTemplate } from "./deep-merge.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
+const ADMIRAL_SETTINGS_FILE = join(FLEETS_DIR, "admiral-settings.json");
 
 export class EngineServer {
   private httpServer: HttpServer;
@@ -154,6 +156,7 @@ export class EngineServer {
       },
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
+      loadAdmiralSettings: () => this.loadAdmiralSettings(),
       requestRestart: () => {
         console.log("[engine] Restart requested via API");
         this.broadcast({ type: "engine:restarting", data: {} });
@@ -822,6 +825,21 @@ export class EngineServer {
           break;
         }
 
+        // Admiral settings operations
+        case "admiral-settings:get": {
+          const admiralSettings = await this.loadAdmiralSettings();
+          this.sendTo(ws, { type: "admiral-settings:data", data: admiralSettings });
+          break;
+        }
+        case "admiral-settings:update": {
+          const current = await this.loadAdmiralSettings();
+          if (data.global !== undefined) current.global = data.global as SettingsLayer;
+          if (data.template !== undefined) current.template = data.template as SettingsLayer;
+          await this.saveAdmiralSettings(current);
+          this.broadcast({ type: "admiral-settings:data", data: current });
+          break;
+        }
+
         // Flagship operations
         case "flagship:send": {
           await this.handleCommanderSend(ws, data, "flagship");
@@ -964,6 +982,21 @@ export class EngineServer {
     await writeFile(FLEETS_FILE, JSON.stringify(fleets, null, 2));
   }
 
+  // Admiral settings persistence
+  async loadAdmiralSettings(): Promise<AdmiralSettings> {
+    try {
+      const content = await readFile(ADMIRAL_SETTINGS_FILE, "utf-8");
+      return JSON.parse(content) as AdmiralSettings;
+    } catch {
+      return { global: {}, template: {} };
+    }
+  }
+
+  private async saveAdmiralSettings(settings: AdmiralSettings): Promise<void> {
+    await mkdir(FLEETS_DIR, { recursive: true });
+    await writeFile(ADMIRAL_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  }
+
   private async resolveRemote(localPath: string): Promise<string | undefined> {
     try {
       const { stdout } = await execFileAsync("git", [
@@ -1010,10 +1043,14 @@ export class EngineServer {
   ): Promise<Fleet> {
     const enriched = await this.enrichRepos(repos);
     const fleets = await this.loadFleets();
+    // Apply template settings from Admiral settings (snapshot at creation time)
+    const admiralSettings = await this.loadAdmiralSettings();
+    const templateDefaults = applyTemplate(admiralSettings.template);
     const fleet: Fleet = {
       id: randomUUID(),
       name,
       repos: enriched,
+      ...templateDefaults,
       createdAt: new Date().toISOString(),
     };
     fleets.push(fleet);

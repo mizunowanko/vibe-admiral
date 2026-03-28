@@ -25,6 +25,7 @@ function createMockDeps() {
       maxConcurrentSorties: 6,
     }]),
     loadRules: vi.fn().mockResolvedValue(""),
+    loadAdmiralSettings: vi.fn().mockResolvedValue({ global: {}, template: {} }),
     broadcastRequestResult: vi.fn(),
     deliverHeadsUp: vi.fn().mockReturnValue(true),
     requestRestart: vi.fn(),
