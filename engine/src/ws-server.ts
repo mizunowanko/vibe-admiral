@@ -143,9 +143,16 @@ export class EngineServer {
     this.wss = new WebSocketServer({ noServer: true });
 
     this.httpServer.on("upgrade", (request, socket, head) => {
+      socket.on("error", (err) => {
+        console.warn("[engine] Upgrade socket error:", err);
+      });
       this.wss.handleUpgrade(request, socket, head, (ws) => {
         this.wss.emit("connection", ws, request);
       });
+    });
+
+    this.httpServer.on("error", (err) => {
+      console.error("[engine] HTTP server error:", err);
     });
 
     this.httpServer.listen(port);
@@ -191,6 +198,11 @@ export class EngineServer {
       ws.on("close", () => {
         this.clients.delete(ws);
         console.log("Client disconnected");
+      });
+
+      ws.on("error", (err) => {
+        console.warn("[engine] WebSocket client error:", err);
+        this.clients.delete(ws);
       });
     });
   }
@@ -910,7 +922,11 @@ export class EngineServer {
   // Messaging helpers
   private sendTo(ws: WebSocket, msg: Record<string, unknown>): void {
     if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(msg));
+      try {
+        ws.send(JSON.stringify(msg));
+      } catch (err) {
+        console.warn("[engine] sendTo failed:", err);
+      }
     }
   }
 
@@ -918,7 +934,11 @@ export class EngineServer {
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
       if (client.readyState === client.OPEN) {
-        client.send(data);
+        try {
+          client.send(data);
+        } catch (err) {
+          console.warn("[engine] broadcast send failed:", err);
+        }
       }
     }
   }
