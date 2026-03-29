@@ -60,6 +60,7 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## Acceptance Test: ⏭️ SKIPPED
 
    QA not required for this change (\`qaRequired: false\`).
+   No UI-related file changes detected.
    Automatically approved by acceptance-test-gate.
 
    🤖 Generated with [Claude Code](https://claude.com/claude-code)"
@@ -88,7 +89,9 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    - CSS/スタイル変更がレイアウトを壊していないか
    - コンポーネントの props/型変更が互換性を保っているか
 
-3. 結果を PR コメントとして投稿:
+3. UI 関連ファイルが含まれる場合は **Step 3.5（UI 表示整合性チェック）** も実施する
+
+4. 結果を PR コメントとして投稿:
    ```bash
    gh pr comment "$PR_NUMBER" --repo "$REPO" --body "## Acceptance Test: 🔍 MINIMAL CHECK
 
@@ -106,14 +109,14 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    🤖 Generated with [Claude Code](https://claude.com/claude-code)"
    ```
 
-4. gate-verdict を送信（結果に応じて approve or reject）:
+5. gate-verdict を送信（結果に応じて approve or reject）:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "<approve or reject>", "feedback": "<reject の場合のみ>"}'
    ```
 
-5. **ここで終了する。以降の手順は実行しない。**
+6. **ここで終了する。以降の手順は実行しない。**
 
 ---
 
@@ -190,6 +193,48 @@ GATE_PROMPT="${VIBE_ADMIRAL_GATE_PROMPT:-}"
 
 Gate prompt にはプロジェクト固有のテスト手順が記述されている（例: Playwright E2E、CLI テスト、API テストなど）。
 その手順に従ってテストを実行し、結果を収集する。
+
+### Step 3.5: UI 表示整合性チェック（UI 関連変更がある場合は必須）
+
+PR の diff に以下のいずれかが含まれる場合、このステップは **必須** で実行する:
+- `src/components/` 配下のファイル変更
+- 表示値（phase 名、ステータス、ラベル等）のリネーム・変更
+- `STATUS_CONFIG`、表示ヘルパー関数、バッジ定義の変更
+- Store（Zustand）の状態構造変更
+
+```bash
+# PR の diff からUI関連ファイルを検出
+UI_FILES=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only 2>/dev/null | grep -E '^src/components/|STATUS_CONFIG|phase|badge|card|store' || true)
+```
+
+UI 関連変更が **ない** 場合はこのステップをスキップしてよい。
+
+#### 3.5a. レンダリング画面の特定
+
+変更されたコンポーネントが **実際にレンダリングされる全ての画面・箇所** を特定する:
+- どのページ・パネルで使用されているか
+- 親コンポーネントからどのように呼び出されているか
+- 条件付きレンダリング（if/switch）がある場合、全ブランチを確認
+
+#### 3.5b. 表示値のソース追跡
+
+変更された表示値について、データフローを **末端から源泉まで** 追跡する:
+1. **Frontend**: コンポーネントの props / store selector / computed 値を確認
+2. **Engine**: WebSocket メッセージや REST API レスポンスで渡される値を確認
+3. **DB / 型定義**: `engine/src/types.ts` や共通型の定義と一致するか確認
+
+> **重要**: phase 名のような「DB → Engine → Frontend」を貫通する値は、**全レイヤーの型定義が一貫している** ことを確認する。1 箇所でもリネーム漏れがあれば FAIL とする。
+
+#### 3.5c. 関連コンポーネントの横断確認
+
+同じ値を表示する **全てのコンポーネント** で正しく表示されることを確認する:
+- Ship カード（一覧表示）
+- Ship 詳細パネル
+- バッジ・ステータス表示
+- リスト・テーブル表示
+- ツールチップやポップオーバー
+
+> **失敗事例（PR #641）**: phase 名のリネームで一部のコンポーネント（バッジ表示）の更新が漏れ、`qaRequired: false` で承認されてしまった。この横断確認で検出できるケース。
 
 ### Step 4: テスト結果を判定
 

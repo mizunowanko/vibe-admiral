@@ -126,3 +126,17 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
 - For re-reviews: verify previous feedback was addressed. Do NOT repeat same rejection if fixed
 - Base decisions on actual plan content, not stale information
 - qaRequired path check failure is a **mandatory rejection** — cannot be overridden by reviewer judgment
+
+### qaRequired 判定の検証（必須）
+
+Ship の計画コメントに含まれる `qaRequired` の判定を以下のルールで検証する。**1 つでも該当する場合は `qaRequired: true` を強制する**（Ship の判定が `false` であっても reject して修正を求める）:
+
+| 条件 | 理由 |
+|------|------|
+| `src/components/` 配下のファイルに変更がある | UI コンポーネントの変更は表示に直接影響する |
+| 表示値（phase 名、ステータス、ラベル等）のリネーム・変更がある | 表示値の不整合は全コンポーネントに波及する |
+| `STATUS_CONFIG` や表示ヘルパー関数に変更がある | バッジ・ステータス表示の源泉データが変わる |
+| Store（Zustand）の状態構造に変更がある | UI の表示データソースが変わる |
+| 「DB → Engine → Frontend」を貫通する値の変更がある | 全レイヤーの整合性確認が必要 |
+
+> **背景（PR #641 事例）**: planning-gate が `qaRequired: false` と判定した結果、acceptance-test-gate が QA をスキップし、バッジ表示の不具合がそのまま merge された。UI 表示に影響する変更は保守的に `qaRequired: true` とすること。
