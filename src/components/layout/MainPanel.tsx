@@ -11,6 +11,11 @@ import { SessionCardList } from "@/components/session/SessionCardList";
 import { FleetSettings } from "@/components/fleet/FleetSettings";
 import { AdmiralSettings } from "@/components/admiral/AdmiralSettings";
 import { KeyboardShortcutsDialog } from "@/components/layout/KeyboardShortcutsDialog";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 
 export function MainPanel() {
   const mainView = useUIStore((s) => s.mainView);
@@ -95,7 +100,7 @@ export function MainPanel() {
   if (!selectedFleetId && mainView !== "fleet-settings" && mainView !== "admiral-settings") {
     return (
       <>
-        <div className="flex flex-1 items-center justify-center text-muted-foreground">
+        <div className="flex h-full items-center justify-center text-muted-foreground">
           <div className="text-center">
             <p className="text-lg font-medium">Select or create a Fleet</p>
             <p className="text-sm mt-1">
@@ -115,13 +120,17 @@ export function MainPanel() {
     switch (mainView) {
       case "command":
         return (
-          <div className="flex flex-1 min-h-0">
+          <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
             {/* Left: Session Chat */}
-            <SessionChat key={focusedSessionId ?? ''} sessionId={focusedSessionId} />
-
+            <ResizablePanel defaultSize={65} minSize={30}>
+              <SessionChat key={focusedSessionId ?? ''} sessionId={focusedSessionId} />
+            </ResizablePanel>
+            <ResizableHandle withHandle />
             {/* Right: Session Card List */}
-            <SessionCardList fleetId={selectedFleetId!} />
-          </div>
+            <ResizablePanel defaultSize={35} minSize={20}>
+              <SessionCardList fleetId={selectedFleetId!} />
+            </ResizablePanel>
+          </ResizablePanelGroup>
         );
       case "fleet-settings":
         return <FleetSettings />;

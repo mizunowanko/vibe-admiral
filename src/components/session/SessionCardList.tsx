@@ -160,7 +160,7 @@ export const SessionCardList = memo(function SessionCardList({
   }, [dispatches, fleetId]);
 
   return (
-    <div className="w-[420px] shrink-0 border-l border-border bg-background/50 flex flex-col min-h-0">
+    <div className="h-full border-l border-border bg-background/50 flex flex-col min-h-0">
       {/* Scrollable sections: Commander cards → Dispatches → Ships */}
       <ScrollArea className="flex-1">
         <div className="divide-y divide-border">
