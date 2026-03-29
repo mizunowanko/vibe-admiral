@@ -1,4 +1,5 @@
 import { EngineServer } from "./ws-server.js";
+import { writeCrashLog } from "./crash-logger.js";
 
 const PORT = parseInt(process.env.ENGINE_PORT ?? "9721", 10);
 
@@ -14,12 +15,14 @@ try {
 // Global error handlers — prevent silent crashes
 process.on("uncaughtException", (err) => {
   console.error("[engine] Uncaught exception:", err);
+  writeCrashLog(err, "uncaughtException");
   engine.shutdown();
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
   console.error("[engine] Unhandled rejection:", reason);
+  writeCrashLog(reason, "unhandledRejection");
   engine.shutdown();
   process.exit(1);
 });

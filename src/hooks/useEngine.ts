@@ -27,6 +27,7 @@ export function useEngine() {
   const updateShipFromApi = useShipStore((s) => s.updateShipFromApi);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const setRateLimitActive = useUIStore((s) => s.setRateLimitActive);
+  const setPreviousCrash = useUIStore((s) => s.setPreviousCrash);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
   const setAdmiralSettings = useAdmiralSettingsStore((s) => s.setSettings);
   const fetchAdmiralSettings = useAdmiralSettingsStore((s) => s.fetchSettings);
@@ -251,6 +252,18 @@ export function useEngine() {
           break;
         }
 
+        case "engine:previous-crash": {
+          const crashData = msg.data as {
+            timestamp: string;
+            context: string;
+            message: string;
+            stack?: string;
+          };
+          console.warn("[engine] Previous crash detected:", crashData);
+          setPreviousCrash(crashData);
+          break;
+        }
+
         case "error": {
           const errorData = msg.data as { source: string; message: string };
           console.error(`Engine error [${errorData.source}]:`, errorData.message);
@@ -301,6 +314,7 @@ export function useEngine() {
     updateShipFromApi,
     setEngineConnected,
     setRateLimitActive,
+    setPreviousCrash,
     fetchFleets,
     setAdmiralSettings,
     fetchAdmiralSettings,
