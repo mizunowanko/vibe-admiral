@@ -211,7 +211,7 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
 
   if (!sessionId || !session) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-muted-foreground">
         <div className="text-center">
           <p className="text-lg font-medium">Select a session</p>
           <p className="text-sm mt-1">Choose Dock, Flagship, or a Ship from the panel</p>
@@ -223,7 +223,7 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
   const baseIndex = isShip ? Math.max(0, messages.length - visibleMessages.length) : 0;
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 min-w-0">
+    <div className="flex h-full flex-col min-h-0 min-w-0">
       {/* Session Header */}
       {session && (
         <SessionHeader
