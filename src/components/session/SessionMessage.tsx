@@ -57,8 +57,9 @@ export const SessionMessage = memo(function SessionMessage({
   // Commander status: suppress in Ship sessions
   if (isSystem && message.subtype === "commander-status" && isShip) return null;
 
-  // Escort log: Ship only
-  if (isSystem && message.subtype === "escort-log" && !isShip) return null;
+  // Escort log: Ship only.
+  // Check meta.category (not subtype) — Escort messages are type "assistant", not "system" (#729).
+  if (message.meta?.category === "escort-log" && !isShip) return null;
 
   // --- Render routing ---
 
