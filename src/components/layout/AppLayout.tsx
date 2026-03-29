@@ -18,7 +18,7 @@ export function AppLayout() {
         orientation="horizontal"
         className="min-h-0 flex-1"
       >
-        <ResizablePanel defaultSize={15} minSize={10} maxSize={30}>
+        <ResizablePanel defaultSize={15} minSize={5}>
           <Sidebar />
         </ResizablePanel>
         <ResizableHandle withHandle />
