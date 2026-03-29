@@ -28,6 +28,7 @@ function createMockDeps() {
     loadAdmiralSettings: vi.fn().mockResolvedValue({ global: {}, template: {} }),
     broadcastRequestResult: vi.fn(),
     deliverHeadsUp: vi.fn().mockReturnValue(true),
+    resumeAllUnits: vi.fn().mockResolvedValue([]),
     requestRestart: vi.fn(),
     _handle: handle,
   };
