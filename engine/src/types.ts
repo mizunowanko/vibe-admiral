@@ -396,3 +396,15 @@ export interface HeadsUpNotification {
   severity: HeadsUpSeverity;
   needsInvestigation: boolean;
 }
+
+// === Resume All Units (cross-fleet bulk resume) ===
+export type ResumeAllUnitType = "ship" | "flagship" | "dock";
+
+export interface ResumeAllUnitResult {
+  type: ResumeAllUnitType;
+  id: string;
+  fleetId: string;
+  label: string;
+  status: "resumed" | "skipped" | "error";
+  reason?: string;
+}

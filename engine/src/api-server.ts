@@ -6,7 +6,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { DispatchManager } from "./dispatch-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole, AdmiralSettings, HeadsUpNotification, HeadsUpSeverity } from "./types.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole, AdmiralSettings, HeadsUpNotification, HeadsUpSeverity, ResumeAllUnitResult } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
@@ -41,6 +41,7 @@ interface ApiDeps {
   loadAdmiralSettings: () => Promise<AdmiralSettings>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
   deliverHeadsUp: (notification: HeadsUpNotification) => boolean;
+  resumeAllUnits: () => Promise<ResumeAllUnitResult[]>;
   requestRestart: () => void;
 }
 
@@ -51,6 +52,8 @@ interface ApiResponse {
   phase?: string;
   transitions?: Array<Record<string, unknown>>;
   ships?: unknown[];
+  results?: ResumeAllUnitResult[];
+  summary?: { resumed: number; skipped: number; errors: number };
 }
 
 function validateSortieRequest(body: unknown): FlagshipRequest | string {
@@ -869,6 +872,16 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         sendJson(res, 200, { ok: true, result: "Restart initiated" });
         // Trigger restart asynchronously after response is sent
         setImmediate(() => deps.requestRestart());
+        return;
+      }
+
+      // POST /api/resume-all — Resume all stopped/dead Units across all Fleets
+      if (route === "resume-all" && req.method === "POST") {
+        const results = await deps.resumeAllUnits();
+        const resumed = results.filter(r => r.status === "resumed");
+        const skipped = results.filter(r => r.status === "skipped");
+        const errors = results.filter(r => r.status === "error");
+        sendJson(res, 200, { ok: true, results, summary: { resumed: resumed.length, skipped: skipped.length, errors: errors.length } });
         return;
       }
 

@@ -33,7 +33,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification, ResumeAllUnitResult } from "./types.js";
 import { applyTemplate } from "./deep-merge.js";
 
 const FLEETS_DIR = getAdmiralHome();
@@ -186,6 +186,7 @@ export class EngineServer {
       deliverHeadsUp: (notification: HeadsUpNotification) => {
         return this.deliverHeadsUp(notification);
       },
+      resumeAllUnits: () => this.resumeAllUnits(),
     });
 
     this.httpServer = createServer(apiHandler);
@@ -1519,6 +1520,60 @@ export class EngineServer {
       }
     }, 30_000);
     this.processLivenessTimer.unref();
+  }
+
+  /**
+   * Resume all stopped/dead Units across all Fleets.
+   * Ships: filter processDead or phase=stopped, call retryShip().
+   * Commanders (Flagship/Dock): check isRunning, re-launch if dead.
+   */
+  async resumeAllUnits(): Promise<ResumeAllUnitResult[]> {
+    const results: ResumeAllUnitResult[] = [];
+    const fleets = await this.loadFleets();
+
+    for (const fleet of fleets) {
+      // --- Ships ---
+      const ships = this.shipManager.getShipsByFleet(fleet.id);
+      for (const ship of ships) {
+        if (ship.phase === "done") {
+          results.push({ type: "ship", id: ship.id, fleetId: fleet.id, label: `Ship #${ship.issueNumber} (${ship.issueTitle})`, status: "skipped", reason: "already done" });
+          continue;
+        }
+        if (this.processManager.isRunning(ship.id)) {
+          results.push({ type: "ship", id: ship.id, fleetId: fleet.id, label: `Ship #${ship.issueNumber} (${ship.issueTitle})`, status: "skipped", reason: "already running" });
+          continue;
+        }
+        const resumed = this.shipManager.retryShip(ship.id);
+        if (resumed) {
+          const method = ship.sessionId ? "session resume" : "re-sortie";
+          results.push({ type: "ship", id: ship.id, fleetId: fleet.id, label: `Ship #${ship.issueNumber} (${ship.issueTitle})`, status: "resumed", reason: method });
+        } else {
+          results.push({ type: "ship", id: ship.id, fleetId: fleet.id, label: `Ship #${ship.issueNumber} (${ship.issueTitle})`, status: "error", reason: "retryShip failed" });
+        }
+      }
+
+      // --- Flagship ---
+      if (this.flagshipManager.hasSession(fleet.id)) {
+        const flagshipResult = this.flagshipManager.resumeIfDead(fleet.id);
+        if (flagshipResult.resumed) {
+          results.push({ type: "flagship", id: `flagship-${fleet.id}`, fleetId: fleet.id, label: `Flagship (${fleet.name})`, status: "resumed", reason: flagshipResult.method });
+        } else {
+          results.push({ type: "flagship", id: `flagship-${fleet.id}`, fleetId: fleet.id, label: `Flagship (${fleet.name})`, status: "skipped", reason: flagshipResult.reason });
+        }
+      }
+
+      // --- Dock ---
+      if (this.dockManager.hasSession(fleet.id)) {
+        const dockResult = this.dockManager.resumeIfDead(fleet.id);
+        if (dockResult.resumed) {
+          results.push({ type: "dock", id: `dock-${fleet.id}`, fleetId: fleet.id, label: `Dock (${fleet.name})`, status: "resumed", reason: dockResult.method });
+        } else {
+          results.push({ type: "dock", id: `dock-${fleet.id}`, fleetId: fleet.id, label: `Dock (${fleet.name})`, status: "skipped", reason: dockResult.reason });
+        }
+      }
+    }
+
+    return results;
   }
 
   shutdown(): void {

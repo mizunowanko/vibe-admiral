@@ -100,6 +100,45 @@ export class CommanderManager {
     return this.sessions.has(fleetId);
   }
 
+  /**
+   * Check if the Commander process for this fleet is dead, and re-launch it if so.
+   * Returns { resumed: true, method } if re-launched, { resumed: false, reason } if skipped.
+   */
+  resumeIfDead(fleetId: string): { resumed: boolean; method?: string; reason?: string } {
+    const session = this.sessions.get(fleetId);
+    if (!session) {
+      return { resumed: false, reason: "no session" };
+    }
+
+    const processId = `${this.role}-${fleetId}`;
+    if (this.processManager.isRunning(processId)) {
+      return { resumed: false, reason: "already running" };
+    }
+
+    const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
+
+    if (session.sessionId) {
+      this.processManager.resumeCommander(
+        processId,
+        session.sessionId,
+        session.fleetPath,
+        session.additionalDirs,
+        session.systemPrompt,
+        commanderEnv,
+      );
+      return { resumed: true, method: "session resume" };
+    } else {
+      this.processManager.launchCommander(
+        processId,
+        session.fleetPath,
+        session.additionalDirs,
+        session.systemPrompt,
+        commanderEnv,
+      );
+      return { resumed: true, method: "fresh launch" };
+    }
+  }
+
   setSessionId(fleetId: string, sessionId: string): void {
     const session = this.sessions.get(fleetId);
     if (session && !session.sessionId) {
