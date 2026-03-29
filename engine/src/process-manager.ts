@@ -90,7 +90,10 @@ export class ProcessManager extends EventEmitter {
       },
     );
 
-    const logFilePath = join(worktreePath, ".claude", "ship-log.jsonl");
+    // Escort processes share the parent Ship's worktree — write to separate log file
+    // so ship-manager can load them independently (#729).
+    const logFileName = skill === "/escort" ? "escort-log.jsonl" : "ship-log.jsonl";
+    const logFilePath = join(worktreePath, ".claude", logFileName);
     this.setupProcess(id, proc, logFilePath);
     return proc;
   }
@@ -315,6 +318,7 @@ export class ProcessManager extends EventEmitter {
     cwd: string,
     extraEnv?: Record<string, string>,
     appendSystemPrompt?: string,
+    logFileName?: string,
   ): ChildProcess {
     // Same stdio/disallowedTools constraints as sortie().
     // See .claude/rules/cli-subprocess.md for full rationale.
@@ -353,7 +357,7 @@ export class ProcessManager extends EventEmitter {
       },
     );
 
-    const logFilePath = join(cwd, ".claude", "ship-log.jsonl");
+    const logFilePath = join(cwd, ".claude", logFileName ?? "ship-log.jsonl");
     this.setupProcess(id, proc, logFilePath);
     return proc;
   }
