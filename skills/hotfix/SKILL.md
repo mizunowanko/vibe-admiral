@@ -18,10 +18,10 @@ Emergency code modification mode where Bridge launches a Dispatch process via En
 
 ## Constraints
 
-- **No worktree**: Operates on the main branch directly in the fleet's working directory
+- **No worktree**: Operates in the fleet's working directory (creates a hotfix branch from main)
 - **No Gate checks**: Emergency mode skips plan-review and code-review gates
 - **No admiral-request**: Does not use status-transition protocol (Engine may be broken)
-- **Commit directly**: The Dispatch agent commits, pushes, and optionally creates a PR
+- **PR required**: The Dispatch agent creates a hotfix branch, commits, pushes, creates a PR, and self-merges
 
 ## Hotfix Dispatch Template
 
@@ -36,7 +36,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
     "name": "hotfix",
     "type": "modify",
     "cwd": "<repo-path>",
-    "prompt": "You are a Dispatch agent performing an emergency hotfix.\n\nRepo: <repo-path>\nIssue/Problem: <description of what needs to be fixed>\nTarget branch: main (or current branch)\n\n## Steps\n\n1. **Investigate**: Read the relevant files to understand the issue\n2. **Fix**: Make the minimum necessary code changes using Edit/Write tools\n3. **Verify**: Run type checks and build to ensure the fix is correct\n   - Frontend: npx tsc --noEmit\n   - Engine: cd engine && npx tsc --noEmit\n   - Build: npm run build\n4. **Commit**: Stage only the changed files (never use git add -A) and commit with:\n   - Prefix: fix: (for bug fixes) or refactor: (for structural fixes)\n   - Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\n5. **Push**: Push to the remote\n6. **Report**: Summarize what was changed and why\n\n## Rules\n\n- Make the MINIMUM change necessary — this is an emergency fix, not a refactor\n- Do NOT touch unrelated files\n- Do NOT add new features\n- If the fix requires more than ~3 files, recommend a proper sortie instead\n- Always run verification (type check + build) before committing"
+    "prompt": "You are a Dispatch agent performing an emergency hotfix.\n\nRepo: <repo-path>\nIssue/Problem: <description of what needs to be fixed>\nIssue number: <issue-num>\n\n## Steps\n\n1. **Branch**: Create a hotfix branch from main:\n   - git checkout main && git pull origin main\n   - git checkout -b hotfix/<short-description>\n2. **Investigate**: Read the relevant files to understand the issue\n3. **Fix**: Make the minimum necessary code changes using Edit/Write tools\n4. **Verify**: Run type checks and build to ensure the fix is correct\n   - Frontend: npx tsc --noEmit\n   - Engine: cd engine && npx tsc --noEmit\n   - Build: npm run build\n5. **Commit**: Stage only the changed files (never use git add -A) and commit with:\n   - Prefix: fix: (for bug fixes) or refactor: (for structural fixes)\n   - Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\n6. **Push**: Push the hotfix branch to the remote:\n   - git push -u origin hotfix/<short-description>\n7. **PR**: Create a pull request:\n   - gh pr create --title 'fix: <summary>' --body 'Closes #<issue-num>\\n\\n<description of what was changed and why>'\n8. **Merge**: Self-merge the PR:\n   - gh pr merge --merge\n9. **Report**: Summarize what was changed and why, include the PR URL\n\n## Rules\n\n- Make the MINIMUM change necessary — this is an emergency fix, not a refactor\n- Do NOT touch unrelated files\n- Do NOT add new features\n- If the fix requires more than ~3 files, recommend a proper sortie instead\n- Always run verification (type check + build) before committing\n- Always create a PR — never push directly to main"
   }'
 ```
 
