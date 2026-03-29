@@ -279,7 +279,8 @@ export type ClientMessage =
   | { type: "ship:logs"; data: { id: string; limit?: number } }
   | { type: "issue:list"; data: { repo: string } }
   | { type: "issue:get"; data: { repo: string; number: number } }
-  | { type: "fs:list-dir"; data: { path?: string } };
+  | { type: "fs:list-dir"; data: { path?: string } }
+  | { type: "pong" };
 
 // === WebSocket Messages: Engine → Frontend ===
 export type ServerMessage =
@@ -386,4 +387,5 @@ export type ServerMessage =
   | { type: "engine:previous-crash"; data: { timestamp: string; context: string; message: string; stack?: string } }
   | { type: "rate-limit:detected"; data: { processId: string } }
   | { type: "caffeinate:status"; data: CaffeinateStatus }
+  | { type: "ping" }
   | { type: "error"; data: { source: string; message: string } };
