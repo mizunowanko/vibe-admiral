@@ -81,6 +81,27 @@ export interface GateCheckState {
 /** @deprecated Use GatePhase instead. Kept for backward compat in admiral-protocol. */
 export type GateTransition = GatePhase;
 
+// === Admiral Settings (3-layer configuration) ===
+/**
+ * Settings fields that participate in the 3-layer merge:
+ * Admiral Global → (Fleet Template at creation) → Fleet Per-Fleet
+ */
+export interface SettingsLayer {
+  customInstructions?: CustomInstructions;
+  gates?: FleetGateSettings;
+  gatePrompts?: Partial<Record<GateType, string>>;
+  qaRequiredPaths?: string[];
+  maxConcurrentSorties?: number;
+}
+
+/** Admiral-level settings: global (runtime merge) + template (creation-time snapshot). */
+export interface AdmiralSettings {
+  /** Settings applied to ALL fleets at runtime via deepMerge. */
+  global: SettingsLayer;
+  /** Template copied into new fleets at creation time. Does NOT affect existing fleets. */
+  template: SettingsLayer;
+}
+
 // === Custom Instructions ===
 /** Per-actor custom instructions injected via --append-system-prompt. */
 export interface CustomInstructions {
@@ -130,6 +151,8 @@ export interface Fleet {
   gates?: FleetGateSettings;
   /** Custom Escort prompts per gate type. Overrides default gate skill behavior. */
   gatePrompts?: Partial<Record<GateType, string>>;
+  /** Glob patterns for paths that force qaRequired=true when changed. Passed to Escorts via env var. */
+  qaRequiredPaths?: string[];
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   createdAt: string;
@@ -137,6 +160,13 @@ export interface Fleet {
 
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
+
+// === Gate Intent (Escort pre-verdict declaration) ===
+export interface GateIntent {
+  verdict: "approve" | "reject";
+  feedback?: string;
+  declaredAt: string;
+}
 
 // === Ship ===
 export interface Ship {
@@ -179,7 +209,9 @@ export type StreamMessageSubtype =
   | "lookout-alert"
   | "task-notification"
   | "dispatch-log"
-  | "escort-log";
+  | "escort-log"
+  | "rate-limit-status"
+  | "heads-up";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -210,6 +242,7 @@ export interface StreamMessage {
   toolInput?: Record<string, unknown>;
   subtype?: StreamMessageSubtype;
   meta?: SystemMessageMeta;
+  timestamp?: number;
   [key: string]: unknown;
 }
 
@@ -304,8 +337,11 @@ export interface EscortProcess {
   completedAt: string | null;
 }
 
-// === Dispatch (Commander sub-agent launched via Task tool) ===
+// === Dispatch (Engine-managed independent CLI process) ===
 export type DispatchStatus = "running" | "completed" | "failed";
+
+/** Dispatch type determines tool permissions. */
+export type DispatchType = "investigate" | "modify";
 
 export interface Dispatch {
   id: string;
@@ -313,6 +349,21 @@ export interface Dispatch {
   fleetId: string;
   name: string;
   status: DispatchStatus;
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
+}
+
+/** Full Dispatch process state tracked by DispatchManager. */
+export interface DispatchProcess {
+  id: string;
+  fleetId: string;
+  parentRole: CommanderRole;
+  name: string;
+  prompt: string;
+  type: DispatchType;
+  status: DispatchStatus;
+  cwd: string;
   startedAt: number;
   completedAt?: number;
   result?: string;
@@ -331,3 +382,17 @@ export interface PersistedCommanderSession {
 
 /** @deprecated Use PersistedCommanderSession instead. */
 export type PersistedBridgeSession = PersistedCommanderSession;
+
+// === Heads-Up Notification (Commander-to-Commander) ===
+export type HeadsUpSeverity = "info" | "warning" | "urgent";
+
+export interface HeadsUpNotification {
+  from: CommanderRole;
+  to: CommanderRole;
+  fleetId: string;
+  summary: string;
+  shipId?: string;
+  issueNumber?: number;
+  severity: HeadsUpSeverity;
+  needsInvestigation: boolean;
+}

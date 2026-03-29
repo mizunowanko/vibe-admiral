@@ -1,46 +1,40 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { wsClient } from "@/lib/ws-client";
-import { useSessionStore } from "@/stores/sessionStore";
-import type { ServerMessage, StreamMessage, ImageAttachment, CommanderRole, Dispatch } from "@/types";
+import type { ServerMessage, StreamMessage, ImageAttachment, CommanderRole } from "@/types";
 
-export function useCommander(fleetId: string | null, role: CommanderRole) {
+export function useCommander(sessionId: string | null, fleetId: string | null, role: CommanderRole) {
   const [messages, setMessages] = useState<StreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const historyLoadedRef = useRef(false);
   // Track the timestamp when we requested history so we can identify
   // which optimistic messages arrived after the request and must be preserved.
   const historyRequestedAtRef = useRef<number>(0);
-  // Track previous fleetId/role to detect actual changes vs. effect re-runs
-  const prevFleetRef = useRef<{ fleetId: string | null; role: CommanderRole }>({ fleetId: null, role });
-
-  const addDispatch = useSessionStore((s) => s.addDispatch);
-  const updateDispatch = useSessionStore((s) => s.updateDispatch);
+  // Track previous sessionId to detect actual session changes vs. effect re-runs
+  const prevSessionIdRef = useRef<string | null>(null);
 
   const streamType = `${role}:stream` as const;
-  const dispatchStartedType = `${role}:dispatch-started` as const;
-  const dispatchCompletedType = `${role}:dispatch-completed` as const;
 
   useEffect(() => {
-    if (!fleetId) {
-      // Don't clear messages when fleetId becomes null transiently
-      // (e.g. during WS reconnection). Preserve existing state so
-      // the UI doesn't flash and drafts survive the remount cycle.
-      prevFleetRef.current = { fleetId, role };
+    if (!sessionId || !fleetId) {
       return;
     }
 
-    // Only clear messages when fleetId or role actually changed to prevent
-    // cross-role leakage. Skip clearing if the effect re-runs with the
-    // same values (e.g. due to dependency identity changes from parent re-renders).
-    const prev = prevFleetRef.current;
-    if ((prev.fleetId && prev.fleetId !== fleetId) || prev.role !== role) {
+    // Only clear messages when sessionId actually changed to prevent
+    // cross-session leakage. sessionId encodes both fleetId and role,
+    // so a single comparison covers fleet switches and role switches.
+    if (prevSessionIdRef.current && prevSessionIdRef.current !== sessionId) {
       setMessages([]);
       setIsLoading(false);
       historyLoadedRef.current = false;
     }
-    prevFleetRef.current = { fleetId, role };
+    prevSessionIdRef.current = sessionId;
+
+    // Guard against stale closures: if the effect has been cleaned up
+    // (role/fleet changed), the listener must not process any more messages.
+    let active = true;
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
+      if (!active) return;
       if (msg.type === streamType) {
         const data = msg.data as { fleetId: string; message: StreamMessage };
         if (data.fleetId === fleetId) {
@@ -58,7 +52,7 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
                 // Collect messages the user added optimistically after we
                 // requested history — these won't be in the server payload yet.
                 const optimistic = prev.filter(
-                  (m) => (m.timestamp ?? 0) >= requestedAt && m.type === "user",
+                  (m) => (m.timestamp ?? 0) >= requestedAt && (m.type === "user" || m.type === "assistant"),
                 );
                 if (optimistic.length === 0) return history;
                 // Deduplicate: if the history already contains a message with
@@ -102,19 +96,6 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
         }
       }
 
-      // Dispatch sub-agent events
-      if (msg.type === dispatchStartedType) {
-        const data = msg.data as { fleetId: string; dispatch: Dispatch };
-        if (data.fleetId === fleetId) {
-          addDispatch(data.dispatch);
-        }
-      }
-      if (msg.type === dispatchCompletedType) {
-        const data = msg.data as { fleetId: string; dispatch: Dispatch };
-        if (data.fleetId === fleetId) {
-          updateDispatch(data.dispatch);
-        }
-      }
     });
 
     // Request history on initial connect
@@ -131,10 +112,11 @@ export function useCommander(fleetId: string | null, role: CommanderRole) {
     });
 
     return () => {
+      active = false;
       unsub();
       unsubConnect();
     };
-  }, [fleetId, role, streamType, dispatchStartedType, dispatchCompletedType, addDispatch, updateDispatch]);
+  }, [sessionId, fleetId, role, streamType]);
 
   const sendMessage = useCallback(
     (message: string, images?: ImageAttachment[]) => {

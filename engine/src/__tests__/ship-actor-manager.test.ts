@@ -75,18 +75,49 @@ describe("ShipActorManager", () => {
   });
 
   describe("restoreActor", () => {
-    it("restores actor and returns effective DB phase", () => {
+    it("restores actor and replays to DB phase", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.hasActor("ship-1")).toBe(true);
-      // getPhase should return DB phase, not XState state
+      // XState should be replayed to "coding", not stuck at "plan"
       expect(manager.getPhase("ship-1")).toBe("coding");
       manager.stopAll();
     });
 
-    it("restores actor for stopped phase", () => {
-      const ship = createMockShipProcess({ phase: "stopped" });
+    it("replays to plan-gate phase", () => {
+      const ship = createMockShipProcess({ phase: "plan-gate" });
       manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("plan-gate");
+      manager.stopAll();
+    });
+
+    it("replays to qa phase", () => {
+      const ship = createMockShipProcess({ phase: "qa" });
+      manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("qa");
+      manager.stopAll();
+    });
+
+    it("replays to merging phase", () => {
+      const ship = createMockShipProcess({ phase: "merging" });
+      manager.restoreActor(ship);
+      expect(manager.getPhase("ship-1")).toBe("merging");
+      manager.stopAll();
+    });
+
+    it("restores actor for stopped phase with phaseBeforeStopped", () => {
+      const ship = createMockShipProcess({ phase: "stopped" });
+      manager.restoreActor(ship, "coding");
+      expect(manager.getPhase("ship-1")).toBe("stopped");
+      // Verify the actor is in stopped state and can resume to coding
+      manager.send("ship-1", { type: "RESUME" });
+      expect(manager.getPhase("ship-1")).toBe("coding");
+      manager.stopAll();
+    });
+
+    it("restores stopped actor when phaseBeforeStopped is plan", () => {
+      const ship = createMockShipProcess({ phase: "stopped" });
+      manager.restoreActor(ship, "plan");
       expect(manager.getPhase("ship-1")).toBe("stopped");
       manager.stopAll();
     });
@@ -98,22 +129,30 @@ describe("ShipActorManager", () => {
       expect(manager.hasActor("ship-1")).toBe(false);
     });
 
-    it("does not fire onPhaseChange during restoration", () => {
+    it("does not fire onPhaseChange during replay", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
+      // Side effects should be suppressed during replay
       expect(sideEffects.onPhaseChange).not.toHaveBeenCalled();
       manager.stopAll();
     });
 
-    it("clears effective phase after a real transition", () => {
+    it("transitions correctly after restore (GATE_ENTER from coding → coding-gate)", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.getPhase("ship-1")).toBe("coding");
-      // Send a real event that transitions the XState actor
+      // This is the key fix: GATE_ENTER should now go to coding-gate, not plan-gate
       manager.send("ship-1", { type: "GATE_ENTER" });
-      // Now getPhase should return the XState state (plan-gate because
-      // XState started at plan and GATE_ENTER → plan-gate)
-      expect(manager.getPhase("ship-1")).toBe("plan-gate");
+      expect(manager.getPhase("ship-1")).toBe("coding-gate");
+      manager.stopAll();
+    });
+
+    it("fires onPhaseChange for transitions after restore", () => {
+      const ship = createMockShipProcess({ phase: "coding" });
+      manager.restoreActor(ship);
+      (sideEffects.onPhaseChange as ReturnType<typeof vi.fn>).mockClear();
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(sideEffects.onPhaseChange).toHaveBeenCalledWith("ship-1", "coding-gate");
       manager.stopAll();
     });
   });
@@ -169,7 +208,7 @@ describe("ShipActorManager", () => {
       expect(manager.getPhase("ship-1")).toBeUndefined();
     });
 
-    it("clears effective phase on stop", () => {
+    it("clears replayed actor on stop", () => {
       const ship = createMockShipProcess({ phase: "coding" });
       manager.restoreActor(ship);
       expect(manager.getPhase("ship-1")).toBe("coding");
@@ -294,6 +333,35 @@ describe("ShipActorManager", () => {
     });
   });
 
+  describe("assertPhaseConsistency", () => {
+    it("returns true when XState phase matches DB phase", () => {
+      manager.createActor(DEFAULT_INPUT);
+      expect(manager.assertPhaseConsistency("ship-1", "plan")).toBe(true);
+      manager.stopAll();
+    });
+
+    it("returns false and logs error on phase mismatch", () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      // XState is in "plan", but DB says "coding" — mismatch
+      expect(manager.assertPhaseConsistency("ship-1", "coding")).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Phase consistency MISMATCH"),
+      );
+      errorSpy.mockRestore();
+      manager.stopAll();
+    });
+
+    it("returns false when actor does not exist", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(manager.assertPhaseConsistency("nonexistent", "plan")).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("no actor for Ship"),
+      );
+      warnSpy.mockRestore();
+    });
+  });
+
   describe("side effects", () => {
     it("fires onPhaseChange when actor transitions", () => {
       manager.createActor(DEFAULT_INPUT);
@@ -308,6 +376,91 @@ describe("ShipActorManager", () => {
       manager.send("ship-1", { type: "PROCESS_OUTPUT", timestamp: 123 });
       // PROCESS_OUTPUT doesn't change phase, only context
       expect(sideEffects.onPhaseChange).not.toHaveBeenCalled();
+      manager.stopAll();
+    });
+  });
+
+  describe("reconcilePhase", () => {
+    it("repairs XState/DB mismatch by re-creating actor at DB phase", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      // XState is at "plan", but DB says "coding" — simulate split-brain
+      expect(manager.getPhase("ship-1")).toBe("plan");
+
+      const result = manager.reconcilePhase("ship-1", "coding");
+      expect(result).toBe(true);
+      expect(manager.getPhase("ship-1")).toBe("coding");
+
+      // Verify the repaired actor can still accept events
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(manager.getPhase("ship-1")).toBe("coding-gate");
+
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+      manager.stopAll();
+    });
+
+    it("repairs gate-phase mismatch (XState=coding-gate, DB=coding)", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      // Advance to coding-gate
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      manager.send("ship-1", { type: "GATE_APPROVED" });
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(manager.getPhase("ship-1")).toBe("coding-gate");
+
+      // DB was reverted to "coding" but XState stayed at "coding-gate" — the #694 scenario
+      const result = manager.reconcilePhase("ship-1", "coding");
+      expect(result).toBe(true);
+      expect(manager.getPhase("ship-1")).toBe("coding");
+
+      // Ship should now be able to re-enter coding-gate
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      expect(manager.getPhase("ship-1")).toBe("coding-gate");
+
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+      manager.stopAll();
+    });
+
+    it("is no-op when phases already match", () => {
+      manager.createActor(DEFAULT_INPUT);
+      const result = manager.reconcilePhase("ship-1", "plan");
+      expect(result).toBe(false);
+      expect(manager.getPhase("ship-1")).toBe("plan");
+      manager.stopAll();
+    });
+
+    it("returns false when no actor exists", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const result = manager.reconcilePhase("nonexistent", "coding");
+      expect(result).toBe(false);
+      warnSpy.mockRestore();
+    });
+
+    it("stops actor when DB phase is 'done'", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      const result = manager.reconcilePhase("ship-1", "done");
+      expect(result).toBe(true);
+      expect(manager.hasActor("ship-1")).toBe(false);
+      warnSpy.mockRestore();
+    });
+
+    it("preserves actor context (shipId, issueNumber, etc.) after reconciliation", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      manager.reconcilePhase("ship-1", "coding");
+      const ctx = manager.getContext("ship-1");
+      expect(ctx?.shipId).toBe("ship-1");
+      expect(ctx?.fleetId).toBe("fleet-1");
+      expect(ctx?.issueNumber).toBe(42);
+      expect(ctx?.branchName).toBe("feature/42-test");
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
       manager.stopAll();
     });
   });

@@ -32,7 +32,17 @@ export function parseStreamMessage(
   raw: Record<string, unknown>,
 ): StreamMessage | null {
   const type = raw.type as string | undefined;
+  const parsed = parseStreamMessageInner(raw, type);
+  if (parsed) {
+    parsed.timestamp = Date.now();
+  }
+  return parsed;
+}
 
+function parseStreamMessageInner(
+  raw: Record<string, unknown>,
+  type: string | undefined,
+): StreamMessage | null {
   switch (type) {
     case "assistant": {
       const msg = raw.message as
@@ -86,7 +96,7 @@ export function parseStreamMessage(
     case "system": {
       const subtype = raw.subtype as string | undefined;
       // Skip hooks, init, and task_notification — not useful for the user.
-      // Task results are already shown via TaskOutput tool_result messages.
+      // Agent results are surfaced via task_notification with chat logs.
       // If a task_notification contains a description, surface it as a compact card.
       if (subtype === "init" || subtype?.startsWith("hook")) {
         return null;
@@ -107,7 +117,15 @@ export function parseStreamMessage(
         }
         // Fallback: surface description as a compact task-notification pill
         const desc = (raw.description as string | undefined) ?? (raw.content as string | undefined);
-        if (!desc) return null;
+        if (!desc) {
+          // Even without chat or description, emit a dispatch-log so
+          // ws-server can detect dispatch completion (#703).
+          return {
+            type: "system",
+            subtype: "dispatch-log" as StreamMessageSubtype,
+            content: "",
+          };
+        }
         return {
           type: "system",
           subtype: "task-notification" as StreamMessageSubtype,
@@ -159,11 +177,19 @@ export function parseStreamMessage(
           .join("\n");
       }
       if (!content) return null;
+      const toolUseId = raw.tool_use_id as string | undefined;
       return {
         type: "tool_result",
         content,
+        ...(toolUseId ? { toolUseId } : {}),
       };
     }
+
+    // Claude CLI emits rate_limit_event on stdout during rate limiting.
+    // Drop these — the Engine handles retry automatically. (#712)
+    case "rate_limit_event":
+    case "error":
+      return null;
 
     default:
       return null;

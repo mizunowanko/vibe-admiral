@@ -30,10 +30,27 @@ export interface ShipActorSideEffects {
   onLaunchEscort: (shipId: string, gatePhase: GatePhase, gateType: GateType) => void;
 }
 
+/**
+ * Events to replay from the initial "plan" state to reach each phase.
+ * XState v5 always creates actors at the initial state, so we replay
+ * events to advance the actor to the correct DB phase on Engine restart.
+ */
+const PHASE_REPLAY_EVENTS: Record<Phase, ShipMachineEvent[]> = {
+  plan: [],
+  "plan-gate": [{ type: "GATE_ENTER" }],
+  coding: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
+  "coding-gate": [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }],
+  qa: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
+  "qa-gate": [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }],
+  merging: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
+  done: [],
+  stopped: [],
+};
+
 export class ShipActorManager {
   private actors = new Map<string, Actor<typeof shipMachine>>();
-  /** Tracks the effective DB phase for restored actors (Actor may be in a different XState state). */
-  private effectivePhase = new Map<string, Phase>();
+  /** Ships currently being replayed — side effects are suppressed during replay. */
+  private replayingShips = new Set<string>();
   private sideEffects: ShipActorSideEffects | null = null;
 
   setSideEffects(effects: ShipActorSideEffects): void {
@@ -43,24 +60,33 @@ export class ShipActorManager {
   /**
    * Create and start a new Ship Actor.
    * Called when a Ship is sortied (new or re-sortied).
+   *
+   * @param startPhase If provided (re-sortie), replay events to advance the
+   *   actor to this phase. Side effects are suppressed during replay so that
+   *   intermediate gate phases don't trigger Escort launches.
    */
-  createActor(input: ShipMachineInput): Actor<typeof shipMachine> {
+  createActor(input: ShipMachineInput, startPhase?: Phase): Actor<typeof shipMachine> {
     // Stop existing actor if present (re-sortie case)
     this.stopActor(input.shipId);
 
     const actor = createActor(shipMachine, { input });
-    this.setupSubscription(input.shipId, actor);
+    const needsReplay = startPhase && startPhase !== "plan";
+    this.setupSubscription(input.shipId, actor, { suppressInitial: !!needsReplay });
     actor.start();
     this.actors.set(input.shipId, actor);
-    // New actors start at "plan" — no effective phase override needed
-    this.effectivePhase.delete(input.shipId);
+
+    // Re-sortie: replay events to advance XState to the target phase.
+    // suppressInitial prevents side effects (Escort launches) during replay.
+    if (needsReplay) {
+      this.replayToPhase(input.shipId, actor, startPhase, null);
+    }
 
     return actor;
   }
 
   /**
    * Restore an Actor for a Ship that was persisted in DB.
-   * Creates the actor at the correct initial state matching the DB phase.
+   * Replays events to advance the XState actor to the DB phase.
    * Called during Engine startup reconciliation.
    */
   restoreActor(ship: ShipProcess, phaseBeforeStopped?: Phase | null): Actor<typeof shipMachine> | null {
@@ -83,18 +109,15 @@ export class ShipActorManager {
       phaseBeforeStopped: phaseBeforeStopped ?? null,
     };
 
-    // Create actor — XState v5 always starts at "plan" (initial state).
-    // We track the effective DB phase separately to avoid spurious side effects.
-    // The actor is used for event-driven transitions going forward; getPhase()
-    // returns the effective phase (DB truth) rather than the Actor's XState state.
     const actor = createActor(shipMachine, { input });
     this.setupSubscription(ship.id, actor, { suppressInitial: true });
     actor.start();
-
     this.actors.set(ship.id, actor);
-    // Store the DB phase as the effective phase — getPhase() returns this
-    // instead of the Actor's XState state until a real transition occurs.
-    this.effectivePhase.set(ship.id, ship.phase as Phase);
+
+    // Replay events to advance XState to the DB phase.
+    // For "stopped" ships, replay to phaseBeforeStopped then send STOP.
+    const targetPhase = ship.phase as Phase;
+    this.replayToPhase(ship.id, actor, targetPhase, phaseBeforeStopped ?? null);
 
     return actor;
   }
@@ -138,15 +161,10 @@ export class ShipActorManager {
   }
 
   /**
-   * Get the current phase from the Actor's state.
-   * For restored actors, returns the effective DB phase until a real
-   * transition occurs through the Actor. Falls back to undefined if no actor exists.
+   * Get the current phase from the Actor's XState state.
+   * After replay, the XState state matches the DB phase.
    */
   getPhase(shipId: string): Phase | undefined {
-    // Return effective phase if set (restored actors)
-    const effective = this.effectivePhase.get(shipId);
-    if (effective) return effective;
-
     const actor = this.actors.get(shipId);
     if (!actor) return undefined;
     const snapshot = actor.getSnapshot();
@@ -178,7 +196,7 @@ export class ShipActorManager {
       actor.stop();
       this.actors.delete(shipId);
     }
-    this.effectivePhase.delete(shipId);
+    this.replayingShips.delete(shipId);
   }
 
   /**
@@ -189,7 +207,7 @@ export class ShipActorManager {
       actor.stop();
     }
     this.actors.clear();
-    this.effectivePhase.clear();
+    this.replayingShips.clear();
   }
 
   /**
@@ -197,6 +215,147 @@ export class ShipActorManager {
    */
   getActiveShipIds(): string[] {
     return Array.from(this.actors.keys());
+  }
+
+  /**
+   * Assert that the XState actor phase matches the expected DB phase.
+   * Logs a warning on mismatch (non-blocking diagnostic for #689).
+   * Returns true if consistent, false if mismatched or actor not found.
+   */
+  assertPhaseConsistency(shipId: string, dbPhase: Phase): boolean {
+    const actorPhase = this.getPhase(shipId);
+    if (actorPhase === undefined) {
+      console.warn(
+        `[ship-actor-manager] Phase consistency check: no actor for Ship ${shipId.slice(0, 8)}...`,
+      );
+      return false;
+    }
+    if (actorPhase !== dbPhase) {
+      console.error(
+        `[ship-actor-manager] Phase consistency MISMATCH for Ship ${shipId.slice(0, 8)}...: ` +
+        `XState=${actorPhase}, DB=${dbPhase}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Reconcile XState actor to match the DB phase by destroying and re-creating
+   * the actor with event replay. This fixes split-brain where XState and DB
+   * have diverged (e.g., DB persist failed after XState transition, or
+   * gate reject updated DB but not XState).
+   *
+   * Returns true if reconciliation was performed, false if phases already match
+   * or reconciliation was not possible (no actor, terminal phase).
+   *
+   * @see https://github.com/mizunowanko/vibe-admiral/issues/694
+   */
+  reconcilePhase(shipId: string, dbPhase: Phase): boolean {
+    const actorPhase = this.getPhase(shipId);
+
+    // No actor — nothing to reconcile
+    if (actorPhase === undefined) {
+      console.warn(
+        `[ship-actor-manager] reconcilePhase: no actor for Ship ${shipId.slice(0, 8)}... — skipping`,
+      );
+      return false;
+    }
+
+    // Already in sync
+    if (actorPhase === dbPhase) return false;
+
+    // Terminal phases cannot be replayed to
+    if (dbPhase === "done") {
+      console.warn(
+        `[ship-actor-manager] reconcilePhase: DB phase is "done" for Ship ${shipId.slice(0, 8)}... — stopping actor`,
+      );
+      this.stopActor(shipId);
+      return true;
+    }
+
+    console.warn(
+      `[ship-actor-manager] reconcilePhase: repairing Ship ${shipId.slice(0, 8)}... ` +
+      `XState=${actorPhase} → DB=${dbPhase}`,
+    );
+
+    // Preserve context from old actor for re-creation
+    const oldContext = this.getContext(shipId);
+
+    // Stop the out-of-sync actor
+    this.stopActor(shipId);
+
+    // Re-create with the same input and replay to DB phase
+    const input: ShipMachineInput = {
+      shipId,
+      fleetId: oldContext?.fleetId ?? "",
+      repo: oldContext?.repo ?? "",
+      issueNumber: oldContext?.issueNumber ?? 0,
+      worktreePath: oldContext?.worktreePath ?? "",
+      branchName: oldContext?.branchName ?? "",
+      sessionId: oldContext?.sessionId ?? null,
+      prUrl: oldContext?.prUrl ?? null,
+      qaRequired: oldContext?.qaRequired ?? true,
+      phaseBeforeStopped: oldContext?.phaseBeforeStopped ?? null,
+    };
+
+    const actor = createActor(shipMachine, { input });
+    this.setupSubscription(shipId, actor, { suppressInitial: true });
+    actor.start();
+    this.actors.set(shipId, actor);
+
+    this.replayToPhase(shipId, actor, dbPhase, oldContext?.phaseBeforeStopped ?? null);
+
+    // Verify replay succeeded
+    const newPhase = this.getPhase(shipId);
+    if (newPhase !== dbPhase) {
+      console.error(
+        `[ship-actor-manager] reconcilePhase: replay failed for Ship ${shipId.slice(0, 8)}... ` +
+        `expected=${dbPhase}, got=${newPhase}`,
+      );
+      return false;
+    }
+
+    console.log(
+      `[ship-actor-manager] reconcilePhase: Ship ${shipId.slice(0, 8)}... repaired to ${dbPhase}`,
+    );
+    return true;
+  }
+
+  /**
+   * Replay events to advance the XState actor from "plan" to the target phase.
+   * Side effects are suppressed during replay.
+   */
+  private replayToPhase(
+    shipId: string,
+    actor: Actor<typeof shipMachine>,
+    targetPhase: Phase,
+    phaseBeforeStopped: Phase | null,
+  ): void {
+    // For "stopped" ships: replay to phaseBeforeStopped, then send STOP
+    const replayTarget = targetPhase === "stopped" && phaseBeforeStopped
+      ? phaseBeforeStopped
+      : targetPhase;
+
+    const events = PHASE_REPLAY_EVENTS[replayTarget];
+    if (!events || events.length === 0) {
+      if (targetPhase === "stopped") {
+        // phaseBeforeStopped is "plan" or unknown — just send STOP from initial state
+        this.replayingShips.add(shipId);
+        actor.send({ type: "STOP" });
+        this.replayingShips.delete(shipId);
+      }
+      return;
+    }
+
+    this.replayingShips.add(shipId);
+    for (const event of events) {
+      actor.send(event);
+    }
+    if (targetPhase === "stopped") {
+      actor.send({ type: "STOP" });
+    }
+    this.replayingShips.delete(shipId);
   }
 
   /**
@@ -225,11 +384,10 @@ export class ShipActorManager {
       if (isInitial && suppressInitial) return;
       if (isInitial) return;
 
-      const phase = stateValueToPhase(currentPhase);
+      // Suppress side effects during replay (Engine restart reconciliation)
+      if (this.replayingShips.has(shipId)) return;
 
-      // When a real transition occurs on a restored actor, clear the effective
-      // phase override so getPhase() starts returning the Actor's XState state.
-      this.effectivePhase.delete(shipId);
+      const phase = stateValueToPhase(currentPhase);
 
       // Dispatch side effects
       this.sideEffects?.onPhaseChange(shipId, phase);

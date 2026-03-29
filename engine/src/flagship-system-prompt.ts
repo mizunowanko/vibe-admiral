@@ -86,7 +86,7 @@ Always query via \`curl http://localhost:9721/api/ships\` before reporting Ship 
 2. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
 3. **Lookout Alerts**: query Ship status via \`curl http://localhost:9721/api/ships\` (see \`/admiral-protocol\`) to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
-5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Task tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
+5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Agent tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
 
 ## Troubleshooting: Rate Limit vs Sleep
 

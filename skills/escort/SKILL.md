@@ -65,14 +65,21 @@ When `PHASE` is `plan-gate`:
    - Impact analysis accuracy
    - Test plan adequacy
 
-3. Post review findings as an Issue comment
+3. Declare gate intent (fallback if process dies before verdict):
+   ```bash
+   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent" \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "approve"}' # or "reject"
+   ```
 
-4. Submit verdict and exit:
+4. Submit verdict (before posting comment — prevents verdict loss on process exit):
    ```bash
    curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict" \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}' # or "reject" with "feedback": "..."
    ```
+
+5. Post review findings as an Issue comment, then exit
 
 ## Implementing Gate Review
 
@@ -94,14 +101,21 @@ When `PHASE` is `coding-gate`:
    - Test coverage
    - No security issues
 
-4. Post review findings as a PR comment
+4. Declare gate intent (fallback if process dies before verdict):
+   ```bash
+   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent" \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "approve"}' # or "reject"
+   ```
 
-5. Submit verdict and exit:
+5. Submit verdict (before posting comment — prevents verdict loss on process exit):
    ```bash
    curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict" \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}' # or "reject" with "feedback": "..."
    ```
+
+6. Post review findings as a PR comment, then exit
 
 ## Acceptance Test Gate Review
 
@@ -117,8 +131,8 @@ QA_REQUIRED="${QA_REQUIRED:-true}"
 ```
 
 If `QA_REQUIRED` is `false`:
-1. Post a QA skip comment on the PR
-2. Submit `approve` verdict immediately
+1. Submit `approve` verdict immediately
+2. Post a QA skip comment on the PR
 3. Exit
 
 ### Steps (when QA is required):
@@ -132,12 +146,21 @@ If `QA_REQUIRED` is `false`:
 
 3. Verify acceptance criteria are met
 
-4. Submit verdict and exit:
+4. Declare gate intent (fallback if process dies before verdict):
+   ```bash
+   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent" \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "approve"}' # or "reject"
+   ```
+
+5. Submit verdict (before posting comment — prevents verdict loss on process exit):
    ```bash
    curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict" \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}' # or "reject" with "feedback": "..."
    ```
+
+6. Post test results as a PR comment, then exit
 
 ## Key Advantages (Session Resume Model)
 

@@ -4,6 +4,7 @@ import type { ShipManager } from "./ship-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { StatusManager } from "./status-manager.js";
+import type { Phase } from "./types.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 
@@ -260,6 +261,9 @@ export class StateSync {
       // Clean up Escort: kill process + mark DB record as done
       this.escortManager?.cleanupForDoneShip(shipId);
 
+      // Persist chat logs to DB before worktree deletion
+      await this.shipManager.persistChatLogs(shipId);
+
       // Successful completion: remove worktree, mark done (label + close issue)
       await this.removeWorktreeWithRetry(ship.worktreePath);
 
@@ -328,13 +332,26 @@ export class StateSync {
       // Notify the status change handler so Bridge gets notified.
       this.shipManager.notifyProcessDead(shipId);
 
+      // Persist chat logs on failure too (worktree may be cleaned up later)
+      await this.shipManager.persistChatLogs(shipId);
+
       // --- PR existence fallback ---
       // If the Ship is in "coding" phase and a PR exists for the branch,
       // the Ship likely created a PR but died before calling the phase-transition API.
       // Auto-transition to coding-gate so the Escort can review the PR.
+      // Guard: skip if Escort has already failed in this gate (escortFailCount > 0),
+      // to prevent coding ↔ coding-gate infinite loop when Escort keeps crashing.
       if (ship.phase === "coding") {
-        const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
-        if (prFallbackApplied) return;
+        const context = this.actorManager?.getContext(shipId);
+        if (context && context.escortFailCount > 0) {
+          console.warn(
+            `[state-sync] PR fallback suppressed for Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...): ` +
+            `escortFailCount=${context.escortFailCount} — Escort has been failing in this gate`,
+          );
+        } else {
+          const prFallbackApplied = await this.rescueWithPRFallback(shipId, ship.repo, ship.branchName, ship.issueNumber);
+          if (prFallbackApplied) return;
+        }
       }
 
       // Check if the issue was already closed (PR merged) on GitHub.
@@ -558,7 +575,17 @@ export class StateSync {
       }
     }
 
-    // 3. Restored ships with no running process remain in their phase.
+    // 3. Validate XState/DB phase consistency after restoration (#689).
+    // Auto-repair mismatches by reconciling XState to DB phase (#694).
+    for (const ship of this.shipManager.getAllShips()) {
+      if (ship.phase !== "done") {
+        if (!this.actorManager?.assertPhaseConsistency(ship.id, ship.phase as Phase)) {
+          this.actorManager?.reconcilePhase(ship.id, ship.phase as Phase);
+        }
+      }
+    }
+
+    // 4. Restored ships with no running process remain in their phase.
     // The UI will show them as "process dead" based on the derived state.
     // Notify for each so Bridge gets the process-dead notification.
     for (const ship of this.shipManager.getAllShips()) {

@@ -39,6 +39,8 @@ export interface ShipMachineContext {
   lastStartedAt: number | null;
   /** Count of consecutive rapid deaths (process exiting within RAPID_DEATH_THRESHOLD_MS of start). */
   rapidDeathCount: number;
+  /** Count of consecutive Escort failures in the current gate phase. Reset on GATE_APPROVED or GATE_ENTER. */
+  escortFailCount: number;
 }
 
 // === Events ===
@@ -62,7 +64,8 @@ export type ShipMachineEvent =
   | { type: "SET_QA_REQUIRED"; qaRequired: boolean }
   | { type: "SET_PR_REVIEW_STATUS"; status: PRReviewStatus }
   | { type: "SET_PHASE_BEFORE_STOPPED"; phase: Phase }
-  | { type: "RAPID_DEATH_LIMIT" };
+  | { type: "RAPID_DEATH_LIMIT" }
+  | { type: "ESCORT_FAIL_LIMIT" };
 
 // === Input (for actor creation) ===
 
@@ -132,6 +135,7 @@ export const shipMachine = setup({
     qaRequired: input.qaRequired ?? true,
     lastStartedAt: null,
     rapidDeathCount: 0,
+    escortFailCount: 0,
   }),
   initial: "plan",
   // Global events available in all states
@@ -173,7 +177,10 @@ export const shipMachine = setup({
   states: {
     plan: {
       on: {
-        GATE_ENTER: { target: "plan-gate" },
+        GATE_ENTER: {
+          target: "plan-gate",
+          actions: assign({ escortFailCount: () => 0 }),
+        },
         STOP: {
           target: "stopped",
           actions: assign({
@@ -191,7 +198,7 @@ export const shipMachine = setup({
       on: {
         GATE_APPROVED: {
           target: "coding",
-          actions: "clearGateCheck",
+          actions: ["clearGateCheck", assign({ escortFailCount: () => 0 })],
         },
         GATE_REJECTED: {
           target: "plan",
@@ -199,7 +206,7 @@ export const shipMachine = setup({
         },
         ESCORT_DIED: {
           target: "plan",
-          actions: "clearGateCheck",
+          actions: ["clearGateCheck", assign({ escortFailCount: ({ context }) => context.escortFailCount + 1 })],
         },
         STOP: {
           target: "stopped",
@@ -212,7 +219,10 @@ export const shipMachine = setup({
 
     coding: {
       on: {
-        GATE_ENTER: { target: "coding-gate" },
+        GATE_ENTER: {
+          target: "coding-gate",
+          actions: assign({ escortFailCount: () => 0 }),
+        },
         STOP: {
           target: "stopped",
           actions: assign({
@@ -230,7 +240,7 @@ export const shipMachine = setup({
       on: {
         GATE_APPROVED: {
           target: "qa",
-          actions: "clearGateCheck",
+          actions: ["clearGateCheck", assign({ escortFailCount: () => 0 })],
         },
         GATE_REJECTED: {
           target: "coding",
@@ -238,7 +248,7 @@ export const shipMachine = setup({
         },
         ESCORT_DIED: {
           target: "coding",
-          actions: "clearGateCheck",
+          actions: ["clearGateCheck", assign({ escortFailCount: ({ context }) => context.escortFailCount + 1 })],
         },
         STOP: {
           target: "stopped",
@@ -256,7 +266,10 @@ export const shipMachine = setup({
             target: "merging",
             guard: "canSkipQA",
           },
-          { target: "qa-gate" },
+          {
+            target: "qa-gate",
+            actions: assign({ escortFailCount: () => 0 }),
+          },
         ],
         STOP: {
           target: "stopped",
@@ -275,7 +288,7 @@ export const shipMachine = setup({
       on: {
         GATE_APPROVED: {
           target: "merging",
-          actions: "clearGateCheck",
+          actions: ["clearGateCheck", assign({ escortFailCount: () => 0 })],
         },
         GATE_REJECTED: {
           target: "qa",
@@ -283,7 +296,7 @@ export const shipMachine = setup({
         },
         ESCORT_DIED: {
           target: "qa",
-          actions: "clearGateCheck",
+          actions: ["clearGateCheck", assign({ escortFailCount: ({ context }) => context.escortFailCount + 1 })],
         },
         STOP: {
           target: "stopped",
@@ -321,6 +334,9 @@ export const shipMachine = setup({
         },
         RAPID_DEATH_LIMIT: {
           // Auto-stop: too many rapid deaths detected by Engine
+        },
+        ESCORT_FAIL_LIMIT: {
+          // Auto-stop: too many consecutive Escort failures in the same gate
         },
         RESUME: [
           {
@@ -387,8 +403,10 @@ export const shipMachine = setup({
             }),
           },
           {
-            // Default: resume to coding if phaseBeforeStopped is unknown
-            target: "coding",
+            // Default: resume to plan if phaseBeforeStopped is unknown.
+            // "plan" is the safe initial state — resuming to "coding" would
+            // skip plan-gate, causing XState/DB split-brain (#689).
+            target: "plan",
             actions: assign({
               processDead: () => false,
               retryCount: ({ context }) => context.retryCount + 1,

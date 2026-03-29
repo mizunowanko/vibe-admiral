@@ -22,6 +22,10 @@ export default defineConfig({
         target: `http://localhost:${enginePort}`,
         changeOrigin: true,
       },
+      "/ws": {
+        target: `http://localhost:${enginePort}`,
+        ws: true,
+      },
     },
   },
 });

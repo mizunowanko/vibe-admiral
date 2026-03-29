@@ -21,7 +21,7 @@ argument-hint: [description or issue-number]
 ## Bug Investigation Template
 
 ```
-Task(description="Dispatch: investigate bug", subagent_type="general-purpose", run_in_background=true, prompt=`
+Agent(description="Dispatch: investigate bug", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent investigating a bug.
 
 Repo: <repo>
@@ -47,7 +47,7 @@ Do NOT create issues or make any changes. Only investigate and report.
 ## Codebase Exploration Template
 
 ```
-Task(description="Dispatch: explore codebase", subagent_type="general-purpose", run_in_background=true, prompt=`
+Agent(description="Dispatch: explore codebase", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent exploring the codebase.
 
 Repo: <repo>
@@ -64,10 +64,10 @@ Output a clear summary. Do NOT create issues or make any changes.
 
 ## Ship Error Diagnosis Template
 
-> **ログ確認が最優先**: DB の phase 遷移やフロントエンド通知は補助情報。実際に何が起きているかはログにしかない。推測で行動する前に必ずログを読むこと。
+> **調査順序を厳守**: ソースコードを先に読んではいけない。ログなしの仮説は精度が低い。ログを見れば「実際に何が起きたか」がわかり、仮説の質が格段に上がる。ソースコードは仮説の**検証**に使うもので、仮説の**生成**に使うものではない。
 
 ```
-Task(description="Dispatch: diagnose Ship error", subagent_type="general-purpose", run_in_background=true, prompt=`
+Agent(description="Dispatch: diagnose Ship error", subagent_type="general-purpose", run_in_background=true, prompt=`
 You are a Dispatch agent diagnosing a Ship error.
 
 Repo: <repo>
@@ -75,18 +75,18 @@ Ship issue: #<issue-number>
 Error context: <error details from Ship status>
 Ship log: <worktree>/.claude/ship-log.jsonl
 
-IMPORTANT: Always read logs FIRST before any other investigation.
-DB phase history and frontend notifications are supplementary — the log is the source of truth.
+IMPORTANT: Follow the investigation order strictly. Do NOT read source code until steps 1-4 are complete.
 
-Steps:
-1. **[MUST] Read the Ship's CLI log first** — this is the highest priority:
+Steps (in strict order):
+1. **[MUST] Engine ログ** — Engine の stdout/stderr を確認。クラッシュ、未捕捉例外、WS エラー等:
+   Run: tail -n 200 <engine-log-path> 2>/dev/null | grep -iE 'error|exception|crash|ECONNREFUSED|SIGTERM' | tail -n 20
+2. **[MUST] Ship chat log** — Ship が何をしていたか、どこで止まったか:
    Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30
-2. Check for error messages in the log:
    Run: tail -n 100 <worktree>/.claude/ship-log.jsonl | grep -i '"type":"result"'
-3. If Escort is involved, read Escort logs as well:
-   Run: find <worktree>/.. -name 'ship-log.jsonl' -path '*escort*' 2>/dev/null
-4. Read work context (PR diff, commits) if available
-5. Identify what went wrong and why
+3. **[MUST] Escort chat log** — Gate の判定内容、reject 理由等:
+   Run: tail -n 200 <worktree>/.claude/escort-log.jsonl 2>/dev/null | grep '"type":"assistant"' | tail -n 20
+4. **DB の状態** — phase_transitions テーブルで遷移履歴を確認
+5. **ソースコード** — 上記 1〜4 で得た情報をもとに、初めてソースコードを読む
 
 OUTPUT FORMAT CONSTRAINT — keep your response concise (max 12 lines):
 - **Error**: <1 sentence>
@@ -103,10 +103,11 @@ Do NOT create issues or make any changes. Only investigate and report.
 
 ## Ship Log Reading
 
-Ship logs are stored at `<worktree>/.claude/ship-log.jsonl`. Read them via Dispatch using these patterns:
+Ship logs are stored at `<worktree>/.claude/ship-log.jsonl`, Escort logs at `<worktree>/.claude/escort-log.jsonl`. Read them via Dispatch using these patterns:
 
-- **Recent assistant messages**: `tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30`
-- **Final result**: `tail -n 100 <worktree>/.claude/ship-log.jsonl | grep '"type":"result"'`
+- **Ship recent assistant messages**: `tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30`
+- **Ship final result**: `tail -n 100 <worktree>/.claude/ship-log.jsonl | grep '"type":"result"'`
+- **Escort recent messages**: `tail -n 200 <worktree>/.claude/escort-log.jsonl | grep '"type":"assistant"' | tail -n 20`
 
 Always read logs via Dispatch — Commanders must not read files directly.
 
@@ -120,11 +121,16 @@ When a Ship's process dies (processDead), Bridge receives a system message with 
 ## Investigation Flow
 
 1. Identify that investigation is needed
-2. **Read Ship/Escort logs first** — launch Dispatch with the Ship Error Diagnosis template to read logs before any other action
+2. **以下の順序を厳守して Dispatch** — Ship Error Diagnosis テンプレートを使用:
+   1. **Engine ログ** — Engine の stdout/stderr（クラッシュ、未捕捉例外、WS エラー等）
+   2. **Ship chat log** — `.claude/ship-log.jsonl`（Ship が何をしていたか、どこで止まったか）
+   3. **Escort chat log** — `.claude/escort-log.jsonl`（Gate の判定内容、reject 理由等）
+   4. **DB の状態** — phase_transitions テーブルで遷移履歴を確認
+   5. **ソースコード** — 上記 1〜4 で得た情報をもとに、初めてソースコードを読む
 3. Launch additional Dispatch agents with appropriate templates if needed (`run_in_background=true`)
 4. Continue normal duties while Dispatch runs
 5. When Dispatch completes, review findings
 6. Take action: create issues (`gh issue create`), report to user, or plan next steps
 7. **Bridge always makes final decisions and creates issues** — Dispatch only provides information
 
-> **ログ最優先**: Ship 異常の調査では、DB phase 遷移やフロントエンド通知だけで判断せず、必ずログを最初に確認すること。
+> **ソースコードを先に読んではいけない**: ログなしの仮説は「こうなりそう」という推測にすぎず、精度が低い。ログを見れば「実際に何が起きたか」がわかる。ソースコードは仮説の**検証**に使うもので、仮説の**生成**に使うものではない。
