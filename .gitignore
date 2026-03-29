@@ -30,6 +30,7 @@ playwright-report/
 .claude/workflow-state.json
 .claude/gate-request.json
 .claude/gate-response.json
+.claude/rules/custom-instructions.md
 
 # Restart marker (dev-runner)
 .restart
