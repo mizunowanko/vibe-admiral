@@ -57,7 +57,7 @@ export function Sidebar() {
   }, []);
 
   return (
-    <div className="flex h-full w-60 flex-col border-r border-border bg-sidebar-background">
+    <div className="flex h-full flex-col border-r border-border bg-sidebar-background">
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <Anchor className="h-5 w-5 text-primary" />
