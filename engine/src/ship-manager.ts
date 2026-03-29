@@ -932,6 +932,7 @@ export class ShipManager {
       "read-issue",
       // Other Admiral skills
       "adr",
+      "admiral-issue",
     ];
     for (const skillName of admiralSkills) {
       const src = join(admiralSkillsDir, skillName, "SKILL.md");
