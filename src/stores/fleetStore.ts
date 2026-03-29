@@ -5,10 +5,12 @@ import { wsClient } from "@/lib/ws-client";
 
 interface FleetState {
   fleets: Fleet[];
+  fleetOrder: string[];
   selectedFleetId: string | null;
   selectedFleet: Fleet | null;
 
   setFleets: (fleets: Fleet[]) => void;
+  reorderFleets: (activeId: string, overId: string) => void;
   selectFleet: (id: string | null) => void;
   createFleet: (name: string, repos: FleetRepo[]) => void;
   updateFleet: (id: string, updates: {
@@ -33,6 +35,7 @@ export const useFleetStore = create<FleetState>()(
   persist(
     (set, get) => ({
       fleets: [],
+      fleetOrder: [],
       selectedFleetId: null,
       selectedFleet: null,
 
@@ -46,6 +49,23 @@ export const useFleetStore = create<FleetState>()(
         // selectedFleetId is only cleared explicitly via selectFleet()
         // or deleteFleet().
         set({ fleets, selectedFleet });
+      },
+
+      reorderFleets: (activeId, overId) => {
+        const { fleets, fleetOrder } = get();
+        const orderMap = new Map(fleetOrder.map((id, i) => [id, i]));
+        const sorted = [...fleets].sort((a, b) => {
+          const aIdx = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const bIdx = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          return aIdx - bIdx;
+        });
+        const ids = sorted.map((f) => f.id);
+        const fromIndex = ids.indexOf(activeId);
+        const toIndex = ids.indexOf(overId);
+        if (fromIndex === -1 || toIndex === -1) return;
+        ids.splice(fromIndex, 1);
+        ids.splice(toIndex, 0, activeId);
+        set({ fleetOrder: ids });
       },
 
       selectFleet: (id) => {
@@ -78,7 +98,10 @@ export const useFleetStore = create<FleetState>()(
     }),
     {
       name: "admiral-fleet",
-      partialize: (state) => ({ selectedFleetId: state.selectedFleetId }),
+      partialize: (state) => ({
+        selectedFleetId: state.selectedFleetId,
+        fleetOrder: state.fleetOrder,
+      }),
     },
   ),
 );
