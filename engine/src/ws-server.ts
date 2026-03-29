@@ -61,11 +61,16 @@ export class EngineServer {
   private commanderFirstData = new Set<string>();
   private questionTimeoutTimer: ReturnType<typeof setInterval> | null = null;
   private processLivenessTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private clientAliveMap = new WeakMap<WebSocket, boolean>();
   private fleetDb: FleetDatabase | null = null;
   private pendingCrashLog: CrashLog | null = null;
 
   /** Unanswered commander questions auto-answered after this duration (ms). */
   private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+  /** Interval between WS heartbeat pings (ms). */
+  private static readonly HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 
   constructor(port: number) {
     this.processManager = new ProcessManager();
@@ -218,6 +223,7 @@ export class EngineServer {
     this.startQuestionTimeoutScanner();
     this.setupLookout();
     this.startProcessLivenessCheck();
+    this.startHeartbeat();
 
     console.log(`Engine HTTP+WebSocket server running on port ${port}`);
 
@@ -241,7 +247,12 @@ export class EngineServer {
   private setupWSS(): void {
     this.wss.on("connection", (ws) => {
       this.clients.add(ws);
+      this.clientAliveMap.set(ws, true);
       console.log("Client connected");
+
+      ws.on("pong", () => {
+        this.clientAliveMap.set(ws, true);
+      });
 
       // Notify the first connecting client about a previous crash
       if (this.pendingCrashLog) {
@@ -261,6 +272,11 @@ export class EngineServer {
       ws.on("message", (data) => {
         try {
           const msg = JSON.parse(data.toString()) as ClientMessage;
+          if (msg.type === "pong") {
+            // Application-level pong response — mark client as alive
+            this.clientAliveMap.set(ws, true);
+            return;
+          }
           this.handleMessage(ws, msg);
         } catch (err) {
           this.sendTo(ws, {
@@ -1601,6 +1617,24 @@ export class EngineServer {
     return results;
   }
 
+  private startHeartbeat(): void {
+    this.heartbeatTimer = setInterval(() => {
+      for (const ws of this.clients) {
+        if (!this.clientAliveMap.get(ws)) {
+          console.log("[engine] Client heartbeat timeout — terminating dead connection");
+          ws.terminate();
+          this.clients.delete(ws);
+          continue;
+        }
+        this.clientAliveMap.set(ws, false);
+        // Native WS ping (handled by ws library)
+        ws.ping();
+        // Application-level ping (for browser clients that can't see native ping/pong)
+        this.sendTo(ws, { type: "ping" });
+      }
+    }, EngineServer.HEARTBEAT_INTERVAL_MS);
+  }
+
   shutdown(): void {
     if (this.questionTimeoutTimer) {
       clearInterval(this.questionTimeoutTimer);
@@ -1609,6 +1643,10 @@ export class EngineServer {
     if (this.processLivenessTimer) {
       clearInterval(this.processLivenessTimer);
       this.processLivenessTimer = null;
+    }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
     this.dispatchManager.killAll();
     this.escortManager.killAll();
