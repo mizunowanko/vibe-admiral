@@ -258,6 +258,7 @@ export class EscortManager {
       parentShip.worktreePath,
       escortEnv,
       extraPrompt,
+      "escort-log.jsonl",
     );
 
     return escortId;

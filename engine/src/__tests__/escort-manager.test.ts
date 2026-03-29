@@ -112,6 +112,7 @@ describe("EscortManager", () => {
         "/repo/.worktrees/feature/42-test",
         expect.any(Object),
         undefined,
+        "escort-log.jsonl",
       );
     });
 
