@@ -35,6 +35,8 @@ import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
 import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification, ResumeAllUnitResult } from "./types.js";
 import { applyTemplate } from "./deep-merge.js";
+import { readLastCrashLog, clearCrashLog } from "./crash-logger.js";
+import type { CrashLog } from "./crash-logger.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -62,6 +64,7 @@ export class EngineServer {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private clientAliveMap = new WeakMap<WebSocket, boolean>();
   private fleetDb: FleetDatabase | null = null;
+  private pendingCrashLog: CrashLog | null = null;
 
   /** Unanswered commander questions auto-answered after this duration (ms). */
   private static readonly QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -224,6 +227,13 @@ export class EngineServer {
 
     console.log(`Engine HTTP+WebSocket server running on port ${port}`);
 
+    // Check for previous crash log and hold it for the first client connection
+    this.pendingCrashLog = readLastCrashLog();
+    if (this.pendingCrashLog) {
+      console.log(`[engine] Previous crash detected at ${this.pendingCrashLog.timestamp}: ${this.pendingCrashLog.message}`);
+      clearCrashLog();
+    }
+
     // Notify frontend if this is a restart (dev-runner sets RESTARTED=1)
     if (process.env.RESTARTED === "1") {
       console.log("[engine] Restart detected — notifying frontend");
@@ -243,6 +253,21 @@ export class EngineServer {
       ws.on("pong", () => {
         this.clientAliveMap.set(ws, true);
       });
+
+      // Notify the first connecting client about a previous crash
+      if (this.pendingCrashLog) {
+        const crashData = this.pendingCrashLog;
+        this.pendingCrashLog = null;
+        this.sendTo(ws, {
+          type: "engine:previous-crash",
+          data: {
+            timestamp: crashData.timestamp,
+            context: crashData.context,
+            message: crashData.message,
+            stack: crashData.stack,
+          },
+        });
+      }
 
       ws.on("message", (data) => {
         try {
