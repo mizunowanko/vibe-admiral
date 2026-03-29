@@ -11,7 +11,7 @@ Trigger: User asks Bridge to directly fix code, says "hotfix", "直接修正し�
 
 ## Purpose
 
-Emergency code modification mode where Bridge delegates a Dispatch sub-agent to make direct code changes without the full sortie workflow. Designed for situations where:
+Emergency code modification mode where Bridge launches a Dispatch process via Engine API to make direct code changes without the full sortie workflow. Designed for situations where:
 - Engine or Ship processes are broken and cannot start
 - A quick 1-file fix is needed without spinning up a Ship
 - Merge conflict residue or syntax errors block normal operations
@@ -25,38 +25,19 @@ Emergency code modification mode where Bridge delegates a Dispatch sub-agent to 
 
 ## Hotfix Dispatch Template
 
-When a user requests a hotfix, launch a Dispatch sub-agent using the Agent tool:
+When a user requests a hotfix, launch a Dispatch process via Engine API (`POST /api/dispatch`):
 
-```
-Agent(description="Dispatch: hotfix", subagent_type="general-purpose", prompt=`
-You are a Dispatch agent performing an emergency hotfix.
-
-Repo: <repo-path>
-Issue/Problem: <description of what needs to be fixed>
-Target branch: main (or current branch)
-
-## Steps
-
-1. **Investigate**: Read the relevant files to understand the issue
-2. **Fix**: Make the minimum necessary code changes using Edit/Write tools
-3. **Verify**: Run type checks and build to ensure the fix is correct
-   - Frontend: npx tsc --noEmit
-   - Engine: cd engine && npx tsc --noEmit
-   - Build: npm run build
-4. **Commit**: Stage only the changed files (never use git add -A) and commit with:
-   - Prefix: fix: (for bug fixes) or refactor: (for structural fixes)
-   - Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
-5. **Push**: Push to the remote
-6. **Report**: Summarize what was changed and why
-
-## Rules
-
-- Make the MINIMUM change necessary — this is an emergency fix, not a refactor
-- Do NOT touch unrelated files
-- Do NOT add new features
-- If the fix requires more than ~3 files, recommend a proper sortie instead
-- Always run verification (type check + build) before committing
-`)
+```bash
+curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "fleetId": "<fleet-id>",
+    "parentRole": "flagship",
+    "name": "hotfix",
+    "type": "modify",
+    "cwd": "<repo-path>",
+    "prompt": "You are a Dispatch agent performing an emergency hotfix.\n\nRepo: <repo-path>\nIssue/Problem: <description of what needs to be fixed>\nTarget branch: main (or current branch)\n\n## Steps\n\n1. **Investigate**: Read the relevant files to understand the issue\n2. **Fix**: Make the minimum necessary code changes using Edit/Write tools\n3. **Verify**: Run type checks and build to ensure the fix is correct\n   - Frontend: npx tsc --noEmit\n   - Engine: cd engine && npx tsc --noEmit\n   - Build: npm run build\n4. **Commit**: Stage only the changed files (never use git add -A) and commit with:\n   - Prefix: fix: (for bug fixes) or refactor: (for structural fixes)\n   - Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\n5. **Push**: Push to the remote\n6. **Report**: Summarize what was changed and why\n\n## Rules\n\n- Make the MINIMUM change necessary — this is an emergency fix, not a refactor\n- Do NOT touch unrelated files\n- Do NOT add new features\n- If the fix requires more than ~3 files, recommend a proper sortie instead\n- Always run verification (type check + build) before committing"
+  }'
 ```
 
 ## Flow

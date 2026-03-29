@@ -16,89 +16,59 @@ argument-hint: [description or issue-number]
 - Ship error diagnosis (analyzing failure, recovery recommendation)
 - Any task requiring reading source files or running analysis commands
 
-**Bridge must NEVER read source code directly.** Always delegate to a Dispatch agent.
+**Bridge must NEVER read source code directly.** Always delegate to a Dispatch process via `POST /api/dispatch`.
 
 ## Bug Investigation Template
 
-```
-Agent(description="Dispatch: investigate bug", subagent_type="general-purpose", run_in_background=true, prompt=`
-You are a Dispatch agent investigating a bug.
+Launch via Engine API (`POST /api/dispatch`):
 
-Repo: <repo>
-Bug description: <description from user or Ship error>
-
-Steps:
-1. Explore the codebase to identify the root cause
-2. Identify affected files and the scope of the issue
-3. Determine reproduction steps if possible
-4. Analyze potential fixes and their impact
-
-Output a clear summary:
-- **Root cause**: ...
-- **Affected files**: ...
-- **Reproduction**: ...
-- **Suggested fix**: ...
-- **Impact scope**: ...
-
-Do NOT create issues or make any changes. Only investigate and report.
-`)
+```bash
+curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "fleetId": "<fleet-id>",
+    "parentRole": "flagship",
+    "name": "investigate-bug",
+    "type": "investigate",
+    "cwd": "<repo>",
+    "prompt": "You are a Dispatch agent investigating a bug.\n\nRepo: <repo>\nBug description: <description from user or Ship error>\n\nSteps:\n1. Explore the codebase to identify the root cause\n2. Identify affected files and the scope of the issue\n3. Determine reproduction steps if possible\n4. Analyze potential fixes and their impact\n\nOutput a clear summary:\n- **Root cause**: ...\n- **Affected files**: ...\n- **Reproduction**: ...\n- **Suggested fix**: ...\n- **Impact scope**: ...\n\nDo NOT create issues or make any changes. Only investigate and report."
+  }'
 ```
 
 ## Codebase Exploration Template
 
-```
-Agent(description="Dispatch: explore codebase", subagent_type="general-purpose", run_in_background=true, prompt=`
-You are a Dispatch agent exploring the codebase.
+Launch via Engine API (`POST /api/dispatch`):
 
-Repo: <repo>
-Question: <what needs to be understood>
-
-Steps:
-1. Search the codebase for relevant files and code
-2. Read and analyze the relevant sections
-3. Map out the architecture/relationships relevant to the question
-
-Output a clear summary. Do NOT create issues or make any changes.
-`)
+```bash
+curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "fleetId": "<fleet-id>",
+    "parentRole": "flagship",
+    "name": "explore-codebase",
+    "type": "investigate",
+    "cwd": "<repo>",
+    "prompt": "You are a Dispatch agent exploring the codebase.\n\nRepo: <repo>\nQuestion: <what needs to be understood>\n\nSteps:\n1. Search the codebase for relevant files and code\n2. Read and analyze the relevant sections\n3. Map out the architecture/relationships relevant to the question\n\nOutput a clear summary. Do NOT create issues or make any changes."
+  }'
 ```
 
 ## Ship Error Diagnosis Template
 
 > **調査順序を厳守**: ソースコードを先に読んではいけない。ログなしの仮説は精度が低い。ログを見れば「実際に何が起きたか」がわかり、仮説の質が格段に上がる。ソースコードは仮説の**検証**に使うもので、仮説の**生成**に使うものではない。
 
-```
-Agent(description="Dispatch: diagnose Ship error", subagent_type="general-purpose", run_in_background=true, prompt=`
-You are a Dispatch agent diagnosing a Ship error.
+Launch via Engine API (`POST /api/dispatch`):
 
-Repo: <repo>
-Ship issue: #<issue-number>
-Error context: <error details from Ship status>
-Ship log: <worktree>/.claude/ship-log.jsonl
-
-IMPORTANT: Follow the investigation order strictly. Do NOT read source code until steps 1-4 are complete.
-
-Steps (in strict order):
-1. **[MUST] Engine ログ** — Engine の stdout/stderr を確認。クラッシュ、未捕捉例外、WS エラー等:
-   Run: tail -n 200 <engine-log-path> 2>/dev/null | grep -iE 'error|exception|crash|ECONNREFUSED|SIGTERM' | tail -n 20
-2. **[MUST] Ship chat log** — Ship が何をしていたか、どこで止まったか:
-   Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep '"type":"assistant"' | tail -n 30
-   Run: tail -n 100 <worktree>/.claude/ship-log.jsonl | grep -i '"type":"result"'
-3. **[MUST] Escort chat log** — Gate の判定内容、reject 理由等:
-   Run: tail -n 200 <worktree>/.claude/escort-log.jsonl 2>/dev/null | grep '"type":"assistant"' | tail -n 20
-4. **DB の状態** — phase_transitions テーブルで遷移履歴を確認
-5. **ソースコード** — 上記 1〜4 で得た情報をもとに、初めてソースコードを読む
-
-OUTPUT FORMAT CONSTRAINT — keep your response concise (max 12 lines):
-- **Error**: <1 sentence>
-- **Root cause**: <1 sentence>
-- **Last Ship actions**: <1-2 sentences summarizing key actions from log>
-- **Recovery recommendation**: Choose one of:
-  - **ship-resume** (preferred): Use when error is transient (rate limit, etc.), preserves session/PR
-  - **ship-resume (re-sortie)**: Use when session is unavailable but branch/PR should be preserved
-  - **manual intervention**: Use when error is fundamental (wrong approach, impossible task)
-
-Do NOT create issues or make any changes. Only investigate and report.
-`)
+```bash
+curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "fleetId": "<fleet-id>",
+    "parentRole": "flagship",
+    "name": "diagnose-ship-error",
+    "type": "investigate",
+    "cwd": "<repo>",
+    "prompt": "You are a Dispatch agent diagnosing a Ship error.\n\nRepo: <repo>\nShip issue: #<issue-number>\nError context: <error details from Ship status>\nShip log: <worktree>/.claude/ship-log.jsonl\n\nIMPORTANT: Follow the investigation order strictly. Do NOT read source code until steps 1-4 are complete.\n\nSteps (in strict order):\n1. **[MUST] Engine ログ** — Engine の stdout/stderr を確認。クラッシュ、未捕捉例外、WS エラー等:\n   Run: tail -n 200 <engine-log-path> 2>/dev/null | grep -iE \"error|exception|crash|ECONNREFUSED|SIGTERM\" | tail -n 20\n2. **[MUST] Ship chat log** — Ship が何をしていたか、どこで止まったか:\n   Run: tail -n 300 <worktree>/.claude/ship-log.jsonl | grep \"\\\"type\\\":\\\"assistant\\\"\" | tail -n 30\n   Run: tail -n 100 <worktree>/.claude/ship-log.jsonl | grep -i \"\\\"type\\\":\\\"result\\\"\"\n3. **[MUST] Escort chat log** — Gate の判定内容、reject 理由等:\n   Run: tail -n 200 <worktree>/.claude/escort-log.jsonl 2>/dev/null | grep \"\\\"type\\\":\\\"assistant\\\"\" | tail -n 20\n4. **DB の状態** — phase_transitions テーブルで遷移履歴を確認\n5. **ソースコード** — 上記 1〜4 で得た情報をもとに、初めてソースコードを読む\n\nOUTPUT FORMAT CONSTRAINT — keep your response concise (max 12 lines):\n- **Error**: <1 sentence>\n- **Root cause**: <1 sentence>\n- **Last Ship actions**: <1-2 sentences summarizing key actions from log>\n- **Recovery recommendation**: Choose one of:\n  - **ship-resume** (preferred): Use when error is transient (rate limit, etc.), preserves session/PR\n  - **ship-resume (re-sortie)**: Use when session is unavailable but branch/PR should be preserved\n  - **manual intervention**: Use when error is fundamental (wrong approach, impossible task)\n\nDo NOT create issues or make any changes. Only investigate and report."
+  }'
 ```
 
 ## Ship Log Reading
@@ -127,7 +97,7 @@ When a Ship's process dies (processDead), Bridge receives a system message with 
    3. **Escort chat log** — `.claude/escort-log.jsonl`（Gate の判定内容、reject 理由等）
    4. **DB の状態** — phase_transitions テーブルで遷移履歴を確認
    5. **ソースコード** — 上記 1〜4 で得た情報をもとに、初めてソースコードを読む
-3. Launch additional Dispatch agents with appropriate templates if needed (`run_in_background=true`)
+3. Launch additional Dispatch processes with appropriate templates if needed (`POST /api/dispatch`)
 4. Continue normal duties while Dispatch runs
 5. When Dispatch completes, review findings
 6. Take action: create issues (`gh issue create`), report to user, or plan next steps

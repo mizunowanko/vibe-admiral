@@ -156,9 +156,8 @@ export class ProcessManager extends EventEmitter {
     // MUST write to stdin immediately after spawn — Bun blocks stdout
     // when stdin pipe is idle, creating a deadlock if you wait for init.
     //
-    // allowedTools: Commanders themselves are read-only by rule (commander-rules.md).
-    // Write/Edit are included so that Dispatch sub-agents (launched via Agent tool)
-    // can modify files. Commander rules prohibit direct Write/Edit usage.
+    // allowedTools: Commanders are strictly read-only.
+    // Dispatch is launched via Engine API (POST /api/dispatch), not via Agent tool.
     // AskUserQuestion is allowed — Engine intercepts it and forwards to frontend.
     const args = [
       "-p",
@@ -169,7 +168,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
+      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
