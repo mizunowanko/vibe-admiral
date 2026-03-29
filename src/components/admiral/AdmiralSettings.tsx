@@ -3,8 +3,10 @@ import { useAdmiralSettingsStore } from "@/stores/admiralSettingsStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings, Plus, X } from "lucide-react";
+import { Settings, Plus, X, Moon } from "lucide-react";
 import type { SettingsLayer, CustomInstructions, GatePhase, GateType, FleetGateSettings } from "@/types";
+import { useUIStore } from "@/stores/uiStore";
+import { wsClient } from "@/lib/ws-client";
 
 function PathListEditor({
   label,
@@ -309,7 +311,10 @@ export function AdmiralSettings() {
   const settings = useAdmiralSettingsStore((s) => s.settings);
   const updateGlobal = useAdmiralSettingsStore((s) => s.updateGlobal);
   const updateTemplate = useAdmiralSettingsStore((s) => s.updateTemplate);
+  const caffeinateActive = useUIStore((s) => s.caffeinateActive);
   const [activeTab, setActiveTab] = useState<"global" | "template">("global");
+
+  const caffeinateEnabled = settings.caffeinateEnabled !== false;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -317,6 +322,46 @@ export function AdmiralSettings() {
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <Settings className="h-4 w-4 text-primary" />
         <h2 className="text-sm font-semibold">Admiral Settings</h2>
+      </div>
+
+      {/* Sleep Inhibition */}
+      <div className="border-b border-border px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Moon className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <label className="text-sm font-medium">Sleep Inhibition</label>
+              <p className="text-xs text-muted-foreground">
+                Prevent macOS sleep while Units are active (caffeinate)
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {caffeinateActive && (
+              <span className="text-xs text-amber-500 font-medium">Active</span>
+            )}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={caffeinateEnabled}
+              onClick={() => {
+                wsClient.send({
+                  type: "admiral-settings:update",
+                  data: { caffeinateEnabled: !caffeinateEnabled },
+                });
+              }}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                caffeinateEnabled ? "bg-primary" : "bg-muted"
+              }`}
+            >
+              <span
+                className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-sm transition-transform ${
+                  caffeinateEnabled ? "translate-x-4" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Tabs */}

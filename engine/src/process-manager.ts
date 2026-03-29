@@ -381,6 +381,10 @@ export class ProcessManager extends EventEmitter {
     return proc !== undefined && proc.exitCode === null;
   }
 
+  getActiveCount(): number {
+    return this.processes.size;
+  }
+
   getPid(id: string): number | undefined {
     return this.processes.get(id)?.pid;
   }
@@ -391,6 +395,7 @@ export class ProcessManager extends EventEmitter {
     logFilePath?: string,
   ): void {
     this.processes.set(id, proc);
+    this.emit("spawn", id);
     const shortId = id.slice(0, 8);
 
     // Ensure log directory exists for Ship log persistence

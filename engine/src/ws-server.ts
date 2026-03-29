@@ -29,6 +29,7 @@ import type { LookoutAlert } from "./lookout.js";
 import { EscortManager } from "./escort-manager.js";
 import { ShipActorManager } from "./ship-actor-manager.js";
 import { DispatchManager } from "./dispatch-manager.js";
+import { CaffeinateManager } from "./caffeinate-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
@@ -56,6 +57,7 @@ export class EngineServer {
   private actorManager: ShipActorManager;
   private dispatchManager: DispatchManager;
   private lookout: Lookout;
+  private caffeinateManager: CaffeinateManager;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
   private commanderFirstData = new Set<string>();
@@ -87,6 +89,11 @@ export class EngineServer {
     this.actorManager = new ShipActorManager();
     this.dispatchManager = new DispatchManager(this.processManager);
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
+    // CaffeinateManager: default enabled; overridden by persisted settings in runStartupReconciliation()
+    this.caffeinateManager = new CaffeinateManager(true);
+    this.caffeinateManager.setOnStatusChange((status) => {
+      this.broadcast({ type: "caffeinate:status", data: status });
+    });
 
     // Wire up ShipActorManager to ShipManager, EscortManager, and StateSync
     this.shipManager.setActorManager(this.actorManager);
@@ -569,6 +576,12 @@ export class EngineServer {
           this.stateSync.onProcessExit(id, false).catch(console.error);
         }
       }
+
+      this.syncCaffeinateCount();
+    });
+
+    this.processManager.on("spawn", () => {
+      this.syncCaffeinateCount();
     });
 
     this.processManager.on("rate-limit", (id: string) => {
@@ -877,8 +890,15 @@ export class EngineServer {
           const current = await this.loadAdmiralSettings();
           if (data.global !== undefined) current.global = data.global as SettingsLayer;
           if (data.template !== undefined) current.template = data.template as SettingsLayer;
+          if (data.caffeinateEnabled !== undefined) current.caffeinateEnabled = data.caffeinateEnabled as boolean;
           await this.saveAdmiralSettings(current);
+          this.caffeinateManager.setEnabled(current.caffeinateEnabled !== false);
           this.broadcast({ type: "admiral-settings:data", data: current });
+          break;
+        }
+
+        case "caffeinate:get": {
+          this.sendTo(ws, { type: "caffeinate:status", data: this.caffeinateManager.getStatus() });
           break;
         }
 
@@ -1297,6 +1317,10 @@ export class EngineServer {
 
   private runStartupReconciliation(): void {
     this.initDatabase()
+      .then(async () => {
+        const settings = await this.loadAdmiralSettings();
+        this.caffeinateManager.setEnabled(settings.caffeinateEnabled !== false);
+      })
       .then(() => this.loadFleets())
       .then((fleets) => {
         const allRepos = fleets.flatMap((f) => f.repos);
@@ -1617,6 +1641,10 @@ export class EngineServer {
     return results;
   }
 
+  private syncCaffeinateCount(): void {
+    this.caffeinateManager.updateActiveUnitCount(this.processManager.getActiveCount());
+  }
+
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
       for (const ws of this.clients) {
@@ -1644,6 +1672,7 @@ export class EngineServer {
       clearInterval(this.processLivenessTimer);
       this.processLivenessTimer = null;
     }
+    this.caffeinateManager.shutdown();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
