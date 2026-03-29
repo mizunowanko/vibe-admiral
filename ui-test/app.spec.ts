@@ -149,7 +149,7 @@ test.describe("Fleet settings", () => {
 
     // Click Settings button in sidebar
     await page
-      .getByRole("button", { name: "Settings", exact: true })
+      .getByRole("button", { name: "Fleet Settings", exact: true })
       .click();
 
     // Fleet settings should show the fleet name
