@@ -383,6 +383,7 @@ export type ServerMessage =
     }
   | { type: "engine:restarting"; data: Record<string, never> }
   | { type: "engine:restarted"; data: Record<string, never> }
+  | { type: "engine:previous-crash"; data: { timestamp: string; context: string; message: string; stack?: string } }
   | { type: "rate-limit:detected"; data: { processId: string } }
   | { type: "caffeinate:status"; data: CaffeinateStatus }
   | { type: "error"; data: { source: string; message: string } };
