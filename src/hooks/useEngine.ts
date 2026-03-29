@@ -11,7 +11,7 @@ import {
   createDispatchSession,
   commanderSessionId,
 } from "@/stores/sessionStore";
-import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole, AdmiralSettings } from "@/types";
+import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole, AdmiralSettings, CaffeinateStatus } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -27,6 +27,7 @@ export function useEngine() {
   const updateShipFromApi = useShipStore((s) => s.updateShipFromApi);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const setRateLimitActive = useUIStore((s) => s.setRateLimitActive);
+  const setCaffeinateActive = useUIStore((s) => s.setCaffeinateActive);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
   const setAdmiralSettings = useAdmiralSettingsStore((s) => s.setSettings);
   const fetchAdmiralSettings = useAdmiralSettingsStore((s) => s.fetchSettings);
@@ -243,6 +244,12 @@ export function useEngine() {
           // Issue data handled by specific components
           break;
 
+        case "caffeinate:status": {
+          const caffeinate = msg.data as unknown as CaffeinateStatus;
+          setCaffeinateActive(caffeinate.active);
+          break;
+        }
+
         case "rate-limit:detected": {
           // Show rate limit banner, auto-clear after 30s (#699)
           setRateLimitActive(true);
@@ -263,6 +270,7 @@ export function useEngine() {
     const unsubConnect = wsClient.onConnect(() => {
       fetchFleets();
       fetchAdmiralSettings();
+      wsClient.send({ type: "caffeinate:get" });
       void fetchShips().then(() => {
         // Register sessions for ships loaded via REST API.
         // The ship:data WS handler would do this, but Engine never sends
@@ -301,6 +309,7 @@ export function useEngine() {
     updateShipFromApi,
     setEngineConnected,
     setRateLimitActive,
+    setCaffeinateActive,
     fetchFleets,
     setAdmiralSettings,
     fetchAdmiralSettings,

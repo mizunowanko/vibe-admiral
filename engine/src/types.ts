@@ -100,6 +100,8 @@ export interface AdmiralSettings {
   global: SettingsLayer;
   /** Template copied into new fleets at creation time. Does NOT affect existing fleets. */
   template: SettingsLayer;
+  /** Whether to inhibit macOS sleep while Units are active. Default: true. */
+  caffeinateEnabled?: boolean;
 }
 
 // === Custom Instructions ===

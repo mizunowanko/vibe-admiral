@@ -27,6 +27,14 @@ export interface AdmiralSettings {
   global: SettingsLayer;
   /** Template copied into new fleets at creation time. Does NOT affect existing fleets. */
   template: SettingsLayer;
+  /** Whether to inhibit macOS sleep while Units are active. Default: true. */
+  caffeinateEnabled?: boolean;
+}
+
+/** Caffeinate process status broadcast by Engine. */
+export interface CaffeinateStatus {
+  enabled: boolean;
+  active: boolean;
 }
 
 // === Custom Instructions ===
@@ -259,7 +267,8 @@ export type ClientMessage =
     }
   | { type: "fleet:delete"; data: { id: string } }
   | { type: "admiral-settings:get" }
-  | { type: "admiral-settings:update"; data: { global?: SettingsLayer; template?: SettingsLayer } }
+  | { type: "admiral-settings:update"; data: { global?: SettingsLayer; template?: SettingsLayer; caffeinateEnabled?: boolean } }
+  | { type: "caffeinate:get" }
   | { type: "flagship:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
   | { type: "flagship:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "flagship:history"; data: { fleetId: string } }
@@ -375,4 +384,5 @@ export type ServerMessage =
   | { type: "engine:restarting"; data: Record<string, never> }
   | { type: "engine:restarted"; data: Record<string, never> }
   | { type: "rate-limit:detected"; data: { processId: string } }
+  | { type: "caffeinate:status"; data: CaffeinateStatus }
   | { type: "error"; data: { source: string; message: string } };

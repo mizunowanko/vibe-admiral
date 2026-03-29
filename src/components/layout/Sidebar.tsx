@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Anchor,
+  Moon,
   Play,
   Plus,
   Settings,
@@ -20,6 +21,7 @@ export function Sidebar() {
   const mainView = useUIStore((s) => s.mainView);
   const setMainView = useUIStore((s) => s.setMainView);
   const engineConnected = useUIStore((s) => s.engineConnected);
+  const caffeinateActive = useUIStore((s) => s.caffeinateActive);
 
   const [resumeLoading, setResumeLoading] = useState(false);
   const [resumeStatus, setResumeStatus] = useState<string | null>(null);
@@ -130,10 +132,16 @@ export function Sidebar() {
           <span className="text-xs font-medium text-muted-foreground uppercase">
             Admiral
           </span>
+          {caffeinateActive && (
+            <span className="ml-auto" title="Sleep inhibited (caffeinate)">
+              <Moon className="h-3 w-3 text-amber-500" />
+            </span>
+          )}
           <div
             data-testid="engine-status"
             className={cn(
-              "ml-auto h-2 w-2 rounded-full",
+              caffeinateActive ? "ml-1" : "ml-auto",
+              "h-2 w-2 rounded-full",
               engineConnected ? "bg-green-500" : "bg-red-500",
             )}
             title={engineConnected ? "Engine connected" : "Engine disconnected"}
