@@ -5,10 +5,13 @@ import { wsClient } from "@/lib/ws-client";
 
 interface FleetState {
   fleets: Fleet[];
+  fleetOrder: string[];
   selectedFleetId: string | null;
   selectedFleet: Fleet | null;
 
+  orderedFleets: () => Fleet[];
   setFleets: (fleets: Fleet[]) => void;
+  reorderFleets: (fromIndex: number, toIndex: number) => void;
   selectFleet: (id: string | null) => void;
   createFleet: (name: string, repos: FleetRepo[]) => void;
   updateFleet: (id: string, updates: {
@@ -33,8 +36,19 @@ export const useFleetStore = create<FleetState>()(
   persist(
     (set, get) => ({
       fleets: [],
+      fleetOrder: [],
       selectedFleetId: null,
       selectedFleet: null,
+
+      orderedFleets: () => {
+        const { fleets, fleetOrder } = get();
+        const orderMap = new Map(fleetOrder.map((id, i) => [id, i]));
+        return [...fleets].sort((a, b) => {
+          const aIdx = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const bIdx = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          return aIdx - bIdx;
+        });
+      },
 
       setFleets: (fleets) => {
         const { selectedFleetId } = get();
@@ -46,6 +60,15 @@ export const useFleetStore = create<FleetState>()(
         // selectedFleetId is only cleared explicitly via selectFleet()
         // or deleteFleet().
         set({ fleets, selectedFleet });
+      },
+
+      reorderFleets: (fromIndex, toIndex) => {
+        const ordered = get().orderedFleets();
+        const newOrder = ordered.map((f) => f.id);
+        const moved = newOrder.splice(fromIndex, 1)[0];
+        if (moved == null) return;
+        newOrder.splice(toIndex, 0, moved);
+        set({ fleetOrder: newOrder });
       },
 
       selectFleet: (id) => {
@@ -78,7 +101,10 @@ export const useFleetStore = create<FleetState>()(
     }),
     {
       name: "admiral-fleet",
-      partialize: (state) => ({ selectedFleetId: state.selectedFleetId }),
+      partialize: (state) => ({
+        selectedFleetId: state.selectedFleetId,
+        fleetOrder: state.fleetOrder,
+      }),
     },
   ),
 );
