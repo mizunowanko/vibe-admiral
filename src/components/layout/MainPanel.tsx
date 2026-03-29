@@ -17,17 +17,17 @@ export function MainPanel() {
   const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
   const focusedSessionId = useSessionStore((s) => s.focusedSessionId);
   const setFocus = useSessionStore((s) => s.setFocus);
-  const registerSession = useSessionStore((s) => s.registerSession);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Register commander sessions when fleet changes and auto-focus flagship
   useEffect(() => {
     if (!selectedFleetId) return;
+    const { registerSession, setFocus: focus } = useSessionStore.getState();
     registerSession(createCommanderSession("dock", selectedFleetId));
     registerSession(createCommanderSession("flagship", selectedFleetId));
     // Always focus this fleet's Flagship when fleet changes
-    setFocus(commanderSessionId("flagship", selectedFleetId));
-  }, [selectedFleetId, registerSession, setFocus]);
+    focus(commanderSessionId("flagship", selectedFleetId));
+  }, [selectedFleetId]);
 
   // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships, ? or Ctrl+/ → help
   const handleKeyDown = useCallback(
