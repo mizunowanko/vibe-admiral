@@ -1,14 +1,17 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useUIStore } from "@/stores/uiStore";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Anchor,
+  Play,
   Plus,
   Settings,
   Ship,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resumeAll } from "@/lib/api-client";
 
 export function Sidebar() {
   const fleets = useFleetStore((s) => s.fleets);
@@ -17,6 +20,41 @@ export function Sidebar() {
   const mainView = useUIStore((s) => s.mainView);
   const setMainView = useUIStore((s) => s.setMainView);
   const engineConnected = useUIStore((s) => s.engineConnected);
+
+  const [resumeLoading, setResumeLoading] = useState(false);
+  const [resumeStatus, setResumeStatus] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleResumeAll = useCallback(async () => {
+    setResumeLoading(true);
+    setResumeStatus(null);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    try {
+      const { summary } = await resumeAll();
+      if (summary.resumed === 0 && summary.errors === 0) {
+        setResumeStatus("No stopped units");
+      } else if (summary.errors > 0) {
+        setResumeStatus(
+          `Resumed ${summary.resumed}, ${summary.errors} error(s)`,
+        );
+      } else {
+        setResumeStatus(`Resumed ${summary.resumed} unit(s)`);
+      }
+    } catch (err) {
+      setResumeStatus(
+        `Error: ${err instanceof Error ? err.message : "unknown"}`,
+      );
+    } finally {
+      setResumeLoading(false);
+      timerRef.current = setTimeout(() => setResumeStatus(null), 5000);
+    }
+  }, []);
 
   return (
     <div className="flex h-full w-60 flex-col border-r border-border bg-sidebar-background">
@@ -101,6 +139,19 @@ export function Sidebar() {
             title={engineConnected ? "Engine connected" : "Engine disconnected"}
           />
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2"
+          disabled={!engineConnected || resumeLoading}
+          onClick={handleResumeAll}
+        >
+          <Play className="h-4 w-4" />
+          {resumeLoading ? "Resuming…" : "Resume All"}
+        </Button>
+        {resumeStatus && (
+          <p className="px-2 text-xs text-muted-foreground">{resumeStatus}</p>
+        )}
         <Button
           variant={mainView === "admiral-settings" ? "secondary" : "ghost"}
           size="sm"
