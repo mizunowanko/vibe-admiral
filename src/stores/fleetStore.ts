@@ -9,9 +9,8 @@ interface FleetState {
   selectedFleetId: string | null;
   selectedFleet: Fleet | null;
 
-  orderedFleets: () => Fleet[];
   setFleets: (fleets: Fleet[]) => void;
-  reorderFleets: (fromIndex: number, toIndex: number) => void;
+  reorderFleets: (activeId: string, overId: string) => void;
   selectFleet: (id: string | null) => void;
   createFleet: (name: string, repos: FleetRepo[]) => void;
   updateFleet: (id: string, updates: {
@@ -40,16 +39,6 @@ export const useFleetStore = create<FleetState>()(
       selectedFleetId: null,
       selectedFleet: null,
 
-      orderedFleets: () => {
-        const { fleets, fleetOrder } = get();
-        const orderMap = new Map(fleetOrder.map((id, i) => [id, i]));
-        return [...fleets].sort((a, b) => {
-          const aIdx = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-          const bIdx = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-          return aIdx - bIdx;
-        });
-      },
-
       setFleets: (fleets) => {
         const { selectedFleetId } = get();
         const selectedFleet = fleets.find((f) => f.id === selectedFleetId) ?? null;
@@ -62,13 +51,21 @@ export const useFleetStore = create<FleetState>()(
         set({ fleets, selectedFleet });
       },
 
-      reorderFleets: (fromIndex, toIndex) => {
-        const ordered = get().orderedFleets();
-        const newOrder = ordered.map((f) => f.id);
-        const moved = newOrder.splice(fromIndex, 1)[0];
-        if (moved == null) return;
-        newOrder.splice(toIndex, 0, moved);
-        set({ fleetOrder: newOrder });
+      reorderFleets: (activeId, overId) => {
+        const { fleets, fleetOrder } = get();
+        const orderMap = new Map(fleetOrder.map((id, i) => [id, i]));
+        const sorted = [...fleets].sort((a, b) => {
+          const aIdx = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const bIdx = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          return aIdx - bIdx;
+        });
+        const ids = sorted.map((f) => f.id);
+        const fromIndex = ids.indexOf(activeId);
+        const toIndex = ids.indexOf(overId);
+        if (fromIndex === -1 || toIndex === -1) return;
+        ids.splice(fromIndex, 1);
+        ids.splice(toIndex, 0, activeId);
+        set({ fleetOrder: ids });
       },
 
       selectFleet: (id) => {

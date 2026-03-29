@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -82,10 +82,20 @@ function SortableFleetItem({
 }
 
 export function Sidebar() {
-  const orderedFleets = useFleetStore((s) => s.orderedFleets());
+  const fleets = useFleetStore((s) => s.fleets);
+  const fleetOrder = useFleetStore((s) => s.fleetOrder);
   const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
   const selectFleet = useFleetStore((s) => s.selectFleet);
   const reorderFleets = useFleetStore((s) => s.reorderFleets);
+
+  const orderedFleets = useMemo(() => {
+    const orderMap = new Map(fleetOrder.map((id, i) => [id, i]));
+    return [...fleets].sort((a, b) => {
+      const aIdx = orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const bIdx = orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      return aIdx - bIdx;
+    });
+  }, [fleets, fleetOrder]);
   const mainView = useUIStore((s) => s.mainView);
   const setMainView = useUIStore((s) => s.setMainView);
   const engineConnected = useUIStore((s) => s.engineConnected);
@@ -109,13 +119,9 @@ export function Sidebar() {
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const oldIndex = orderedFleets.findIndex((f) => f.id === active.id);
-      const newIndex = orderedFleets.findIndex((f) => f.id === over.id);
-      if (oldIndex !== -1 && newIndex !== -1) {
-        reorderFleets(oldIndex, newIndex);
-      }
+      reorderFleets(String(active.id), String(over.id));
     },
-    [orderedFleets, reorderFleets],
+    [reorderFleets],
   );
 
   const handleResumeAll = useCallback(async () => {
@@ -238,7 +244,7 @@ export function Sidebar() {
           onClick={handleResumeAll}
         >
           <Play className="h-4 w-4" />
-          {resumeLoading ? "Resuming…" : "Resume All"}
+          {resumeLoading ? "Resuming..." : "Resume All"}
         </Button>
         {resumeStatus && (
           <p className="px-2 text-xs text-muted-foreground">{resumeStatus}</p>
