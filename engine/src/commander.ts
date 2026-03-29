@@ -73,6 +73,8 @@ export class CommanderManager {
     };
     this.sessions.set(fleetId, session);
 
+    const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
+
     if (session.sessionId) {
       this.processManager.resumeCommander(
         sessionId,
@@ -80,6 +82,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
+        commanderEnv,
       );
     } else {
       this.processManager.launchCommander(
@@ -87,6 +90,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
+        commanderEnv,
       );
     }
     return sessionId;
@@ -209,7 +213,7 @@ export class CommanderManager {
 
   // --- Dispatch tracking ---
 
-  /** Register a new Dispatch when a Task tool_use is detected. */
+  /** Register a new Dispatch when an Agent tool_use is detected. */
   registerDispatch(fleetId: string, toolUseId: string, name: string): Dispatch | null {
     const session = this.sessions.get(fleetId);
     if (!session) return null;

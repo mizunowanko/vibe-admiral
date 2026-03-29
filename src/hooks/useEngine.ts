@@ -3,13 +3,15 @@ import { wsClient } from "@/lib/ws-client";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
+import { useAdmiralSettingsStore } from "@/stores/admiralSettingsStore";
 import {
   useSessionStore,
   createCommanderSession,
   createShipSession,
+  createDispatchSession,
   commanderSessionId,
 } from "@/stores/sessionStore";
-import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType } from "@/types";
+import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole, AdmiralSettings } from "@/types";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -24,12 +26,16 @@ export function useEngine() {
   const fetchShips = useShipStore((s) => s.fetchShips);
   const updateShipFromApi = useShipStore((s) => s.updateShipFromApi);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
+  const setRateLimitActive = useUIStore((s) => s.setRateLimitActive);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
+  const setAdmiralSettings = useAdmiralSettingsStore((s) => s.setSettings);
+  const fetchAdmiralSettings = useAdmiralSettingsStore((s) => s.fetchSettings);
   const registerSession = useSessionStore((s) => s.registerSession);
   const setFocus = useSessionStore((s) => s.setFocus);
 
   useEffect(() => {
     wsClient.connect();
+    let rateLimitTimer = 0;
 
     const checkConnection = setInterval(() => {
       const connected = wsClient.connected;
@@ -194,14 +200,56 @@ export function useEngine() {
           break;
         }
 
+        case "dispatch:stream": {
+          // Register dispatch session on first stream message
+          const dispatchStreamData = msg.data as {
+            id: string;
+            fleetId: string;
+            parentRole: CommanderRole;
+          };
+          const existingSession = useSessionStore.getState().sessions.get(`dispatch-${dispatchStreamData.id}`);
+          if (!existingSession) {
+            const dispatch = useSessionStore.getState().dispatches.get(dispatchStreamData.id);
+            const dispatchName = dispatch?.name ?? "Dispatch";
+            registerSession(
+              createDispatchSession(
+                dispatchStreamData.id,
+                dispatchStreamData.fleetId,
+                dispatchName,
+                dispatchStreamData.parentRole,
+              ),
+            );
+          }
+          // Log routing handled by useDispatchListener
+          break;
+        }
+
+        case "dispatch:completed":
+          // Handled by useDispatchListener
+          break;
+
         case "flagship:stream":
         case "dock:stream":
           // Commander messages are handled by useCommander hook
           break;
 
+        case "admiral-settings:data": {
+          const admiralSettings = msg.data as unknown as AdmiralSettings;
+          setAdmiralSettings(admiralSettings);
+          break;
+        }
+
         case "issue:data":
           // Issue data handled by specific components
           break;
+
+        case "rate-limit:detected": {
+          // Show rate limit banner, auto-clear after 30s (#699)
+          setRateLimitActive(true);
+          clearTimeout(rateLimitTimer);
+          rateLimitTimer = window.setTimeout(() => setRateLimitActive(false), 30_000);
+          break;
+        }
 
         case "error": {
           const errorData = msg.data as { source: string; message: string };
@@ -214,6 +262,7 @@ export function useEngine() {
     // Fetch data on every connect/reconnect
     const unsubConnect = wsClient.onConnect(() => {
       fetchFleets();
+      fetchAdmiralSettings();
       void fetchShips().then(() => {
         // Register sessions for ships loaded via REST API.
         // The ship:data WS handler would do this, but Engine never sends
@@ -235,6 +284,7 @@ export function useEngine() {
       unsub();
       unsubConnect();
       clearInterval(checkConnection);
+      clearTimeout(rateLimitTimer);
       wsClient.disconnect();
     };
   }, [
@@ -250,7 +300,10 @@ export function useEngine() {
     fetchShips,
     updateShipFromApi,
     setEngineConnected,
+    setRateLimitActive,
     fetchFleets,
+    setAdmiralSettings,
+    fetchAdmiralSettings,
     registerSession,
     setFocus,
   ]);

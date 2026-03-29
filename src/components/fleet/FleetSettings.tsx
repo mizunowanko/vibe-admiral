@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
+import { useAdmiralSettingsStore } from "@/stores/admiralSettingsStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Settings, Plus, Trash2, X, FolderOpen } from "lucide-react";
@@ -116,11 +117,21 @@ const GATE_PHASE_CONFIG: {
   },
 ];
 
+/** Small badge showing that a value is inherited from Admiral Global settings. */
+function GlobalBadge() {
+  return (
+    <span className="ml-1 inline-flex items-center rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
+      Global
+    </span>
+  );
+}
+
 export function FleetSettings() {
   const selectedFleet = useFleetStore((s) => s.selectedFleet);
   const createFleet = useFleetStore((s) => s.createFleet);
   const updateFleet = useFleetStore((s) => s.updateFleet);
   const deleteFleet = useFleetStore((s) => s.deleteFleet);
+  const admiralGlobal = useAdmiralSettingsStore((s) => s.settings.global);
 
   const [name, setName] = useState(selectedFleet?.name ?? "");
   const [repos, setRepos] = useState<FleetRepo[]>(selectedFleet?.repos ?? []);
@@ -150,6 +161,9 @@ export function FleetSettings() {
   const [gates, setGates] = useState<FleetGateSettings>(
     selectedFleet?.gates ?? {},
   );
+  const [qaRequiredPaths, setQaRequiredPaths] = useState<string[]>(
+    selectedFleet?.qaRequiredPaths ?? [],
+  );
 
   const isNew = !selectedFleet;
 
@@ -165,6 +179,7 @@ export function FleetSettings() {
     setShipRulePaths(selectedFleet?.shipRulePaths ?? []);
     setCustomInstructions(selectedFleet?.customInstructions ?? {});
     setGates(selectedFleet?.gates ?? {});
+    setQaRequiredPaths(selectedFleet?.qaRequiredPaths ?? []);
   }, [selectedFleet]);
 
   const saveRepos = (nextRepos: FleetRepo[]) => {
@@ -191,6 +206,7 @@ export function FleetSettings() {
       shipRulePaths,
       customInstructions,
       gates,
+      qaRequiredPaths,
     });
   };
 
@@ -406,6 +422,22 @@ export function FleetSettings() {
             </div>
           )}
 
+          {/* QA Required Paths — only shown when editing */}
+          {!isNew && (
+            <div>
+              <PathListEditor
+                label="QA Required Paths"
+                paths={qaRequiredPaths}
+                onChange={setQaRequiredPaths}
+              />
+              {admiralGlobal.qaRequiredPaths && admiralGlobal.qaRequiredPaths.length > 0 && (
+                <p className="text-[10px] text-blue-500/70 mt-1">
+                  <GlobalBadge /> {admiralGlobal.qaRequiredPaths.length} global pattern(s) also applied at runtime
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Skill Sources — only shown when editing */}
           {!isNew && (
             <div>
@@ -484,6 +516,11 @@ export function FleetSettings() {
                 <p className="text-xs text-muted-foreground mt-1">
                   Per-actor system prompt instructions. Shared instructions are
                   prepended to all actors.
+                  {admiralGlobal.customInstructions && (
+                    <span className="block mt-1 text-blue-500">
+                      Admiral Global instructions are merged at runtime.
+                    </span>
+                  )}
                 </p>
               </div>
               {([
@@ -496,7 +533,14 @@ export function FleetSettings() {
                 <div key={key}>
                   <label className="text-xs text-muted-foreground mb-1 block">
                     {label}
+                    {admiralGlobal.customInstructions?.[key] && <GlobalBadge />}
                   </label>
+                  {admiralGlobal.customInstructions?.[key] && (
+                    <p className="text-[10px] text-blue-500/70 mb-1 font-mono truncate">
+                      Global: {admiralGlobal.customInstructions[key]!.slice(0, 80)}
+                      {admiralGlobal.customInstructions[key]!.length > 80 ? "..." : ""}
+                    </p>
+                  )}
                   <Textarea
                     value={customInstructions[key] ?? ""}
                     onChange={(e) =>

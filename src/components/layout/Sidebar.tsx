@@ -79,8 +79,8 @@ export function Sidebar() {
       </ScrollArea>
 
       {/* Settings */}
-      {selectedFleetId && (
-        <div className="border-t border-border p-2">
+      <div className="border-t border-border p-2 space-y-1">
+        {selectedFleetId && (
           <Button
             variant={mainView === "fleet-settings" ? "secondary" : "ghost"}
             size="sm"
@@ -88,10 +88,19 @@ export function Sidebar() {
             onClick={() => setMainView("fleet-settings")}
           >
             <Settings className="h-4 w-4" />
-            Settings
+            Fleet Settings
           </Button>
-        </div>
-      )}
+        )}
+        <Button
+          variant={mainView === "admiral-settings" ? "secondary" : "ghost"}
+          size="sm"
+          className="w-full justify-start gap-2"
+          onClick={() => setMainView("admiral-settings")}
+        >
+          <Anchor className="h-4 w-4" />
+          Admiral Settings
+        </Button>
+      </div>
     </div>
   );
 }

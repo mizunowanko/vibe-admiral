@@ -5,9 +5,11 @@ import type { FleetDatabase } from "./db.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
-import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase } from "./types.js";
+import type { DispatchManager } from "./dispatch-manager.js";
+import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole, AdmiralSettings, HeadsUpNotification, HeadsUpSeverity } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
+import { mergeSettings } from "./deep-merge.js";
 
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
@@ -18,11 +20,13 @@ interface ApiDeps {
   requestHandler: FlagshipRequestHandler;
   getDatabase: () => FleetDatabase | null;
   getShipManager: () => ShipManager;
+  getDispatchManager: () => DispatchManager;
   getEscortManager: () => EscortManager;
   getActorManager: () => ShipActorManager;
   getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
   loadFleets: () => Promise<Array<{
     id: string;
+    name: string;
     repos: FleetRepo[];
     skillSources?: FleetSkillSources;
     sharedRulePaths?: string[];
@@ -30,10 +34,13 @@ interface ApiDeps {
     customInstructions?: CustomInstructions;
     gates?: import("./types.js").FleetGateSettings;
     gatePrompts?: Partial<Record<import("./types.js").GateType, string>>;
+    qaRequiredPaths?: string[];
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
+  loadAdmiralSettings: () => Promise<AdmiralSettings>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
+  deliverHeadsUp: (notification: HeadsUpNotification) => boolean;
   requestRestart: () => void;
 }
 
@@ -112,6 +119,32 @@ function validatePRReviewResultRequest(body: unknown): FlagshipRequest | string 
   return result;
 }
 
+const VALID_SEVERITIES = new Set<HeadsUpSeverity>(["info", "warning", "urgent"]);
+
+function validateHeadsUpRequest(body: unknown): HeadsUpNotification | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (b.from !== "dock" && b.from !== "flagship") return 'from must be "dock" or "flagship"';
+  if (b.to !== "dock" && b.to !== "flagship") return 'to must be "dock" or "flagship"';
+  if (b.from === b.to) return "from and to must be different";
+  if (typeof b.fleetId !== "string" || !b.fleetId) return "fleetId is required";
+  if (typeof b.summary !== "string" || !b.summary) return "summary is required";
+  if (!VALID_SEVERITIES.has(b.severity as HeadsUpSeverity)) return 'severity must be "info", "warning", or "urgent"';
+  if (typeof b.needsInvestigation !== "boolean") return "needsInvestigation must be a boolean";
+
+  const notification: HeadsUpNotification = {
+    from: b.from,
+    to: b.to,
+    fleetId: b.fleetId,
+    summary: b.summary,
+    severity: b.severity as HeadsUpSeverity,
+    needsInvestigation: b.needsInvestigation,
+  };
+  if (typeof b.shipId === "string") notification.shipId = b.shipId;
+  if (typeof b.issueNumber === "number" && Number.isInteger(b.issueNumber)) notification.issueNumber = b.issueNumber;
+  return notification;
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -132,6 +165,7 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   repoRemotes: string[];
   skillSources?: FleetSkillSources;
   shipExtraPrompt?: string;
+  customInstructionsText?: string;
   maxConcurrentSorties?: number;
 } | string> {
   const fleets = await deps.loadFleets();
@@ -144,13 +178,25 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
   } else if (fleets.length === 0) {
     return "No fleets configured";
   } else {
-    return "Multiple fleets exist — fleetId is required";
+    const fleetList = fleets.map((f) => `  - ${f.id} (${f.name})`).join("\n");
+    return `Multiple fleets exist — fleetId is required. Available fleets:\n${fleetList}`;
   }
   const fleetRepos = fleet.repos;
   const repoRemotes = fleetRepos.map((r) => r.remote).filter((r): r is string => r !== undefined);
   const sharedRules = await deps.loadRules(fleet.sharedRulePaths ?? []);
   const shipRules = await deps.loadRules(fleet.shipRulePaths ?? []);
-  const ci = fleet.customInstructions;
+
+  // Merge Admiral global settings with Fleet per-fleet settings
+  const admiralSettings = await deps.loadAdmiralSettings();
+  const merged = mergeSettings(admiralSettings.global, {
+    customInstructions: fleet.customInstructions,
+    gates: fleet.gates,
+    gatePrompts: fleet.gatePrompts,
+    qaRequiredPaths: fleet.qaRequiredPaths,
+    maxConcurrentSorties: fleet.maxConcurrentSorties,
+  });
+
+  const ci = merged.customInstructions;
   const ciParts = [ci?.shared, ci?.ship].filter(Boolean);
   const ciText = ciParts.length > 0 ? `## Custom Instructions\n\n${ciParts.join("\n\n")}` : undefined;
   const shipExtraPrompt = [sharedRules, shipRules, ciText].filter(Boolean).join("\n\n") || undefined;
@@ -160,7 +206,8 @@ async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Promise<{
     repoRemotes,
     skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
     shipExtraPrompt,
-    maxConcurrentSorties: fleet.maxConcurrentSorties,
+    customInstructionsText: ciText,
+    maxConcurrentSorties: merged.maxConcurrentSorties,
   };
 }
 
@@ -253,6 +300,46 @@ async function handleShipRoute(
     const metadata = (body.metadata as Record<string, unknown>) ?? {};
     const triggeredBy = (body.triggeredBy as string) ?? "ship";
 
+    // Extract qaRequired from plan-gate metadata (Ship determines this during planning)
+    if (targetPhase === "plan-gate" && typeof metadata.qaRequired === "boolean") {
+      shipManager.setQaRequired(shipId, metadata.qaRequired);
+    }
+
+    // Fallback guard: if Ship requests qa-gate with qaRequired=false,
+    // check actual changed files against fleet's qaRequiredPaths.
+    // If match found, force qaRequired=true before XState evaluates canSkipQA.
+    if (targetPhase === "qa-gate") {
+      const currentShip = db.getShipById(shipId);
+      if (currentShip && !currentShip.qaRequired) {
+        const fleets = await deps.loadFleets();
+        const fleet = fleets.find((f) => f.id === currentShip.fleetId);
+        if (fleet?.qaRequiredPaths?.length) {
+          try {
+            const { execSync } = await import("node:child_process");
+            const changedFiles = execSync("git diff --name-only main...HEAD", {
+              cwd: currentShip.worktreePath,
+              encoding: "utf-8",
+              timeout: 10000,
+            }).trim().split("\n").filter(Boolean);
+
+            const { matchesGlob } = await import("node:path");
+            const hasMatch = changedFiles.some((file) =>
+              fleet.qaRequiredPaths!.some((pattern) => matchesGlob(file, pattern))
+            );
+            if (hasMatch) {
+              console.log(
+                `[api-server] qaRequiredPaths match found for Ship ${shipId.slice(0, 8)}... — overriding qaRequired to true`,
+              );
+              shipManager.setQaRequired(shipId, true);
+            }
+          } catch (err) {
+            console.warn(`[api-server] Failed to check qaRequiredPaths for Ship ${shipId.slice(0, 8)}...:`, err);
+            // Non-fatal: proceed with existing qaRequired value
+          }
+        }
+      }
+    }
+
     // Determine the XState event based on target phase
     const actorManager = deps.getActorManager();
     let xstateEvent: import("./ship-machine.js").ShipMachineEvent;
@@ -264,6 +351,13 @@ async function handleShipRoute(
       // For non-gate, non-done transitions requested by Ship (shouldn't normally happen)
       sendJson(res, 400, { ok: false, error: `Ships can only transition to gate phases or done, not ${targetPhase}` });
       return;
+    }
+
+    // Pre-transition consistency check: reconcile XState/DB mismatch before processing (#694)
+    const dbPhase = ship.phase as Phase;
+    if (!actorManager.assertPhaseConsistency(shipId, dbPhase)) {
+      console.warn(`[api-server] Pre-transition reconciliation for Ship ${shipId.slice(0, 8)}...`);
+      actorManager.reconcilePhase(shipId, dbPhase);
     }
 
     // XState is the sole authority: request transition through XState first
@@ -283,8 +377,11 @@ async function handleShipRoute(
         metadata,
       );
     } catch (err) {
-      console.error(`[api-server] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}...:`, err);
-      // DB failed but XState already transitioned — log and continue
+      // DB failed but XState already transitioned — revert XState to prevent split-brain (#694)
+      console.error(`[api-server] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
+      actorManager.reconcilePhase(shipId, result.fromPhase);
+      sendJson(res, 500, { ok: false, error: "Phase transition failed: DB persist error" });
+      return;
     }
 
     shipManager.syncPhaseFromDb(shipId);
@@ -293,10 +390,17 @@ async function handleShipRoute(
     if (isGatePhase(result.toPhase)) {
       const gatePhase = result.toPhase as GatePhase;
 
-      // Resolve gate type from fleet settings (supports disabled / auto-approve / override)
+      // Resolve gate type from merged settings (Admiral global + Fleet per-fleet)
       const fleets = await deps.loadFleets();
       const fleet = fleets.find((f) => f.id === ship.fleetId);
-      const gateType = resolveGateType(gatePhase, fleet?.gates);
+      const admiralSettings = await deps.loadAdmiralSettings();
+      const mergedGateSettings = mergeSettings(admiralSettings.global, {
+        customInstructions: fleet?.customInstructions,
+        gates: fleet?.gates,
+        gatePrompts: fleet?.gatePrompts,
+        qaRequiredPaths: fleet?.qaRequiredPaths,
+      });
+      const gateType = resolveGateType(gatePhase, mergedGateSettings.gates);
 
       // Gate disabled or auto-approve: skip Escort, auto-transition to next phase
       if (gateType === null || gateType === "auto-approve") {
@@ -336,19 +440,37 @@ async function handleShipRoute(
       // and are resumed with --resume sessionId for the next gate.
       const escortManager = deps.getEscortManager();
 
-      // Build Escort custom instructions and gate prompt from fleet settings
+      // Build Escort custom instructions and gate prompt from merged settings
       let escortExtraPrompt: string | undefined;
+      let shipCustomInstructionsText: string | undefined;
       {
-        const ci = fleet?.customInstructions;
-        const ciParts = [ci?.shared, ci?.escort].filter(Boolean);
-        if (ciParts.length > 0) {
-          escortExtraPrompt = `## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+        const ci = mergedGateSettings.customInstructions;
+        const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
+        if (escortCiParts.length > 0) {
+          escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
+        }
+        // Build Ship's CI text for restoration after Escort exits
+        const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
+        if (shipCiParts.length > 0) {
+          shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
         }
       }
 
-      // Pass fleet's gate prompt for this gate type to Escort via env var
-      const gatePrompt = fleet?.gatePrompts?.[gateType];
-      const escortId = escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt);
+      // Pass merged gate prompt for this gate type to Escort via env var
+      const gatePrompt = mergedGateSettings.gatePrompts?.[gateType];
+
+      // Build extra env vars for Escort (qaRequiredPaths, qaRequired)
+      const escortExtraEnv: Record<string, string> = {};
+      if (mergedGateSettings.qaRequiredPaths?.length) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(mergedGateSettings.qaRequiredPaths);
+      }
+      // Pass parent Ship's qaRequired to acceptance-test-gate Escort
+      const refreshedShip = db.getShipById(shipId);
+      if (refreshedShip) {
+        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
+      }
+
+      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);
       if (!escortId) {
         // Escort launch failed — revert via XState ESCORT_DIED
         const prevPhase = GATE_PREV_PHASE[gatePhase];
@@ -382,6 +504,33 @@ async function handleShipRoute(
     return;
   }
 
+  // POST /api/ship/:shipId/gate-intent — Escort declares verdict intent before actual verdict
+  // This is a fallback mechanism: if the Escort dies before calling gate-verdict,
+  // the Engine can use this declared intent to auto-approve instead of reverting.
+  if (action === "gate-intent") {
+    const verdict = body.verdict as string | undefined;
+    if (verdict !== "approve" && verdict !== "reject") {
+      sendJson(res, 400, { ok: false, error: 'verdict must be "approve" or "reject"' });
+      return;
+    }
+
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    const escortManager = deps.getEscortManager();
+    escortManager.setGateIntent(shipId, {
+      verdict,
+      feedback: body.feedback as string | undefined,
+      declaredAt: new Date().toISOString(),
+    });
+
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
   // POST /api/ship/:shipId/gate-verdict — Escort submits gate result
   if (action === "gate-verdict") {
     const verdict = body.verdict as string | undefined;
@@ -406,6 +555,13 @@ async function handleShipRoute(
 
     // XState is the sole authority: request transition through XState first
     const actorManager = deps.getActorManager();
+
+    // Pre-transition consistency check: reconcile XState/DB mismatch before processing (#694)
+    if (!actorManager.assertPhaseConsistency(shipId, currentPhase)) {
+      console.warn(`[api-server] Pre-verdict reconciliation for Ship ${shipId.slice(0, 8)}...`);
+      actorManager.reconcilePhase(shipId, currentPhase);
+    }
+
     const xstateEvent: import("./ship-machine.js").ShipMachineEvent = verdict === "approve"
       ? { type: "GATE_APPROVED" }
       : { type: "GATE_REJECTED", feedback: feedback ?? "" };
@@ -424,11 +580,19 @@ async function handleShipRoute(
     try {
       db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata);
     } catch (err) {
-      console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}...:`, err);
+      // DB failed but XState already transitioned — revert XState to prevent split-brain (#694)
+      console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
+      actorManager.reconcilePhase(shipId, result.fromPhase);
+      sendJson(res, 500, { ok: false, error: "Gate verdict failed: DB persist error" });
+      return;
     }
 
     shipManager.syncPhaseFromDb(shipId);
     shipManager.clearGateCheck(shipId);
+
+    // Clear gate intent — verdict was successfully submitted
+    const escortMgr = deps.getEscortManager();
+    escortMgr.clearGateIntent(shipId);
 
     sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
@@ -508,6 +672,102 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       if (shipRouteMatch) {
         const [, shipId, action] = shipRouteMatch;
         await handleShipRoute(deps, req, res, shipId!, action!);
+        return;
+      }
+
+      // === Dispatch API endpoints ===
+
+      // POST /api/dispatch — Launch a new Dispatch process
+      if (route === "dispatch" && req.method === "POST") {
+        const rawBody = await readBody(req);
+        let body: Record<string, unknown>;
+        try {
+          body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: "Invalid JSON body" });
+          return;
+        }
+
+        const prompt = body.prompt as string | undefined;
+        if (!prompt) {
+          sendJson(res, 400, { ok: false, error: "prompt is required" });
+          return;
+        }
+        const name = (body.name as string) ?? "dispatch";
+        const type = (body.type as DispatchType) ?? "investigate";
+        if (type !== "investigate" && type !== "modify") {
+          sendJson(res, 400, { ok: false, error: 'type must be "investigate" or "modify"' });
+          return;
+        }
+        const parentRole = (body.parentRole as CommanderRole) ?? "flagship";
+        if (parentRole !== "dock" && parentRole !== "flagship") {
+          sendJson(res, 400, { ok: false, error: 'parentRole must be "dock" or "flagship"' });
+          return;
+        }
+        const fleetId = body.fleetId as string | undefined;
+        if (!fleetId) {
+          sendJson(res, 400, { ok: false, error: "fleetId is required" });
+          return;
+        }
+        const cwd = body.cwd as string | undefined;
+        if (!cwd) {
+          sendJson(res, 400, { ok: false, error: "cwd is required" });
+          return;
+        }
+
+        const dispatchManager = deps.getDispatchManager();
+        const dispatch = dispatchManager.launch({
+          fleetId,
+          parentRole,
+          prompt,
+          name,
+          type,
+          cwd,
+        });
+
+        sendJson(res, 200, { ok: true, result: dispatch.id, dispatch: dispatchManager.toDispatch(dispatch) } as ApiResponse & { dispatch: unknown });
+        return;
+      }
+
+      // GET /api/dispatches — List dispatches for a fleet
+      if (route === "dispatches" && req.method === "GET") {
+        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        if (!fleetId) {
+          sendJson(res, 400, { ok: false, error: "fleetId query parameter is required" });
+          return;
+        }
+        const dispatchManager = deps.getDispatchManager();
+        const dispatches = dispatchManager.getDispatchesByFleet(fleetId).map((d) => dispatchManager.toDispatch(d));
+        sendJson(res, 200, { ok: true, dispatches } as ApiResponse & { dispatches: unknown[] });
+        return;
+      }
+
+      // === Commander Notification API ===
+
+      // POST /api/commander-notify — Commander-to-Commander heads-up notification
+      if (route === "commander-notify" && req.method === "POST") {
+        const rawBody = await readBody(req);
+        let body: unknown;
+        try {
+          body = rawBody ? JSON.parse(rawBody) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: "Invalid JSON body" });
+          return;
+        }
+
+        const notification = validateHeadsUpRequest(body);
+        if (typeof notification === "string") {
+          sendJson(res, 400, { ok: false, error: notification });
+          return;
+        }
+
+        const delivered = deps.deliverHeadsUp(notification);
+        if (!delivered) {
+          sendJson(res, 503, { ok: false, error: `Target commander (${notification.to}) is not running for fleet ${notification.fleetId}` });
+          return;
+        }
+
+        sendJson(res, 200, { ok: true });
         return;
       }
 
@@ -681,6 +941,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         ctx.skillSources,
         ctx.shipExtraPrompt,
         ctx.maxConcurrentSorties,
+        ctx.customInstructionsText,
       );
 
       deps.broadcastRequestResult(ctx.fleetId, result);

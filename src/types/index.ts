@@ -8,6 +8,27 @@ export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
 
+// === Admiral Settings (3-layer configuration) ===
+/**
+ * Settings fields that participate in the 3-layer merge:
+ * Admiral Global → (Fleet Template at creation) → Fleet Per-Fleet
+ */
+export interface SettingsLayer {
+  customInstructions?: CustomInstructions;
+  gates?: FleetGateSettings;
+  gatePrompts?: Partial<Record<GateType, string>>;
+  qaRequiredPaths?: string[];
+  maxConcurrentSorties?: number;
+}
+
+/** Admiral-level settings: global (runtime merge) + template (creation-time snapshot). */
+export interface AdmiralSettings {
+  /** Settings applied to ALL fleets at runtime via deepMerge. */
+  global: SettingsLayer;
+  /** Template copied into new fleets at creation time. Does NOT affect existing fleets. */
+  template: SettingsLayer;
+}
+
 // === Custom Instructions ===
 /** Per-actor custom instructions injected via --append-system-prompt. */
 export interface CustomInstructions {
@@ -49,6 +70,8 @@ export interface Fleet {
   customInstructions?: CustomInstructions;
   /** Custom Escort prompts per gate type. Overrides default gate skill behavior. */
   gatePrompts?: Partial<Record<GateType, string>>;
+  /** Glob patterns for paths that force qaRequired=true when changed. Passed to Escorts via env var. */
+  qaRequiredPaths?: string[];
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   /** Gate settings: which gate phases are enabled and their types. */
@@ -124,7 +147,7 @@ export interface Ship {
   escorts?: EscortInfo[];
 }
 
-// === Dispatch (Commander sub-agent launched via Task tool) ===
+// === Dispatch (Engine-managed independent CLI process) ===
 export type DispatchStatus = "running" | "completed" | "failed";
 
 export interface Dispatch {
@@ -136,6 +159,11 @@ export interface Dispatch {
   startedAt: number;
   completedAt?: number;
   result?: string;
+}
+
+/** Build a deterministic session ID for dispatch sessions. */
+export function dispatchSessionId(dispatchId: string): string {
+  return `dispatch-${dispatchId}`;
 }
 
 // === Issue ===
@@ -158,7 +186,8 @@ export type StreamMessageSubtype =
   | "lookout-alert"
   | "task-notification"
   | "dispatch-log"
-  | "escort-log";
+  | "escort-log"
+  | "rate-limit-status";
 
 // === Lookout ===
 export type LookoutAlertType =
@@ -229,6 +258,8 @@ export type ClientMessage =
       };
     }
   | { type: "fleet:delete"; data: { id: string } }
+  | { type: "admiral-settings:get" }
+  | { type: "admiral-settings:update"; data: { global?: SettingsLayer; template?: SettingsLayer } }
   | { type: "flagship:send"; data: { fleetId: string; message: string; images?: ImageAttachment[] } }
   | { type: "flagship:answer"; data: { fleetId: string; answer: string; toolUseId?: string } }
   | { type: "flagship:history"; data: { fleetId: string } }
@@ -268,19 +299,16 @@ export type ServerMessage =
       data: { fleetId: string };
     }
   | {
-      type: "flagship:dispatch-started";
-      data: { fleetId: string; dispatch: Dispatch };
+      type: "dispatch:stream";
+      data: {
+        id: string;
+        fleetId: string;
+        parentRole: CommanderRole;
+        message: StreamMessage;
+      };
     }
   | {
-      type: "flagship:dispatch-completed";
-      data: { fleetId: string; dispatch: Dispatch };
-    }
-  | {
-      type: "dock:dispatch-started";
-      data: { fleetId: string; dispatch: Dispatch };
-    }
-  | {
-      type: "dock:dispatch-completed";
+      type: "dispatch:completed";
       data: { fleetId: string; dispatch: Dispatch };
     }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
@@ -335,6 +363,7 @@ export type ServerMessage =
   | { type: "ship:data"; data: Ship[] }
   | { type: "fleet:data"; data: Fleet[] }
   | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
+  | { type: "admiral-settings:data"; data: AdmiralSettings }
   | { type: "issue:data"; data: { repo: string; issues: Issue[] } }
   | {
       type: "fs:dir-listing";
@@ -345,4 +374,5 @@ export type ServerMessage =
     }
   | { type: "engine:restarting"; data: Record<string, never> }
   | { type: "engine:restarted"; data: Record<string, never> }
+  | { type: "rate-limit:detected"; data: { processId: string } }
   | { type: "error"; data: { source: string; message: string } };

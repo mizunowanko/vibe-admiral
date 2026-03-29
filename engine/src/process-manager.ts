@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAdmiralHome } from "./admiral-home.js";
 
@@ -95,6 +96,47 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
+   * Launch a Dispatch process — an independent CLI session for investigation or modification.
+   * Similar to sortie() but with type-dependent allowedTools instead of disallowedTools.
+   */
+  dispatchSortie(
+    id: string,
+    cwd: string,
+    prompt: string,
+    type: "investigate" | "modify",
+    extraEnv?: Record<string, string>,
+  ): ChildProcess {
+    const allowedTools = type === "investigate"
+      ? "Bash,Read,Glob,Grep,WebSearch,WebFetch"
+      : "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch";
+
+    const args = [
+      "-p",
+      prompt,
+      "--output-format",
+      "stream-json",
+      "--dangerously-skip-permissions",
+      "--allowedTools",
+      allowedTools,
+      "--max-turns",
+      "100",
+      "--verbose",
+    ];
+
+    const proc = spawn("claude", args, {
+      cwd,
+      env: {
+        ...process.env,
+        ...extraEnv,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    this.setupProcess(id, proc);
+    return proc;
+  }
+
+  /**
    * Launch an interactive commander session (Dock or Flagship).
    * Both roles use the same CLI config — they differ only in system prompt and skills.
    */
@@ -103,6 +145,7 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     // See .claude/rules/cli-subprocess.md for full rationale.
     //
@@ -110,8 +153,10 @@ export class ProcessManager extends EventEmitter {
     // MUST write to stdin immediately after spawn — Bun blocks stdout
     // when stdin pipe is idle, creating a deadlock if you wait for init.
     //
-    // allowedTools: Commanders are read-only (no Write/Edit). AskUserQuestion
-    // is allowed — Engine intercepts it and forwards to frontend.
+    // allowedTools: Commanders themselves are read-only by rule (commander-rules.md).
+    // Write/Edit are included so that Dispatch sub-agents (launched via Agent tool)
+    // can modify files. Commander rules prohibit direct Write/Edit usage.
+    // AskUserQuestion is allowed — Engine intercepts it and forwards to frontend.
     const args = [
       "-p",
       "",
@@ -121,7 +166,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
@@ -133,6 +178,7 @@ export class ProcessManager extends EventEmitter {
       env: {
         ...process.env,
         VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -147,8 +193,9 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
-    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt);
+    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   sendMessage(
@@ -217,6 +264,7 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
     const args = [
       "--resume",
@@ -227,7 +275,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Task,TaskOutput",
+      "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
@@ -239,6 +287,7 @@ export class ProcessManager extends EventEmitter {
       env: {
         ...process.env,
         VIBE_ADMIRAL_DB_PATH: join(getAdmiralHome(), "fleet.db"),
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -254,8 +303,9 @@ export class ProcessManager extends EventEmitter {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    extraEnv?: Record<string, string>,
   ): ChildProcess {
-    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt);
+    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   resumeSession(
@@ -264,23 +314,33 @@ export class ProcessManager extends EventEmitter {
     message: string,
     cwd: string,
     extraEnv?: Record<string, string>,
+    appendSystemPrompt?: string,
   ): ChildProcess {
     // Same stdio/disallowedTools constraints as sortie().
     // See .claude/rules/cli-subprocess.md for full rationale.
+    const args = [
+      "--resume",
+      sessionId,
+      "-p",
+      message,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--disallowedTools",
+      "EnterPlanMode,ExitPlanMode,AskUserQuestion",
+    ];
+
+    // Re-inject system prompt so customInstructions survive session resume.
+    // The original --append-system-prompt from sortie() is part of the stored session,
+    // but re-applying it provides defense-in-depth against content loss.
+    if (appendSystemPrompt) {
+      args.push("--append-system-prompt", appendSystemPrompt);
+    }
+
     const proc = spawn(
       "claude",
-      [
-        "--resume",
-        sessionId,
-        "-p",
-        message,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--disallowedTools",
-        "EnterPlanMode,ExitPlanMode,AskUserQuestion",
-      ],
+      args,
       {
         cwd,
         env: {
@@ -355,11 +415,9 @@ export class ProcessManager extends EventEmitter {
 
           // Persist Ship log: skip system init/hook messages (noisy, may contain env info)
           if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
-            try {
-              appendFileSync(logFilePath, line + "\n");
-            } catch {
+            appendFile(logFilePath, line + "\n").catch(() => {
               // Best-effort: don't crash on write failure
-            }
+            });
           }
         } catch {
           // Non-JSON output, ignore
@@ -375,8 +433,12 @@ export class ProcessManager extends EventEmitter {
         console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
         if (isRetryableError(text)) {
           this.emit("rate-limit", id);
+          // Don't emit "error" for retryable errors — the retry mechanism
+          // handles recovery. Emitting "error" here would broadcast the
+          // transient failure to the frontend, confusing users. (#712)
+        } else {
+          this.emit("error", id, new Error(text));
         }
-        this.emit("error", id, new Error(text));
         stderrBuffer = "";
       }
     });

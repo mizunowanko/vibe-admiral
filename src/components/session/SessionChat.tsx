@@ -15,11 +15,33 @@ import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 type DisplayMessage = StreamMessage & { repeatCount?: number };
 
 /**
- * Pre-filter messages that SessionMessage would suppress (return null).
+ * System subtypes that are explicitly rendered by SessionMessage or ChatMessage.
+ * Any system message whose subtype is NOT in this set (and has no special
+ * meta.category) will be rendered as null by ChatMessage — filter them out
+ * so they don't break tool_use grouping.
+ *
+ * Keep in sync with:
+ * - SessionMessage.tsx render-level guards & SystemMessageCard routing
+ * - ChatMessage.tsx system subtype handlers
+ */
+const RENDERED_SYSTEM_SUBTYPES = new Set([
+  "ship-status",
+  "compact-status",
+  "task-notification",
+  "request-result",
+  "gate-check-request",
+  "pr-review-request",
+  "lookout-alert",
+  "commander-status",
+  "escort-log",
+  "dispatch-log",
+  "rate-limit-status",
+]);
+
+/**
+ * Pre-filter messages that SessionMessage/ChatMessage would suppress (return null).
  * Removing them before groupToolMessages() prevents invisible messages
  * from breaking consecutive tool_use grouping.
- *
- * Keep in sync with SessionMessage.tsx render-level guards (L41, L54, L58, L61).
  */
 function filterSessionMessages(msgs: StreamMessage[], context: "ship" | "command"): StreamMessage[] {
   const isShip = context === "ship";
@@ -33,23 +55,46 @@ function filterSessionMessages(msgs: StreamMessage[], context: "ship" | "command
     if (isSystem && msg.subtype === "commander-status" && isShip) return false;
     // Escort log: suppress in non-Ship
     if (isSystem && msg.subtype === "escort-log" && !isShip) return false;
+    // System messages with unrecognized subtypes render as null in ChatMessage.
+    // Messages with meta.category (e.g. escort-log, dispatch-log) are handled
+    // separately and should pass through.
+    if (isSystem && !RENDERED_SYSTEM_SUBTYPES.has(msg.subtype ?? "") && !msg.meta?.category) return false;
+    // Messages with no displayable content (ChatMessage L291 guard)
+    if (!msg.content && msg.type !== "system" && msg.type !== "tool_use") return false;
     return true;
   });
 }
 
-/** Collapse consecutive identical ship-status messages into one with a count. */
+/**
+ * Collapse consecutive ship-status messages into groups.
+ * - Identical messages → single message with repeatCount
+ * - Different ship-status messages within COLLAPSE_WINDOW_MS → grouped with count
+ *   (keeps the last message visible, collapses earlier ones)
+ */
+const COLLAPSE_WINDOW_MS = 5000;
+
 function collapseShipStatus(msgs: StreamMessage[]): DisplayMessage[] {
   const result: DisplayMessage[] = [];
   for (const msg of msgs) {
     const prev = result[result.length - 1];
-    if (
-      msg.type === "system" &&
-      msg.subtype === "ship-status" &&
-      prev?.type === "system" &&
-      prev?.subtype === "ship-status" &&
-      msg.content === prev.content
-    ) {
-      prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+    const isStatus = msg.type === "system" && msg.subtype === "ship-status";
+    const prevIsStatus = prev?.type === "system" && prev?.subtype === "ship-status";
+
+    if (isStatus && prevIsStatus) {
+      const timeDiff = Math.abs((msg.timestamp ?? 0) - (prev.timestamp ?? 0));
+      if (msg.content === prev.content) {
+        // Identical messages — always collapse
+        prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+      } else if (timeDiff < COLLAPSE_WINDOW_MS) {
+        // Different ship-status within time window — collapse into group
+        prev.repeatCount = (prev.repeatCount ?? 1) + 1;
+        // Update content to show latest status, keeping the count
+        prev.content = msg.content;
+        prev.timestamp = msg.timestamp;
+        prev.meta = msg.meta;
+      } else {
+        result.push({ ...msg });
+      }
     } else {
       result.push({ ...msg });
     }
@@ -90,6 +135,7 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
   const { messages, sendMessage, isLoading, session } =
     useSessionMessages(sessionId);
   const engineConnected = useUIStore((s) => s.engineConnected);
+  const rateLimitActive = useUIStore((s) => s.rateLimitActive);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
@@ -192,6 +238,13 @@ export const SessionChat = memo(function SessionChat({ sessionId }: SessionChatP
       {!engineConnected && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-center text-xs text-destructive">
           Engine disconnected — messages will not be delivered
+        </div>
+      )}
+
+      {/* Rate Limit Banner */}
+      {rateLimitActive && engineConnected && (
+        <div className="border-b border-yellow-500/20 bg-yellow-500/5 px-4 py-2 text-center text-xs text-yellow-600 dark:text-yellow-400">
+          API rate limit detected — requests will retry automatically
         </div>
       )}
 

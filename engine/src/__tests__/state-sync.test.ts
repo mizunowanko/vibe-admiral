@@ -46,6 +46,7 @@ type MockShipManager = {
   incrementRapidDeathCount: ReturnType<typeof vi.fn>;
   resetRapidDeathCount: ReturnType<typeof vi.fn>;
   setPrUrl: ReturnType<typeof vi.fn>;
+  persistChatLogs: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -133,6 +134,7 @@ describe("StateSync", () => {
       incrementRapidDeathCount: vi.fn().mockReturnValue(1),
       resetRapidDeathCount: vi.fn(),
       setPrUrl: vi.fn(),
+      persistChatLogs: vi.fn().mockResolvedValue(undefined),
     };
     mockStatusManager = {
       getStatus: vi.fn(),

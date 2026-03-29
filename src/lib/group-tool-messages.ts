@@ -17,8 +17,9 @@ export function isToolGroup(item: DisplayItem): item is ToolUseGroupItem {
  *
  * Rules:
  * - Consecutive `tool_use` and `tool_result` messages form a group.
- * - A non-tool message (e.g. `assistant` with text, `user`, `system`, etc.)
- *   breaks the current group.
+ * - `assistant` messages always break the current group and render independently.
+ *   They must never be hidden inside a collapsed tool_use fold.
+ * - Other message types (`user`, `system`, etc.) also break the current group.
  * - Groups with only 1 tool_use (+ optional tool_result) are kept inline
  *   (not wrapped in a group) so they render as before.
  */

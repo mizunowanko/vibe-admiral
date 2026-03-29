@@ -115,9 +115,11 @@ const DISPATCH_STATUS_CONFIG: Record<
 
 export function DispatchCard({
   dispatch,
+  isFocused,
   onClick,
 }: {
   dispatch: Dispatch;
+  isFocused?: boolean;
   onClick?: () => void;
 }) {
   const config = DISPATCH_STATUS_CONFIG[dispatch.status];
@@ -133,7 +135,12 @@ export function DispatchCard({
   return (
     <button
       onClick={onClick}
-      className="w-full rounded border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-left text-xs transition-colors hover:border-amber-500/40"
+      className={cn(
+        "w-full rounded border px-2.5 py-1.5 text-left text-xs transition-colors",
+        isFocused
+          ? "border-primary bg-primary/10"
+          : "border-amber-500/20 bg-amber-500/5 hover:border-amber-500/40",
+      )}
     >
       <div className="flex items-center gap-1.5">
         <Zap className="h-3 w-3 shrink-0 text-amber-400" />

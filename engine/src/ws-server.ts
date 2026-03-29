@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-import { ProcessManager } from "./process-manager.js";
+import { ProcessManager, isRetryableError } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { FlagshipManager } from "./flagship.js";
 import { DockManager } from "./dock.js";
@@ -28,14 +28,17 @@ import { Lookout } from "./lookout.js";
 import type { LookoutAlert } from "./lookout.js";
 import { EscortManager } from "./escort-manager.js";
 import { ShipActorManager } from "./ship-actor-manager.js";
+import { DispatchManager } from "./dispatch-manager.js";
 import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification } from "./types.js";
+import { applyTemplate } from "./deep-merge.js";
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
+const ADMIRAL_SETTINGS_FILE = join(FLEETS_DIR, "admiral-settings.json");
 
 export class EngineServer {
   private httpServer: HttpServer;
@@ -49,6 +52,7 @@ export class EngineServer {
   private requestHandler: FlagshipRequestHandler;
   private escortManager: EscortManager;
   private actorManager: ShipActorManager;
+  private dispatchManager: DispatchManager;
   private lookout: Lookout;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
@@ -73,6 +77,7 @@ export class EngineServer {
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
     this.escortManager = new EscortManager(this.processManager, this.shipManager, () => this.fleetDb);
     this.actorManager = new ShipActorManager();
+    this.dispatchManager = new DispatchManager(this.processManager);
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
 
     // Wire up ShipActorManager to ShipManager, EscortManager, and StateSync
@@ -98,11 +103,51 @@ export class EngineServer {
       },
     });
 
+    // Dispatch completion handler: notify parent Commander via stdin + broadcast
+    this.dispatchManager.setOnCompleteHandler((dispatch) => {
+      const commanderId = `${dispatch.parentRole}-${dispatch.fleetId}`;
+      const statusLabel = dispatch.status === "completed" ? "completed" : "failed";
+      const summary = dispatch.result
+        ? `[Dispatch ${statusLabel}] "${dispatch.name}": ${dispatch.result.slice(0, 2000)}`
+        : `[Dispatch ${statusLabel}] "${dispatch.name}"`;
+
+      // Send result to Commander stdin if running
+      if (this.processManager.isRunning(commanderId)) {
+        this.processManager.sendMessage(commanderId, summary);
+      }
+
+      // Inject into Commander chat history
+      const manager: CommanderManager = dispatch.parentRole === "flagship"
+        ? this.flagshipManager
+        : this.dockManager;
+      const statusMessage: StreamMessage = {
+        type: "system",
+        subtype: "dispatch-log",
+        content: summary,
+        timestamp: Date.now(),
+      };
+      manager.addToHistory(dispatch.fleetId, statusMessage);
+      this.broadcast({
+        type: `${dispatch.parentRole}:stream`,
+        data: { fleetId: dispatch.fleetId, message: statusMessage },
+      });
+
+      // Broadcast dispatch:completed event
+      this.broadcast({
+        type: "dispatch:completed",
+        data: {
+          fleetId: dispatch.fleetId,
+          dispatch: this.dispatchManager.toDispatch(dispatch),
+        },
+      });
+    });
+
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
     const apiHandler = createApiHandler({
       requestHandler: this.requestHandler,
       getDatabase: () => this.fleetDb,
       getShipManager: () => this.shipManager,
+      getDispatchManager: () => this.dispatchManager,
       getEscortManager: () => this.escortManager,
       getActorManager: () => this.actorManager,
       getCommanderHistory: (role, fleetId) => {
@@ -111,6 +156,7 @@ export class EngineServer {
       },
       loadFleets: () => this.loadFleets(),
       loadRules: (paths) => this.loadRules(paths),
+      loadAdmiralSettings: () => this.loadAdmiralSettings(),
       requestRestart: () => {
         console.log("[engine] Restart requested via API");
         this.broadcast({ type: "engine:restarting", data: {} });
@@ -137,15 +183,25 @@ export class EngineServer {
           data: { fleetId, message: resultMessage },
         });
       },
+      deliverHeadsUp: (notification: HeadsUpNotification) => {
+        return this.deliverHeadsUp(notification);
+      },
     });
 
     this.httpServer = createServer(apiHandler);
     this.wss = new WebSocketServer({ noServer: true });
 
     this.httpServer.on("upgrade", (request, socket, head) => {
+      socket.on("error", (err) => {
+        console.warn("[engine] Upgrade socket error:", err);
+      });
       this.wss.handleUpgrade(request, socket, head, (ws) => {
         this.wss.emit("connection", ws, request);
       });
+    });
+
+    this.httpServer.on("error", (err) => {
+      console.error("[engine] HTTP server error:", err);
     });
 
     this.httpServer.listen(port);
@@ -192,6 +248,11 @@ export class EngineServer {
         this.clients.delete(ws);
         console.log("Client disconnected");
       });
+
+      ws.on("error", (err) => {
+        console.warn("[engine] WebSocket client error:", err);
+        this.clients.delete(ws);
+      });
     });
   }
 
@@ -213,6 +274,33 @@ export class EngineServer {
 
   private setupProcessEvents(): void {
     this.processManager.on("data", (id: string, msg: Record<string, unknown>) => {
+      // Route Dispatch stream data to frontend (independent process)
+      if (this.dispatchManager.isDispatchProcess(id)) {
+        const dispatch = this.dispatchManager.getDispatch(id);
+        if (!dispatch) return;
+
+        const parsed = parseStreamMessage(msg);
+        if (parsed) {
+          // Capture result text for completion notification
+          if (parsed.type === "result" && parsed.content) {
+            this.dispatchManager.setResult(id, parsed.content);
+          }
+          // Stream all non-result messages to frontend
+          if (parsed.type !== "result") {
+            this.broadcast({
+              type: "dispatch:stream",
+              data: {
+                id,
+                fleetId: dispatch.fleetId,
+                parentRole: dispatch.parentRole,
+                message: parsed,
+              },
+            });
+          }
+        }
+        return;
+      }
+
       // Route Escort stream data to frontend (separate from Ship stream)
       if (this.escortManager.isEscortProcess(id)) {
         const parentShipId = this.escortManager.findShipIdByEscortId(id);
@@ -307,46 +395,6 @@ export class EngineServer {
               type: questionType,
               data: { fleetId, message: questionMessage },
             });
-          } else if (
-            parsed.type === "tool_use" &&
-            parsed.tool === "Task"
-          ) {
-            // Dispatch sub-agent launched — register and notify frontend
-            const toolInput = parsed.toolInput as Record<string, unknown> | undefined;
-            const toolUseId = parsed.toolUseId as string | undefined;
-            const dispatchName = (toolInput?.description as string) ?? "dispatch";
-            if (toolUseId) {
-              const dispatch = manager.registerDispatch(fleetId, toolUseId, dispatchName);
-              if (dispatch) {
-                this.broadcast({
-                  type: `${role}:dispatch-started`,
-                  data: { fleetId, dispatch },
-                });
-              }
-            }
-            manager.addToHistory(fleetId, parsed);
-            this.broadcast({
-              type: streamType,
-              data: { fleetId, message: parsed },
-            });
-          } else if (
-            parsed.type === "system" &&
-            (parsed.subtype === "dispatch-log" || parsed.subtype === "task-notification")
-          ) {
-            // Dispatch completed — update status and notify frontend
-            const result = parsed.content;
-            const dispatch = manager.completeLatestDispatch(fleetId, "completed", result);
-            if (dispatch) {
-              this.broadcast({
-                type: `${role}:dispatch-completed`,
-                data: { fleetId, dispatch },
-              });
-            }
-            manager.addToHistory(fleetId, parsed);
-            this.broadcast({
-              type: streamType,
-              data: { fleetId, message: parsed },
-            });
           } else if (parsed.type !== "result") {
             manager.addToHistory(fleetId, parsed);
             this.broadcast({
@@ -393,6 +441,13 @@ export class EngineServer {
     });
 
     this.processManager.on("exit", (id: string, code: number | null) => {
+      // Handle Dispatch process exit
+      if (this.dispatchManager.isDispatchProcess(id)) {
+        console.log(`[ws-server] Dispatch ${id.slice(0, 16)}... exited (code=${code})`);
+        this.dispatchManager.onProcessExit(id, code);
+        return;
+      }
+
       // Handle Escort-Ship process exit
       if (this.escortManager.isEscortProcess(id)) {
         const parentShipId = this.escortManager.findShipIdByEscortId(id);
@@ -418,6 +473,7 @@ export class EngineServer {
               content: `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}): Escort review completed (exit ${code})`,
               meta: {
                 category: "ship-status" as const,
+                shipId: parentShipId,
                 issueNumber: parentShip.issueNumber,
                 issueTitle: parentShip.issueTitle,
               },
@@ -476,20 +532,47 @@ export class EngineServer {
     this.processManager.on("rate-limit", (id: string) => {
       if (this.isCommanderProcess(id)) {
         console.warn(`[ws-server] Commander ${id} hit rate limit`);
-        return;
+      } else {
+        console.warn(
+          `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — backoff will apply on next retry`,
+        );
+        this.shipManager.setLastRateLimitAt(id, Date.now());
       }
-      console.warn(
-        `[ws-server] Ship ${id.slice(0, 8)}... hit rate limit — will stop and await manual retry`,
-      );
+      // Notify Ship's own chat with a non-error status (#712)
+      const ship = this.shipManager.getShip(id);
+      if (ship) {
+        this.broadcast({
+          type: "ship:stream",
+          data: {
+            id,
+            message: {
+              type: "system" as const,
+              subtype: "rate-limit-status" as const,
+              content: "Rate limit detected — retrying automatically...",
+              timestamp: Date.now(),
+            },
+          },
+        });
+      }
+      // Notify frontend for global status indicator banner (#699)
+      this.broadcast({ type: "rate-limit:detected", data: { processId: id } });
     });
 
     this.processManager.on("error", (id: string, error: Error) => {
       console.error(`Process ${id} error:`, error.message);
+
+      // Retryable errors (rate limit, 429, 500, etc.) are handled by
+      // process-manager retry logic. Don't broadcast them to the frontend
+      // to avoid flooding chat panels with transient error messages (#699).
+      if (isRetryableError(error.message)) return;
+
       const errCommander = this.resolveCommander(id);
       if (errCommander) {
         const { role, manager, fleetId } = errCommander;
         const hadData = this.commanderFirstData.has(id);
-        this.commanderFirstData.delete(id);
+        // Don't delete commanderFirstData here — only delete on process exit.
+        // Deleting on error caused subsequent errors to be incorrectly treated
+        // as "failed to start" and broadcast as ${role}:stream (#699).
         const roleLabel = role === "flagship" ? "Flagship" : "Dock";
         // Only show "Failed to start" if commander never sent data (spawn failure)
         if (!hadData) {
@@ -535,6 +618,7 @@ export class EngineServer {
           content: `Ship #${ship.issueNumber} (${ship.issueTitle}): ${phase}${detail ? ` — ${detail}` : ""}${resumeInfo}`,
           meta: {
             category: "ship-status" as const,
+            shipId: id,
             issueNumber: ship.issueNumber,
             issueTitle: ship.issueTitle,
           },
@@ -616,6 +700,7 @@ export class EngineServer {
         content: `[Escort Death] ${message}`,
         meta: {
           category: "ship-status",
+          shipId,
           issueNumber: ship.issueNumber,
           issueTitle: ship.issueTitle,
         },
@@ -632,6 +717,68 @@ export class EngineServer {
         this.processManager.sendMessage(flagshipId, `[Escort Death] ${message}`);
       }
     });
+  }
+
+  /** Deliver a heads-up notification from one Commander to another. */
+  private deliverHeadsUp(notification: HeadsUpNotification): boolean {
+    const targetManager: CommanderManager = notification.to === "flagship"
+      ? this.flagshipManager
+      : this.dockManager;
+
+    if (!targetManager.hasSession(notification.fleetId)) {
+      return false;
+    }
+
+    const fromLabel = notification.from === "flagship" ? "Flagship" : "Dock";
+    const toLabel = notification.to === "flagship" ? "Flagship" : "Dock";
+
+    // Build human-readable message for Commander stdin
+    const lines = [
+      `[heads-up from ${fromLabel}]`,
+      `Summary: ${notification.summary}`,
+      `Severity: ${notification.severity}`,
+    ];
+    if (notification.shipId || notification.issueNumber !== undefined) {
+      const parts: string[] = [];
+      if (notification.shipId) parts.push(`Ship: ${notification.shipId}`);
+      if (notification.issueNumber !== undefined) parts.push(`Issue #${notification.issueNumber}`);
+      lines.push(parts.join(" / "));
+    }
+    lines.push(`Investigation needed: ${notification.needsInvestigation ? "yes" : "no"}`);
+    lines.push("");
+    lines.push("Please create an Issue if appropriate, or take other action.");
+    const textContent = lines.join("\n");
+
+    // Create system message for history + frontend
+    const headsUpMessage: StreamMessage = {
+      type: "system",
+      subtype: "heads-up",
+      content: textContent,
+      meta: {
+        category: "heads-up",
+        ...(notification.shipId ? { shipId: notification.shipId } : {}),
+        ...(notification.issueNumber !== undefined ? { issueNumber: notification.issueNumber } : {}),
+      },
+      timestamp: Date.now(),
+    };
+
+    // Add to target Commander's history
+    targetManager.addToHistory(notification.fleetId, headsUpMessage);
+
+    // Broadcast to frontend
+    this.broadcast({
+      type: `${notification.to}:stream`,
+      data: { fleetId: notification.fleetId, message: headsUpMessage },
+    });
+
+    // Send to target Commander's stdin if running
+    const targetId = `${notification.to}-${notification.fleetId}`;
+    if (this.processManager.isRunning(targetId)) {
+      this.processManager.sendMessage(targetId, textContent);
+    }
+
+    console.log(`[engine] Heads-up delivered: ${fromLabel} → ${toLabel} (fleet ${notification.fleetId.slice(0, 8)}...): ${notification.summary.slice(0, 80)}`);
+    return true;
   }
 
   private async handleMessage(
@@ -675,6 +822,21 @@ export class EngineServer {
           await this.deleteFleet(data.id as string);
           const fleets = await this.loadFleets();
           this.sendTo(ws, { type: "fleet:data", data: fleets });
+          break;
+        }
+
+        // Admiral settings operations
+        case "admiral-settings:get": {
+          const admiralSettings = await this.loadAdmiralSettings();
+          this.sendTo(ws, { type: "admiral-settings:data", data: admiralSettings });
+          break;
+        }
+        case "admiral-settings:update": {
+          const current = await this.loadAdmiralSettings();
+          if (data.global !== undefined) current.global = data.global as SettingsLayer;
+          if (data.template !== undefined) current.template = data.template as SettingsLayer;
+          await this.saveAdmiralSettings(current);
+          this.broadcast({ type: "admiral-settings:data", data: current });
           break;
         }
 
@@ -820,6 +982,21 @@ export class EngineServer {
     await writeFile(FLEETS_FILE, JSON.stringify(fleets, null, 2));
   }
 
+  // Admiral settings persistence
+  async loadAdmiralSettings(): Promise<AdmiralSettings> {
+    try {
+      const content = await readFile(ADMIRAL_SETTINGS_FILE, "utf-8");
+      return JSON.parse(content) as AdmiralSettings;
+    } catch {
+      return { global: {}, template: {} };
+    }
+  }
+
+  private async saveAdmiralSettings(settings: AdmiralSettings): Promise<void> {
+    await mkdir(FLEETS_DIR, { recursive: true });
+    await writeFile(ADMIRAL_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  }
+
   private async resolveRemote(localPath: string): Promise<string | undefined> {
     try {
       const { stdout } = await execFileAsync("git", [
@@ -866,10 +1043,14 @@ export class EngineServer {
   ): Promise<Fleet> {
     const enriched = await this.enrichRepos(repos);
     const fleets = await this.loadFleets();
+    // Apply template settings from Admiral settings (snapshot at creation time)
+    const admiralSettings = await this.loadAdmiralSettings();
+    const templateDefaults = applyTemplate(admiralSettings.template);
     const fleet: Fleet = {
       id: randomUUID(),
       name,
       repos: enriched,
+      ...templateDefaults,
       createdAt: new Date().toISOString(),
     };
     fleets.push(fleet);
@@ -909,7 +1090,11 @@ export class EngineServer {
   // Messaging helpers
   private sendTo(ws: WebSocket, msg: Record<string, unknown>): void {
     if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(msg));
+      try {
+        ws.send(JSON.stringify(msg));
+      } catch (err) {
+        console.warn("[engine] sendTo failed:", err);
+      }
     }
   }
 
@@ -917,7 +1102,11 @@ export class EngineServer {
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
       if (client.readyState === client.OPEN) {
-        client.send(data);
+        try {
+          client.send(data);
+        } catch (err) {
+          console.warn("[engine] broadcast send failed:", err);
+        }
       }
     }
   }
@@ -1174,6 +1363,12 @@ export class EngineServer {
         type: "system" as const,
         subtype: "ship-status" as const,
         content: `Ship #${ship.issueNumber} (${ship.issueTitle}): compacting context...`,
+        meta: {
+          category: "ship-status" as const,
+          shipId: id,
+          issueNumber: ship.issueNumber,
+          issueTitle: ship.issueTitle,
+        },
         timestamp: Date.now(),
       };
       this.flagshipManager.addToHistory(ship.fleetId, compactMsg);
@@ -1335,6 +1530,7 @@ export class EngineServer {
       clearInterval(this.processLivenessTimer);
       this.processLivenessTimer = null;
     }
+    this.dispatchManager.killAll();
     this.escortManager.killAll();
     this.actorManager.stopAll();
     this.shipManager.stopAll();

@@ -15,7 +15,8 @@ function createMockDeps() {
     requestHandler: { handle } as unknown as FlagshipRequestHandler,
     getDatabase: vi.fn().mockReturnValue(null),
     getShipManager: vi.fn().mockReturnValue({ syncPhaseFromDb: vi.fn() }),
-    getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn().mockReturnValue("escort-1"), isEscortRunning: vi.fn().mockReturnValue(false) }),
+    getDispatchManager: vi.fn().mockReturnValue({ launch: vi.fn(), toDispatch: vi.fn(), getDispatchesByFleet: vi.fn().mockReturnValue([]) }),
+    getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn().mockReturnValue("escort-1"), isEscortRunning: vi.fn().mockReturnValue(false), setGateIntent: vi.fn(), clearGateIntent: vi.fn() }),
     getActorManager: vi.fn().mockReturnValue({ send: vi.fn() }),
     getCommanderHistory: vi.fn().mockResolvedValue([]),
     loadFleets: vi.fn().mockResolvedValue([{
@@ -24,7 +25,9 @@ function createMockDeps() {
       maxConcurrentSorties: 6,
     }]),
     loadRules: vi.fn().mockResolvedValue(""),
+    loadAdmiralSettings: vi.fn().mockResolvedValue({ global: {}, template: {} }),
     broadcastRequestResult: vi.fn(),
+    deliverHeadsUp: vi.fn().mockReturnValue(true),
     requestRestart: vi.fn(),
     _handle: handle,
   };
@@ -48,7 +51,9 @@ function createMockDepsWithDb() {
 
   // Default: actorManager.requestTransition succeeds (XState approves)
   const requestTransition = vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
-  deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition });
+  const assertPhaseConsistency = vi.fn().mockReturnValue(true);
+  const reconcilePhase = vi.fn().mockReturnValue(false);
+  deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition, assertPhaseConsistency, reconcilePhase });
 
   return {
     ...deps,
