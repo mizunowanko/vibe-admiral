@@ -270,7 +270,8 @@ export type ClientMessage =
   | { type: "ship:logs"; data: { id: string; limit?: number } }
   | { type: "issue:list"; data: { repo: string } }
   | { type: "issue:get"; data: { repo: string; number: number } }
-  | { type: "fs:list-dir"; data: { path?: string } };
+  | { type: "fs:list-dir"; data: { path?: string } }
+  | { type: "pong" };
 
 // === WebSocket Messages: Engine → Frontend ===
 export type ServerMessage =
@@ -375,4 +376,5 @@ export type ServerMessage =
   | { type: "engine:restarting"; data: Record<string, never> }
   | { type: "engine:restarted"; data: Record<string, never> }
   | { type: "rate-limit:detected"; data: { processId: string } }
+  | { type: "ping" }
   | { type: "error"; data: { source: string; message: string } };

@@ -9,12 +9,21 @@ function getEngineWsUrl(): string {
 
 type ConnectHandler = () => void;
 
+/** Backoff config for reconnection */
+const BACKOFF_BASE_MS = 1000;
+const BACKOFF_MAX_MS = 30_000;
+
+/** If no ping is received within this period, consider connection dead */
+const PING_TIMEOUT_MS = 45_000; // 1.5x the 30s server ping interval
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private handlers = new Set<MessageHandler>();
   private connectHandlers = new Set<ConnectHandler>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private _connected = false;
+  private reconnectAttempt = 0;
 
   get connected(): boolean {
     return this._connected;
@@ -28,11 +37,13 @@ export class WSClient {
 
       this.ws.onopen = () => {
         this._connected = true;
+        this.reconnectAttempt = 0;
         console.log("Connected to engine");
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
+        this.resetPingTimeout();
         for (const handler of this.connectHandlers) {
           handler();
         }
@@ -41,6 +52,12 @@ export class WSClient {
       this.ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data as string) as ServerMessage;
+          if (msg.type === "ping") {
+            // Respond with application-level pong and reset ping timeout
+            this.send({ type: "pong" });
+            this.resetPingTimeout();
+            return;
+          }
           for (const handler of this.handlers) {
             handler(msg);
           }
@@ -51,6 +68,7 @@ export class WSClient {
 
       this.ws.onclose = () => {
         this._connected = false;
+        this.clearPingTimeout();
         console.log("Disconnected from engine");
         this.scheduleReconnect();
       };
@@ -68,9 +86,11 @@ export class WSClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.clearPingTimeout();
     this.ws?.close();
     this.ws = null;
     this._connected = false;
+    this.reconnectAttempt = 0;
   }
 
   send(msg: ClientMessage): void {
@@ -93,10 +113,31 @@ export class WSClient {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
+    const delay = Math.min(
+      BACKOFF_BASE_MS * Math.pow(2, this.reconnectAttempt),
+      BACKOFF_MAX_MS,
+    );
+    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt + 1})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      this.reconnectAttempt++;
       this.connect();
-    }, 3000);
+    }, delay);
+  }
+
+  private resetPingTimeout(): void {
+    this.clearPingTimeout();
+    this.pingTimeoutTimer = setTimeout(() => {
+      console.log("Ping timeout — closing connection");
+      this.ws?.close();
+    }, PING_TIMEOUT_MS);
+  }
+
+  private clearPingTimeout(): void {
+    if (this.pingTimeoutTimer) {
+      clearTimeout(this.pingTimeoutTimer);
+      this.pingTimeoutTimer = null;
+    }
   }
 }
 
