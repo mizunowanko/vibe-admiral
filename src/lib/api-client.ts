@@ -9,6 +9,22 @@ interface ApiResponse<T = unknown> {
   ships?: T;
 }
 
+export interface ResumeAllResult {
+  type: "ship" | "flagship" | "dock";
+  id: string;
+  fleetId: string;
+  label: string;
+  status: "resumed" | "skipped" | "error";
+  reason?: string;
+}
+
+interface ResumeAllResponse {
+  ok: boolean;
+  error?: string;
+  results: ResumeAllResult[];
+  summary: { resumed: number; skipped: number; errors: number };
+}
+
 async function request<T>(
   path: string,
   options?: RequestInit,
@@ -55,4 +71,14 @@ export async function resumeShip(
   });
   if (!data.ok) throw new Error(data.error ?? "Resume failed");
   return data.result ?? "OK";
+}
+
+export async function resumeAll(): Promise<ResumeAllResponse> {
+  const res = await fetch(`${BASE_URL}/resume-all`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  const data = (await res.json()) as ResumeAllResponse;
+  if (!data.ok) throw new Error(data.error ?? "Resume all failed");
+  return data;
 }
