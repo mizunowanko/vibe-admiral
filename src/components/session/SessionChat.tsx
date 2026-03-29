@@ -53,8 +53,9 @@ function filterSessionMessages(msgs: StreamMessage[], context: "ship" | "command
     if (isSystem && msg.subtype === "lookout-alert" && isShip) return false;
     // Commander status: suppress in Ship
     if (isSystem && msg.subtype === "commander-status" && isShip) return false;
-    // Escort log: suppress in non-Ship
-    if (isSystem && msg.subtype === "escort-log" && !isShip) return false;
+    // Escort log: suppress in non-Ship.
+    // Check meta.category (not subtype) — Escort messages are type "assistant", not "system" (#729).
+    if (msg.meta?.category === "escort-log" && !isShip) return false;
     // System messages with unrecognized subtypes render as null in ChatMessage.
     // Messages with meta.category (e.g. escort-log, dispatch-log) are handled
     // separately and should pass through.

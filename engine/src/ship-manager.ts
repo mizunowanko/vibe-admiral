@@ -552,6 +552,8 @@ export class ShipManager {
       resumeMessage,
       existingEscort.worktreePath,
       escortEnv,
+      undefined,         // appendSystemPrompt
+      "escort-log.jsonl", // Escort logs separated from ship-log.jsonl (#729)
     );
 
     console.log(
@@ -1275,11 +1277,9 @@ export class ShipManager {
       parseJsonl(escortLogPath),
     ]);
 
-    // Mark escort messages with escort-log metadata for visual distinction
+    // Mark all escort messages with escort-log metadata for visual distinction (#729)
     for (const msg of escortMsgs) {
-      if (msg.type === "assistant") {
-        msg.meta = { ...msg.meta, category: "escort-log" };
-      }
+      msg.meta = { ...msg.meta, category: "escort-log" };
     }
 
     // Merge and sort by timestamp, then take the last N messages
@@ -1312,7 +1312,7 @@ export class ShipManager {
           try {
             const parsed = parseStreamMessage(JSON.parse(line));
             if (parsed) {
-              if (row.logType === "escort" && parsed.type === "assistant") {
+              if (row.logType === "escort") {
                 parsed.meta = { ...parsed.meta, category: "escort-log" };
               }
               allMsgs.push(parsed);

@@ -315,13 +315,13 @@ export class EngineServer {
           }
 
           if (parsed && parsed.type !== "result") {
-            // Mark assistant messages with escort-log metadata for visual distinction
-            if (parsed.type === "assistant") {
-              parsed.meta = {
-                ...parsed.meta,
-                category: "escort-log",
-              };
-            }
+            // Mark all Escort messages with escort-log metadata for visual distinction.
+            // Previously only assistant messages were marked, causing tool_use/tool_result
+            // to appear as Ship messages in the chat panel (#729).
+            parsed.meta = {
+              ...parsed.meta,
+              category: "escort-log",
+            };
             this.broadcast({
               type: "escort:stream",
               data: {
