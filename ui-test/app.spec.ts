@@ -100,7 +100,7 @@ test.describe("Fleet management", () => {
 
     // Settings button should appear in sidebar
     await expect(
-      page.getByRole("button", { name: "Settings", exact: true }),
+      page.getByRole("button", { name: "Fleet Settings", exact: true }),
     ).toBeVisible();
   });
 });
