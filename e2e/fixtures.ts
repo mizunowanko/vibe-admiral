@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
+import { EngineAPI } from "./helpers/engine-api";
 
 export { expect };
 
@@ -6,6 +7,7 @@ export const test = base.extend<{
   enginePort: number;
   vitePort: number;
   admiralHome: string;
+  engineApi: EngineAPI;
 }>({
   enginePort: async ({}, use) => {
     const raw = process.env.E2E_ENGINE_PORT;
@@ -24,6 +26,9 @@ export const test = base.extend<{
   },
   baseURL: async ({ vitePort }, use) => {
     await use(`http://localhost:${vitePort}`);
+  },
+  engineApi: async ({ enginePort }, use) => {
+    await use(new EngineAPI(enginePort));
   },
 });
 

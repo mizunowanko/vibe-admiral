@@ -30,15 +30,18 @@ export default async function globalSetup(config: FullConfig) {
     vitePort,
   };
 
-  // Start the real Engine
+  // Start the real Engine with stub CLI for deterministic E2E tests.
   // Use __dirname to resolve the project root reliably, since
   // config.rootDir may not match when running from a worktree.
   const projectRoot = resolve(__dirname, "..");
+  const stubCliPath = resolve(projectRoot, "test-utils/stub-cli-wrapper.sh");
   const engineProcess = spawn("npx", ["tsx", "engine/src/index.ts"], {
     env: {
       ...process.env,
       ENGINE_PORT: String(enginePort),
       ADMIRAL_HOME: admiralHome,
+      CLAUDE_CLI_PATH: stubCliPath,
+      STUB_CLI_TSX_PATH: resolve(projectRoot, "test-utils/stub-cli.ts"),
     },
     stdio: ["ignore", "pipe", "pipe"],
     cwd: projectRoot,
