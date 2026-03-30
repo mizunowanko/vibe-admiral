@@ -1,5 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { wsClient } from "@/lib/ws-client";
+import { createMessageRegistry } from "@/lib/message-registry";
+import type { EnsureExhaustive } from "@/lib/message-registry";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -11,7 +13,47 @@ import {
   createDispatchSession,
   commanderSessionId,
 } from "@/stores/sessionStore";
-import type { ServerMessage, Fleet, Ship, StreamMessage, GatePhase, GateType, CommanderRole, AdmiralSettings, CaffeinateStatus } from "@/types";
+import type { Fleet, Ship, AdmiralSettings, CaffeinateStatus } from "@/types";
+
+// Compile-time exhaustive check: ensures every ServerMessageType has a handler registered below.
+// If a new message type is added to ServerMessage and not handled here, this line will produce
+// a type error listing the missing types.
+type _HandledTypes =
+  | "fleet:data"
+  | "ship:data"
+  | "fleet:created"
+  | "ship:created"
+  | "ship:updated"
+  | "ship:compacting"
+  | "ship:stream"
+  | "escort:stream"
+  | "escort:completed"
+  | "ship:history"
+  | "ship:done"
+  | "ship:gate-pending"
+  | "ship:gate-resolved"
+  | "dispatch:stream"
+  | "dispatch:completed"
+  | "flagship:stream"
+  | "flagship:question"
+  | "flagship:question-timeout"
+  | "dock:stream"
+  | "dock:question"
+  | "dock:question-timeout"
+  | "admiral-settings:data"
+  | "issue:data"
+  | "fs:dir-listing"
+  | "caffeinate:status"
+  | "rate-limit:detected"
+  | "engine:restarting"
+  | "engine:restarted"
+  | "engine:previous-crash"
+  | "error"
+  | "ping";
+
+// This assertion will fail to compile if any ServerMessageType is missing from _HandledTypes.
+const _exhaustiveCheck: EnsureExhaustive<_HandledTypes> = true;
+void _exhaustiveCheck;
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -35,9 +77,213 @@ export function useEngine() {
   const registerSession = useSessionStore((s) => s.registerSession);
   const setFocus = useSessionStore((s) => s.setFocus);
 
+  // Build the handler registry once per mount (handlers capture store actions via closure).
+  const registry = useMemo(() => {
+    const r = createMessageRegistry();
+    let rateLimitTimer = 0;
+
+    r.on("fleet:data", (msg) => {
+      const fleets = msg.data as Fleet[];
+      setFleets(fleets);
+      const selectedId = useFleetStore.getState().selectedFleetId;
+      if (selectedId) {
+        registerSession(createCommanderSession("dock", selectedId));
+        registerSession(createCommanderSession("flagship", selectedId));
+        const currentFocus = useSessionStore.getState().focusedSessionId;
+        if (!currentFocus) {
+          setFocus(commanderSessionId("flagship", selectedId));
+        }
+      }
+    });
+
+    r.on("ship:data", (msg) => {
+      const shipList = msg.data as Ship[];
+      syncShips(shipList);
+      const currentLogs = useShipStore.getState().shipLogs;
+      for (const ship of shipList) {
+        registerSession(
+          createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+        );
+        if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
+          wsClient.send({ type: "ship:logs", data: { id: ship.id } });
+        }
+      }
+    });
+
+    r.on("fleet:created", (msg) => {
+      const created = msg.data as { id: string; fleets: Fleet[] };
+      setFleets(created.fleets);
+      selectFleet(created.id);
+      setMainView("command");
+      registerSession(createCommanderSession("dock", created.id));
+      registerSession(createCommanderSession("flagship", created.id));
+      setFocus(commanderSessionId("flagship", created.id));
+    });
+
+    r.on("ship:created", (msg) => {
+      void updateShipFromApi(msg.data.shipId).then(() => {
+        const ship = useShipStore.getState().ships.get(msg.data.shipId);
+        if (ship) {
+          registerSession(
+            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+          );
+        }
+      });
+    });
+
+    r.on("ship:updated", (msg) => {
+      void updateShipFromApi(msg.data.shipId).then(() => {
+        const ship = useShipStore.getState().ships.get(msg.data.shipId);
+        if (ship) {
+          registerSession(
+            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+          );
+        }
+      });
+    });
+
+    r.on("ship:compacting", (msg) => {
+      setShipCompacting(msg.data.id, msg.data.isCompacting);
+    });
+
+    r.on("ship:stream", (msg) => {
+      addShipLog(msg.data.id, msg.data.message);
+    });
+
+    r.on("escort:stream", (msg) => {
+      addShipLog(msg.data.id, msg.data.message);
+    });
+
+    r.on("escort:completed", () => {
+      // Handled by useDispatchListener / session updates
+    });
+
+    r.on("ship:history", (msg) => {
+      if (msg.data.messages.length > 0) {
+        setShipLogs(msg.data.id, msg.data.messages);
+      }
+    });
+
+    r.on("ship:done", (msg) => {
+      void updateShipFromApi(msg.data.shipId);
+    });
+
+    r.on("ship:gate-pending", (msg) => {
+      setGateCheck(msg.data.id, {
+        gatePhase: msg.data.gatePhase,
+        gateType: msg.data.gateType,
+        status: "pending",
+      });
+    });
+
+    r.on("ship:gate-resolved", (msg) => {
+      if (msg.data.approved) {
+        clearGateCheck(msg.data.id);
+      } else {
+        setGateCheck(msg.data.id, {
+          gatePhase: msg.data.gatePhase,
+          gateType: msg.data.gateType,
+          status: "rejected",
+          feedback: msg.data.feedback,
+        });
+      }
+    });
+
+    r.on("dispatch:stream", (msg) => {
+      const existingSession = useSessionStore.getState().sessions.get(`dispatch-${msg.data.id}`);
+      if (!existingSession) {
+        const dispatch = useSessionStore.getState().dispatches.get(msg.data.id);
+        const dispatchName = dispatch?.name ?? "Dispatch";
+        registerSession(
+          createDispatchSession(
+            msg.data.id,
+            msg.data.fleetId,
+            dispatchName,
+            msg.data.parentRole,
+          ),
+        );
+      }
+      // Log routing handled by useDispatchListener
+    });
+
+    r.on("dispatch:completed", () => {
+      // Handled by useDispatchListener
+    });
+
+    // Commander messages are handled by useCommander hook
+    r.on("flagship:stream", () => {});
+    r.on("flagship:question", () => {});
+    r.on("flagship:question-timeout", () => {});
+    r.on("dock:stream", () => {});
+    r.on("dock:question", () => {});
+    r.on("dock:question-timeout", () => {});
+
+    r.on("admiral-settings:data", (msg) => {
+      setAdmiralSettings(msg.data as AdmiralSettings);
+    });
+
+    r.on("issue:data", () => {
+      // Issue data handled by specific components
+    });
+
+    r.on("fs:dir-listing", () => {
+      // Directory listing handled by specific components
+    });
+
+    r.on("caffeinate:status", (msg) => {
+      setCaffeinateActive((msg.data as CaffeinateStatus).active);
+    });
+
+    r.on("rate-limit:detected", () => {
+      setRateLimitActive(true);
+      clearTimeout(rateLimitTimer);
+      rateLimitTimer = window.setTimeout(() => setRateLimitActive(false), 30_000);
+    });
+
+    r.on("engine:restarting", () => {
+      // Could show a UI notification
+    });
+
+    r.on("engine:restarted", () => {
+      // Could trigger data refresh
+    });
+
+    r.on("engine:previous-crash", (msg) => {
+      console.warn("[engine] Previous crash detected:", msg.data);
+      setPreviousCrash(msg.data);
+    });
+
+    r.on("error", (msg) => {
+      console.error(`Engine error [${msg.data.source}]:`, msg.data.message);
+    });
+
+    r.on("ping", () => {
+      // Ping is handled by ws-client directly; should not reach here
+    });
+
+    return r;
+  }, [
+    setFleets,
+    selectFleet,
+    setMainView,
+    setShipCompacting,
+    addShipLog,
+    setShipLogs,
+    setGateCheck,
+    clearGateCheck,
+    syncShips,
+    updateShipFromApi,
+    setEngineConnected,
+    setRateLimitActive,
+    setCaffeinateActive,
+    setPreviousCrash,
+    setAdmiralSettings,
+    registerSession,
+    setFocus,
+  ]);
+
   useEffect(() => {
     wsClient.connect();
-    let rateLimitTimer = 0;
 
     const checkConnection = setInterval(() => {
       const connected = wsClient.connected;
@@ -46,237 +292,8 @@ export function useEngine() {
       }
     }, 1000);
 
-    const unsub = wsClient.onMessage((msg: ServerMessage) => {
-      switch (msg.type) {
-        case "fleet:data": {
-          const fleets = msg.data as unknown as Fleet[];
-          setFleets(fleets);
-          // Register commander sessions for the selected fleet
-          const selectedId = useFleetStore.getState().selectedFleetId;
-          if (selectedId) {
-            registerSession(createCommanderSession("dock", selectedId));
-            registerSession(createCommanderSession("flagship", selectedId));
-            // Auto-focus flagship if nothing is focused
-            const currentFocus = useSessionStore.getState().focusedSessionId;
-            if (!currentFocus) {
-              setFocus(commanderSessionId("flagship", selectedId));
-            }
-          }
-          break;
-        }
-
-        case "ship:data": {
-          const shipList = msg.data as unknown as Ship[];
-          syncShips(shipList);
-          // Register ship sessions and request logs
-          const currentLogs = useShipStore.getState().shipLogs;
-          for (const ship of shipList) {
-            registerSession(
-              createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-            );
-            if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
-              wsClient.send({ type: "ship:logs", data: { id: ship.id } });
-            }
-          }
-          break;
-        }
-
-        case "fleet:created": {
-          const created = msg.data as unknown as { id: string; fleets: Fleet[] };
-          setFleets(created.fleets);
-          selectFleet(created.id);
-          setMainView("command");
-          // Register commander sessions for the new fleet
-          registerSession(createCommanderSession("dock", created.id));
-          registerSession(createCommanderSession("flagship", created.id));
-          setFocus(commanderSessionId("flagship", created.id));
-          break;
-        }
-
-        case "ship:created": {
-          const { shipId } = msg.data as { shipId: string };
-          // Fetch full Ship data via REST API, then register session
-          void updateShipFromApi(shipId).then(() => {
-            const ship = useShipStore.getState().ships.get(shipId);
-            if (ship) {
-              registerSession(
-                createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-              );
-            }
-          });
-          break;
-        }
-
-        case "ship:updated": {
-          const { shipId } = msg.data as { shipId: string };
-          // Fetch latest Ship state via REST API
-          void updateShipFromApi(shipId).then(() => {
-            const ship = useShipStore.getState().ships.get(shipId);
-            if (ship) {
-              registerSession(
-                createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-              );
-            }
-          });
-          break;
-        }
-
-        case "ship:compacting": {
-          const compactData = msg.data as {
-            id: string;
-            isCompacting: boolean;
-          };
-          setShipCompacting(compactData.id, compactData.isCompacting);
-          break;
-        }
-
-        case "ship:stream": {
-          const streamData = msg.data as {
-            id: string;
-            message: StreamMessage;
-          };
-          addShipLog(streamData.id, streamData.message);
-          break;
-        }
-
-        case "escort:stream": {
-          const escortData = msg.data as {
-            id: string;
-            escortId: string;
-            message: StreamMessage;
-          };
-          addShipLog(escortData.id, escortData.message);
-          break;
-        }
-
-        case "ship:history": {
-          const historyData = msg.data as {
-            id: string;
-            messages: StreamMessage[];
-          };
-          if (historyData.messages.length > 0) {
-            setShipLogs(historyData.id, historyData.messages);
-          }
-          break;
-        }
-
-        case "ship:done": {
-          const { shipId } = msg.data as { shipId: string };
-          // Fetch final Ship state via REST API
-          void updateShipFromApi(shipId);
-          break;
-        }
-
-        case "ship:gate-pending": {
-          const gateData = msg.data as {
-            id: string;
-            gatePhase: GatePhase;
-            gateType: GateType;
-          };
-          setGateCheck(gateData.id, {
-            gatePhase: gateData.gatePhase,
-            gateType: gateData.gateType,
-            status: "pending",
-          });
-          break;
-        }
-
-        case "ship:gate-resolved": {
-          const resolvedData = msg.data as {
-            id: string;
-            gatePhase: GatePhase;
-            gateType: GateType;
-            approved: boolean;
-            feedback?: string;
-          };
-          if (resolvedData.approved) {
-            clearGateCheck(resolvedData.id);
-          } else {
-            setGateCheck(resolvedData.id, {
-              gatePhase: resolvedData.gatePhase,
-              gateType: resolvedData.gateType,
-              status: "rejected",
-              feedback: resolvedData.feedback,
-            });
-          }
-          break;
-        }
-
-        case "dispatch:stream": {
-          // Register dispatch session on first stream message
-          const dispatchStreamData = msg.data as {
-            id: string;
-            fleetId: string;
-            parentRole: CommanderRole;
-          };
-          const existingSession = useSessionStore.getState().sessions.get(`dispatch-${dispatchStreamData.id}`);
-          if (!existingSession) {
-            const dispatch = useSessionStore.getState().dispatches.get(dispatchStreamData.id);
-            const dispatchName = dispatch?.name ?? "Dispatch";
-            registerSession(
-              createDispatchSession(
-                dispatchStreamData.id,
-                dispatchStreamData.fleetId,
-                dispatchName,
-                dispatchStreamData.parentRole,
-              ),
-            );
-          }
-          // Log routing handled by useDispatchListener
-          break;
-        }
-
-        case "dispatch:completed":
-          // Handled by useDispatchListener
-          break;
-
-        case "flagship:stream":
-        case "dock:stream":
-          // Commander messages are handled by useCommander hook
-          break;
-
-        case "admiral-settings:data": {
-          const admiralSettings = msg.data as unknown as AdmiralSettings;
-          setAdmiralSettings(admiralSettings);
-          break;
-        }
-
-        case "issue:data":
-          // Issue data handled by specific components
-          break;
-
-        case "caffeinate:status": {
-          const caffeinate = msg.data as unknown as CaffeinateStatus;
-          setCaffeinateActive(caffeinate.active);
-          break;
-        }
-
-        case "rate-limit:detected": {
-          // Show rate limit banner, auto-clear after 30s (#699)
-          setRateLimitActive(true);
-          clearTimeout(rateLimitTimer);
-          rateLimitTimer = window.setTimeout(() => setRateLimitActive(false), 30_000);
-          break;
-        }
-
-        case "engine:previous-crash": {
-          const crashData = msg.data as {
-            timestamp: string;
-            context: string;
-            message: string;
-            stack?: string;
-          };
-          console.warn("[engine] Previous crash detected:", crashData);
-          setPreviousCrash(crashData);
-          break;
-        }
-
-        case "error": {
-          const errorData = msg.data as { source: string; message: string };
-          console.error(`Engine error [${errorData.source}]:`, errorData.message);
-          break;
-        }
-      }
+    const unsub = wsClient.onMessage((msg) => {
+      registry.dispatch(msg);
     });
 
     // Fetch data on every connect/reconnect
@@ -285,9 +302,6 @@ export function useEngine() {
       fetchAdmiralSettings();
       wsClient.send({ type: "caffeinate:get" });
       void fetchShips().then(() => {
-        // Register sessions for ships loaded via REST API.
-        // The ship:data WS handler would do this, but Engine never sends
-        // that message — ships are fetched via REST on connect/reconnect.
         const ships = useShipStore.getState().ships;
         const currentLogs = useShipStore.getState().shipLogs;
         for (const ship of ships.values()) {
@@ -305,29 +319,14 @@ export function useEngine() {
       unsub();
       unsubConnect();
       clearInterval(checkConnection);
-      clearTimeout(rateLimitTimer);
       wsClient.disconnect();
     };
   }, [
-    setFleets,
-    selectFleet,
-    setMainView,
-    setShipCompacting,
-    addShipLog,
-    setShipLogs,
-    setGateCheck,
-    clearGateCheck,
-    syncShips,
-    fetchShips,
-    updateShipFromApi,
+    registry,
     setEngineConnected,
-    setRateLimitActive,
-    setCaffeinateActive,
-    setPreviousCrash,
     fetchFleets,
-    setAdmiralSettings,
     fetchAdmiralSettings,
+    fetchShips,
     registerSession,
-    setFocus,
   ]);
 }
