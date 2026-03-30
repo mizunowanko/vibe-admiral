@@ -71,25 +71,40 @@ describe("SessionCardList section separation", () => {
     expect(screen.getByText("No active ships")).toBeInTheDocument();
   });
 
-  it("renders Dispatches section when dispatches exist", () => {
+  it("renders Dispatch cards under their parent Commander section", () => {
     seedSessions([
       makeSession({ id: `dock-${FLEET_ID}`, type: "dock", fleetId: FLEET_ID }),
+      makeSession({ id: `flagship-${FLEET_ID}`, type: "flagship", fleetId: FLEET_ID }),
     ]);
     seedDispatches([
       {
         id: "d-1",
         parentRole: "dock",
         fleetId: FLEET_ID,
-        name: "investigate",
+        name: "investigate-dock",
         status: "running",
         startedAt: Date.now(),
+      },
+      {
+        id: "d-2",
+        parentRole: "flagship",
+        fleetId: FLEET_ID,
+        name: "investigate-flagship",
+        status: "completed",
+        startedAt: Date.now() - 1000,
       },
     ]);
 
     render(<SessionCardList fleetId={FLEET_ID} />);
 
-    expect(screen.getByText("Dispatches")).toBeInTheDocument();
-    expect(screen.getByText("investigate")).toBeInTheDocument();
+    // No separate "Dispatches" section header
+    const headers = screen.getAllByRole("heading", { level: 3 });
+    const headerTexts = headers.map((h) => h.textContent);
+    expect(headerTexts).not.toContain("Dispatches");
+
+    // Dispatch cards are rendered under their parent sections
+    expect(screen.getByText("investigate-dock")).toBeInTheDocument();
+    expect(screen.getByText("investigate-flagship")).toBeInTheDocument();
   });
 });
 
