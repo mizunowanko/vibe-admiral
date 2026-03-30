@@ -107,7 +107,7 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
   );
 }
 
-function DispatchSection({
+function DispatchCards({
   dispatches,
   focusedSessionId,
   onFocusDispatch,
@@ -118,20 +118,15 @@ function DispatchSection({
 }) {
   if (dispatches.length === 0) return null;
   return (
-    <div className="px-3 py-2">
-      <h3 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
-        Dispatches
-      </h3>
-      <div className="grid grid-cols-1 gap-1">
-        {dispatches.map((d) => (
-          <DispatchCard
-            key={d.id}
-            dispatch={d}
-            isFocused={focusedSessionId === `dispatch-${d.id}`}
-            onClick={() => onFocusDispatch(d.id)}
-          />
-        ))}
-      </div>
+    <div className="grid grid-cols-1 gap-1 mt-1">
+      {dispatches.map((d) => (
+        <DispatchCard
+          key={d.id}
+          dispatch={d}
+          isFocused={focusedSessionId === `dispatch-${d.id}`}
+          onClick={() => onFocusDispatch(d.id)}
+        />
+      ))}
     </div>
   );
 }
@@ -152,53 +147,67 @@ export const SessionCardList = memo(function SessionCardList({
   const dockSession = sessions.get(dockSessionId);
   const flagshipSession = sessions.get(flagshipSessionId);
 
-  const allDispatches = useMemo(() => {
-    const result: Dispatch[] = [];
+  const { dockDispatches, flagshipDispatches } = useMemo(() => {
+    const dock: Dispatch[] = [];
+    const flagship: Dispatch[] = [];
     for (const d of dispatches.values()) {
-      if (d.fleetId === fleetId) result.push(d);
+      if (d.fleetId !== fleetId) continue;
+      if (d.parentRole === "dock") dock.push(d);
+      else if (d.parentRole === "flagship") flagship.push(d);
     }
-    return result.sort((a, b) => b.startedAt - a.startedAt);
+    const byTime = (a: Dispatch, b: Dispatch) => b.startedAt - a.startedAt;
+    return {
+      dockDispatches: dock.sort(byTime),
+      flagshipDispatches: flagship.sort(byTime),
+    };
   }, [dispatches, fleetId]);
 
   return (
     <div className="h-full border-l border-border bg-background/50 flex flex-col min-h-0">
-      {/* Scrollable sections: Commander cards → Dispatches → Ships */}
+      {/* Scrollable sections: Commander cards (with their Dispatches) → Ships */}
       <ScrollArea className="flex-1">
         <div className="divide-y divide-border">
-          {/* Dock */}
-          {dockSession && (
+          {/* Dock + its Dispatches */}
+          {(dockSession || dockDispatches.length > 0) && (
             <div className="px-3 py-2">
               <h3 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
                 Dock
               </h3>
-              <SessionCard
-                session={dockSession}
-                isFocused={focusedSessionId === dockSessionId}
-                onFocus={() => setFocus(dockSessionId)}
+              {dockSession && (
+                <SessionCard
+                  session={dockSession}
+                  isFocused={focusedSessionId === dockSessionId}
+                  onFocus={() => setFocus(dockSessionId)}
+                />
+              )}
+              <DispatchCards
+                dispatches={dockDispatches}
+                focusedSessionId={focusedSessionId}
+                onFocusDispatch={(id) => setFocus(`dispatch-${id}`)}
               />
             </div>
           )}
 
-          {/* Flagship */}
-          {flagshipSession && (
+          {/* Flagship + its Dispatches */}
+          {(flagshipSession || flagshipDispatches.length > 0) && (
             <div className="px-3 py-2">
               <h3 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
                 Flagship
               </h3>
-              <SessionCard
-                session={flagshipSession}
-                isFocused={focusedSessionId === flagshipSessionId}
-                onFocus={() => setFocus(flagshipSessionId)}
+              {flagshipSession && (
+                <SessionCard
+                  session={flagshipSession}
+                  isFocused={focusedSessionId === flagshipSessionId}
+                  onFocus={() => setFocus(flagshipSessionId)}
+                />
+              )}
+              <DispatchCards
+                dispatches={flagshipDispatches}
+                focusedSessionId={focusedSessionId}
+                onFocusDispatch={(id) => setFocus(`dispatch-${id}`)}
               />
             </div>
           )}
-
-          {/* Dispatches (separate section) */}
-          <DispatchSection
-            dispatches={allDispatches}
-            focusedSessionId={focusedSessionId}
-            onFocusDispatch={(id) => setFocus(`dispatch-${id}`)}
-          />
 
           {/* Ships */}
           <ShipsSection fleetId={fleetId} />
