@@ -90,6 +90,9 @@ export class FleetDatabase {
     if (version < 9) {
       this.applyV9();
     }
+    if (version < 10) {
+      this.applyV10();
+    }
   }
 
   private applyV1(): void {
@@ -462,6 +465,17 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV10(): void {
+    // V10: Migrate "stopped" phase to "paused" (#763).
+    // Existing stopped ships are treated as paused (backward compatible).
+    this.db.exec(`
+      UPDATE ships SET phase = 'paused' WHERE phase = 'stopped';
+      UPDATE phases SET phase = 'paused' WHERE phase = 'stopped';
+
+      INSERT INTO schema_version (version) VALUES (10);
+    `);
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -572,7 +586,7 @@ export class FleetDatabase {
   }
 
   /** Get all ships with non-terminal phase (for startup restoration).
-   *  Includes "stopped" ships so they can be resumed after Engine restart. */
+   *  Includes "paused" and "abandoned" ships so they can be resumed after Engine restart. */
   getActiveShips(): ShipProcess[] {
     const rows = this.db.prepare(`
       SELECT s.*, r.owner, r.name
@@ -630,13 +644,13 @@ export class FleetDatabase {
       SELECT s.*, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'stopped')
+      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'paused', 'abandoned')
     `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
 
     return row ? this.rowToShipProcess(row) : undefined;
   }
 
-  /** Get a ship by repo and issue number (any phase, including done/stopped). */
+  /** Get a ship by repo and issue number (any phase, including done/paused/abandoned). */
   getShipByIssueAnyPhase(repo: string, issueNumber: number): ShipProcess | undefined {
     const [owner, name] = repo.split("/");
     if (!owner || !name) return undefined;
@@ -657,7 +671,7 @@ export class FleetDatabase {
       SELECT s.issue_number, r.owner, r.name
       FROM ships s
       JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase NOT IN ('done', 'stopped')
+      WHERE s.phase NOT IN ('done', 'paused', 'abandoned')
     `).all() as Array<{ issue_number: number; owner: string; name: string }>;
 
     return rows.map((row) => ({
@@ -742,11 +756,11 @@ export class FleetDatabase {
     return txn();
   }
 
-  /** Get the phase a ship was in before it was stopped. */
+  /** Get the phase a ship was in before it was paused. */
   getPhaseBeforeStopped(shipId: string): Phase | null {
     const row = this.db.prepare(`
       SELECT from_phase FROM phase_transitions
-      WHERE ship_id = ? AND to_phase = 'stopped'
+      WHERE ship_id = ? AND to_phase IN ('paused', 'stopped')
       ORDER BY id DESC LIMIT 1
     `).get(shipId) as { from_phase: string | null } | undefined;
     return (row?.from_phase as Phase) ?? null;

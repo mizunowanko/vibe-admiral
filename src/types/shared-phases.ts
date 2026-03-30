@@ -18,9 +18,10 @@ export type Phase =
   | "qa-gate"
   | "merging"
   | "done"
-  | "stopped";
+  | "paused"
+  | "abandoned";
 
-/** Ordered list of active phases (excludes "stopped"). Used for progress display. */
+/** Ordered list of active phases (excludes "paused"/"abandoned"). Used for progress display. */
 export const PHASE_ORDER: readonly Phase[] = [
   "plan",
   "plan-gate",

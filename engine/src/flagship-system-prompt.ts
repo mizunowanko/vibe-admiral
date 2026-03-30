@@ -2,7 +2,7 @@
  * Build the system prompt for Flagship (Ship management AI) sessions.
  *
  * Flagship is responsible for Ship lifecycle management:
- * sortie, ship-status, ship-stop, ship-resume, /hotfix,
+ * sortie, ship-status, ship-pause, ship-resume, ship-abandon, ship-reactivate, /hotfix,
  * Lookout alerts, and Gate monitoring.
  *
  * Detailed rules live in:
@@ -56,15 +56,27 @@ curl -s http://localhost:9721/api/ships | jq '.ships[] | {id, issueNumber, issue
 - Returns all Ships with current phase, processDead status, gate info, etc.
 - For a specific fleet: \`curl -s "http://localhost:9721/api/ships?fleetId=..."\`
 
-### ship-stop — Stop a Ship
+### ship-pause — Pause a Ship (temporary stop, eligible for Resume All)
 \`\`\`bash
-curl -s http://localhost:9721/api/ship-stop -H 'Content-Type: application/json' \\
+curl -s http://localhost:9721/api/ship-pause -H 'Content-Type: application/json' \\
   -d '{"shipId": "uuid"}'
 \`\`\`
 
-### ship-resume — Resume a Dead Ship
+### ship-resume — Resume a Paused/Dead Ship
 \`\`\`bash
 curl -s http://localhost:9721/api/ship-resume -H 'Content-Type: application/json' \\
+  -d '{"shipId": "uuid"}'
+\`\`\`
+
+### ship-abandon — Abandon a Paused Ship (not eligible for Resume All)
+\`\`\`bash
+curl -s http://localhost:9721/api/ship-abandon -H 'Content-Type: application/json' \\
+  -d '{"shipId": "uuid"}'
+\`\`\`
+
+### ship-reactivate — Reactivate an Abandoned Ship (back to paused)
+\`\`\`bash
+curl -s http://localhost:9721/api/ship-reactivate -H 'Content-Type: application/json' \\
   -d '{"shipId": "uuid"}'
 \`\`\`
 

@@ -26,12 +26,14 @@ export class FlagshipRequestHandler {
         return this.handleSortie(fleetId, request, fleetRepos, repoRemotes, skillSources, shipExtraPrompt, maxConcurrentSorties, customInstructionsText);
       case "ship-status":
         return this.handleShipStatus(fleetId);
-      case "ship-stop":
-        return this.handleShipStop(request);
+      case "ship-pause":
+        return this.handleShipPause(request);
       case "ship-resume":
         return this.handleShipResume(request, shipExtraPrompt);
       case "ship-abandon":
         return this.handleShipAbandon(request);
+      case "ship-reactivate":
+        return this.handleShipReactivate(request);
       case "ship-delete":
         return this.handleShipDelete(request);
       case "pr-review-result":
@@ -54,7 +56,7 @@ export class FlagshipRequestHandler {
     // Determine concurrent sortie limit (static, not dynamically adjusted)
     const configuredMax = maxConcurrentSorties ?? 6;
     const activeShips = this.shipManager.getShipsByFleet(fleetId)
-      .filter((s: ShipProcess) => s.phase !== "done" && s.phase !== "stopped");
+      .filter((s: ShipProcess) => s.phase !== "done" && s.phase !== "paused" && s.phase !== "abandoned");
     const availableSlots = Math.max(0, configuredMax - activeShips.length);
 
     if (availableSlots === 0) {
@@ -145,18 +147,18 @@ export class FlagshipRequestHandler {
     return `[Ship Status]\n${lines.join("\n")}`;
   }
 
-  private handleShipStop(
-    request: Extract<FlagshipRequest, { request: "ship-stop" }>,
+  private handleShipPause(
+    request: Extract<FlagshipRequest, { request: "ship-pause" }>,
   ): string {
     const ship = this.shipManager.resolveShip(request.shipId);
     if (!ship) {
-      return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
+      return `[Pause Ship Failed] Ship ${request.shipId} not found or already paused`;
     }
-    const killed = this.shipManager.stopShip(ship.id);
+    const killed = this.shipManager.pauseShip(ship.id);
     if (killed) {
-      return `[Ship Stopped] ${ship.id}`;
+      return `[Ship Paused] ${ship.id}`;
     }
-    return `[Stop Ship Failed] Ship ${request.shipId} not found or already stopped`;
+    return `[Pause Ship Failed] Ship ${request.shipId} not found or already paused`;
   }
 
   private handleShipResume(
@@ -170,6 +172,9 @@ export class FlagshipRequestHandler {
     // Ship can be resumed if phase is not done (process death is handled by retry logic)
     if (ship.phase === "done") {
       return `[Ship Resume Failed] Ship #${ship.issueNumber} is already done`;
+    }
+    if (ship.phase === "abandoned") {
+      return `[Ship Resume Failed] Ship #${ship.issueNumber} is abandoned. Reactivate it first.`;
     }
 
     const result = this.shipManager.retryShip(ship.id, shipExtraPrompt);
@@ -190,9 +195,23 @@ export class FlagshipRequestHandler {
     }
     const abandoned = this.shipManager.abandonShip(ship.id);
     if (abandoned) {
-      return `[Ship Abandoned] Ship #${ship.issueNumber} (${ship.issueTitle}) moved to done`;
+      return `[Ship Abandoned] Ship #${ship.issueNumber} (${ship.issueTitle}) marked as abandoned`;
     }
-    return `[Ship Abandon Failed] Ship #${ship.issueNumber} is not in "stopped" phase (current: ${ship.phase})`;
+    return `[Ship Abandon Failed] Ship #${ship.issueNumber} is not in "paused" phase (current: ${ship.phase})`;
+  }
+
+  private handleShipReactivate(
+    request: Extract<FlagshipRequest, { request: "ship-reactivate" }>,
+  ): string {
+    const ship = this.shipManager.resolveShip(request.shipId);
+    if (!ship) {
+      return `[Ship Reactivate Failed] Ship ${request.shipId} not found`;
+    }
+    const reactivated = this.shipManager.reactivateShip(ship.id);
+    if (reactivated) {
+      return `[Ship Reactivated] Ship #${ship.issueNumber} (${ship.issueTitle}) moved from abandoned to paused`;
+    }
+    return `[Ship Reactivate Failed] Ship #${ship.issueNumber} is not in "abandoned" phase (current: ${ship.phase})`;
   }
 
   private handleShipDelete(

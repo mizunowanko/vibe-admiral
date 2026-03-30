@@ -76,11 +76,11 @@ function validateSortieRequest(body: unknown): FlagshipRequest | string {
   return { request: "sortie", items };
 }
 
-function validateShipStopRequest(body: unknown): FlagshipRequest | string {
+function validateShipPauseRequest(body: unknown): FlagshipRequest | string {
   if (typeof body !== "object" || body === null) return "Invalid request body";
   const b = body as Record<string, unknown>;
   if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
-  return { request: "ship-stop", shipId: b.shipId };
+  return { request: "ship-pause", shipId: b.shipId };
 }
 
 function validateShipResumeRequest(body: unknown): FlagshipRequest | string {
@@ -95,6 +95,13 @@ function validateShipAbandonRequest(body: unknown): FlagshipRequest | string {
   const b = body as Record<string, unknown>;
   if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
   return { request: "ship-abandon", shipId: b.shipId };
+}
+
+function validateShipReactivateRequest(body: unknown): FlagshipRequest | string {
+  if (typeof body !== "object" || body === null) return "Invalid request body";
+  const b = body as Record<string, unknown>;
+  if (typeof b.shipId !== "string" || !b.shipId) return "shipId is required";
+  return { request: "ship-reactivate", shipId: b.shipId };
 }
 
 function validateShipDeleteRequest(body: unknown): FlagshipRequest | string {
@@ -630,7 +637,7 @@ async function handleShipRoute(
     return;
   }
 
-  // POST /api/ship/:shipId/abandon — Abandon a stopped Ship (transition to done)
+  // POST /api/ship/:shipId/abandon — Abandon a paused Ship (transition to abandoned)
   if (action === "abandon") {
     const ship = db.getShipById(shipId);
     if (!ship) {
@@ -638,16 +645,38 @@ async function handleShipRoute(
       return;
     }
 
-    if (ship.phase !== "stopped") {
-      sendJson(res, 400, { ok: false, error: `Ship must be in "stopped" phase to abandon (current: ${ship.phase})` });
+    if (ship.phase !== "paused") {
+      sendJson(res, 400, { ok: false, error: `Ship must be in "paused" phase to abandon (current: ${ship.phase})` });
       return;
     }
 
     const abandoned = shipManager.abandonShip(shipId);
     if (abandoned) {
-      sendJson(res, 200, { ok: true, phase: "done" });
+      sendJson(res, 200, { ok: true, phase: "abandoned" });
     } else {
       sendJson(res, 400, { ok: false, error: "Failed to abandon ship" });
+    }
+    return;
+  }
+
+  // POST /api/ship/:shipId/reactivate — Reactivate an abandoned Ship (transition to paused)
+  if (action === "reactivate") {
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+
+    if (ship.phase !== "abandoned") {
+      sendJson(res, 400, { ok: false, error: `Ship must be in "abandoned" phase to reactivate (current: ${ship.phase})` });
+      return;
+    }
+
+    const reactivated = shipManager.reactivateShip(shipId);
+    if (reactivated) {
+      sendJson(res, 200, { ok: true, phase: "paused" });
+    } else {
+      sendJson(res, 400, { ok: false, error: "Failed to reactivate ship" });
     }
     return;
   }
@@ -875,7 +904,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         return;
       }
 
-      // POST /api/resume-all — Resume all stopped/dead Units across all Fleets
+      // POST /api/resume-all — Resume all paused/dead Units across all Fleets (abandoned ships are skipped)
       if (route === "resume-all" && req.method === "POST") {
         const results = await deps.resumeAllUnits();
         const resumed = results.filter(r => r.status === "resumed");
@@ -886,7 +915,7 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       }
 
       // Check if route is a known POST endpoint
-      const postRoutes = new Set(["sortie", "ship-stop", "ship-resume", "ship-abandon", "ship-delete", "pr-review-result"]);
+      const postRoutes = new Set(["sortie", "ship-pause", "ship-resume", "ship-abandon", "ship-reactivate", "ship-delete", "pr-review-result"]);
       if (!postRoutes.has(route)) {
         sendJson(res, 404, { ok: false, error: `Unknown endpoint: /api/${route}` });
         return;
@@ -921,14 +950,17 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
         case "sortie":
           request = validateSortieRequest(body);
           break;
-        case "ship-stop":
-          request = validateShipStopRequest(body);
+        case "ship-pause":
+          request = validateShipPauseRequest(body);
           break;
         case "ship-resume":
           request = validateShipResumeRequest(body);
           break;
         case "ship-abandon":
           request = validateShipAbandonRequest(body);
+          break;
+        case "ship-reactivate":
+          request = validateShipReactivateRequest(body);
           break;
         case "ship-delete":
           request = validateShipDeleteRequest(body);

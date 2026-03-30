@@ -54,6 +54,9 @@ interface ShipState {
   sortie: (fleetId: string, repo: string, issueNumber: number) => Promise<void>;
   chatWithShip: (id: string, message: string) => void;
   retryShip: (id: string) => Promise<void>;
+  pauseShip: (id: string) => Promise<void>;
+  abandonShip: (id: string) => Promise<void>;
+  reactivateShip: (id: string) => Promise<void>;
 }
 
 export const useShipStore = create<ShipState>((set) => ({
@@ -231,6 +234,30 @@ export const useShipStore = create<ShipState>((set) => ({
       await api.resumeShip(id);
     } catch (err) {
       console.error("[shipStore] retryShip failed:", err);
+    }
+  },
+
+  pauseShip: async (id) => {
+    try {
+      await api.pauseShip(id);
+    } catch (err) {
+      console.error("[shipStore] pauseShip failed:", err);
+    }
+  },
+
+  abandonShip: async (id) => {
+    try {
+      await api.abandonShip(id);
+    } catch (err) {
+      console.error("[shipStore] abandonShip failed:", err);
+    }
+  },
+
+  reactivateShip: async (id) => {
+    try {
+      await api.reactivateShip(id);
+    } catch (err) {
+      console.error("[shipStore] reactivateShip failed:", err);
     }
   },
 

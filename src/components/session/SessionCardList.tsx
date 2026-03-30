@@ -49,7 +49,8 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
         : allFleetShips.filter(
             (s) =>
               s.phase !== "done" &&
-              s.phase !== "stopped" &&
+              s.phase !== "paused" &&
+              s.phase !== "abandoned" &&
               !s.processDead,
           ),
     [allFleetShips, showInactive],

@@ -103,12 +103,13 @@ export class StateSync {
   ): Promise<string[]> {
     const warnings: string[] = [];
     try {
-      // Get active ships in the same repo (excluding done/stopped)
+      // Get active ships in the same repo (excluding done/paused/abandoned)
       const activeShips = this.shipManager.getAllShips().filter(
         (s) =>
           s.repo === repo &&
           s.phase !== "done" &&
-          s.phase !== "stopped" &&
+          s.phase !== "paused" &&
+          s.phase !== "abandoned" &&
           s.issueNumber !== issueNumber,
       );
       if (activeShips.length === 0) return [];
@@ -247,10 +248,10 @@ export class StateSync {
     this.shipManager.setIsCompacting(shipId, false);
 
     if (succeeded) {
-      // Stopped ships: skip done transition, worktree removal, and issue closure.
+      // Paused/abandoned ships: skip done transition, worktree removal, and issue closure.
       // The worktree is preserved for re-sortie. Label rollback is handled by
-      // the ship:stop handler in ws-server.
-      if (ship.phase === "stopped") {
+      // the ship:pause handler in ws-server.
+      if (ship.phase === "paused" || ship.phase === "abandoned") {
         return;
       }
 
@@ -319,9 +320,9 @@ export class StateSync {
             `[state-sync] Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...) hit rapid death limit ` +
             `(${MAX_RAPID_DEATHS} consecutive rapid deaths) — auto-stopping to prevent infinite loop`,
           );
-          this.actorManager?.send(shipId, { type: "STOP" });
+          this.actorManager?.send(shipId, { type: "PAUSE" });
           this.actorManager?.send(shipId, { type: "RAPID_DEATH_LIMIT" });
-          this.shipManager.updatePhase(shipId, "stopped", `Auto-stopped: ${MAX_RAPID_DEATHS} consecutive rapid deaths`);
+          this.shipManager.updatePhase(shipId, "paused", `Auto-paused: ${MAX_RAPID_DEATHS} consecutive rapid deaths`);
           return;
         }
       } else {
@@ -661,7 +662,8 @@ export class StateSync {
     for (const ship of this.shipManager.getAllShips()) {
       if (
         ship.phase !== "done" &&
-        ship.phase !== "stopped" &&
+        ship.phase !== "paused" &&
+        ship.phase !== "abandoned" &&
         !this.shipManager.hasRunningProcess(ship.id)
       ) {
         console.warn(

@@ -171,10 +171,10 @@ describe("API Server", () => {
     });
   });
 
-  describe("POST /api/ship-stop", () => {
-    it("stops a ship with valid shipId", async () => {
-      deps._handle.mockResolvedValue("[Ship Stopped] ship-123");
-      const res = await apiRequest(port, "POST", "/api/ship-stop", {
+  describe("POST /api/ship-pause", () => {
+    it("pauses a ship with valid shipId", async () => {
+      deps._handle.mockResolvedValue("[Ship Paused] ship-123");
+      const res = await apiRequest(port, "POST", "/api/ship-pause", {
         shipId: "ship-123",
       });
       expect(res.status).toBe(200);
@@ -182,7 +182,7 @@ describe("API Server", () => {
     });
 
     it("rejects without shipId", async () => {
-      const res = await apiRequest(port, "POST", "/api/ship-stop", {});
+      const res = await apiRequest(port, "POST", "/api/ship-pause", {});
       expect(res.status).toBe(400);
       expect(res.data.ok).toBe(false);
       expect(res.data.error).toContain("shipId");
@@ -285,7 +285,7 @@ describe("API Server", () => {
 
     it("returns 500 on handler error", async () => {
       deps._handle.mockRejectedValue(new Error("Internal failure"));
-      const res = await apiRequest(port, "POST", "/api/ship-stop", {
+      const res = await apiRequest(port, "POST", "/api/ship-pause", {
         shipId: "ship-123",
       });
       expect(res.status).toBe(500);
@@ -560,9 +560,9 @@ describe("API Server", () => {
     });
 
     describe("POST /api/ship/:id/abandon", () => {
-      it("abandons a stopped ship", async () => {
+      it("abandons a paused ship", async () => {
         const depsWithDb = createMockDepsWithDb();
-        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "stopped" });
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "paused" });
         const abandonShip = vi.fn().mockReturnValue(true);
         depsWithDb.getShipManager.mockReturnValue({
           ...depsWithDb.getShipManager(),
@@ -573,20 +573,20 @@ describe("API Server", () => {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/abandon", {});
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
-          expect(res.data.phase).toBe("done");
+          expect(res.data.phase).toBe("abandoned");
         } finally {
           s2.server.close();
         }
       });
 
-      it("rejects abandon for non-stopped ship", async () => {
+      it("rejects abandon for non-paused ship", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "coding" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/abandon", {});
           expect(res.status).toBe(400);
-          expect(res.data.error).toContain("stopped");
+          expect(res.data.error).toContain("paused");
         } finally {
           s2.server.close();
         }
@@ -784,8 +784,8 @@ describe("API Server", () => {
     });
 
     it("uses explicit fleetId from body", async () => {
-      deps._handle.mockResolvedValue("[Ship Stopped]");
-      const res = await apiRequest(port, "POST", "/api/ship-stop", {
+      deps._handle.mockResolvedValue("[Ship Paused]");
+      const res = await apiRequest(port, "POST", "/api/ship-pause", {
         fleetId: "fleet-1",
         shipId: "ship-123",
       });

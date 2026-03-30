@@ -229,40 +229,40 @@ describe("shipMachine", () => {
     });
   });
 
-  describe("STOP / RESUME", () => {
-    it("transitions to stopped from plan", () => {
+  describe("PAUSE / RESUME", () => {
+    it("transitions to paused from plan", () => {
       const actor = createTestActor();
-      actor.send({ type: "STOP" });
-      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("plan");
       actor.stop();
     });
 
-    it("transitions to stopped from coding", () => {
+    it("transitions to paused from coding", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
-      actor.send({ type: "STOP" });
-      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("coding");
       actor.stop();
     });
 
-    it("transitions to stopped from a gate phase", () => {
+    it("transitions to paused from a gate phase", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
-      actor.send({ type: "STOP" });
-      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("plan-gate");
       actor.stop();
     });
 
-    it("resumes to correct phase from stopped", () => {
+    it("resumes to correct phase from paused", () => {
       const actor = createTestActor();
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" }); // coding
-      actor.send({ type: "STOP" });
-      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
       actor.send({ type: "RESUME" });
       expect(actor.getSnapshot().value).toBe("coding");
       expect(actor.getSnapshot().context.processDead).toBe(false);
@@ -272,10 +272,10 @@ describe("shipMachine", () => {
 
     it("increments retryCount on each resume", () => {
       const actor = createTestActor();
-      actor.send({ type: "STOP" });
+      actor.send({ type: "PAUSE" });
       actor.send({ type: "RESUME" });
       expect(actor.getSnapshot().context.retryCount).toBe(1);
-      actor.send({ type: "STOP" });
+      actor.send({ type: "PAUSE" });
       actor.send({ type: "RESUME" });
       expect(actor.getSnapshot().context.retryCount).toBe(2);
       actor.stop();
@@ -289,20 +289,20 @@ describe("shipMachine", () => {
       const actor = createTestActor();
       // Cannot easily test null phaseBeforeStopped since STOP always sets it
       // But we can verify the default branch works by testing all known phases
-      actor.send({ type: "STOP" }); // from plan
+      actor.send({ type: "PAUSE" }); // from plan
       actor.send({ type: "RESUME" }); // resumes to plan (matched by guard)
       expect(actor.getSnapshot().value).toBe("plan");
       actor.stop();
     });
 
-    it("resumes to merging when stopped from merging", () => {
+    it("resumes to merging when paused from merging", () => {
       const actor = createTestActor({ qaRequired: false });
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" });
       actor.send({ type: "GATE_APPROVED" });
       actor.send({ type: "GATE_ENTER" }); // skip qa → merging
-      actor.send({ type: "STOP" });
+      actor.send({ type: "PAUSE" });
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("merging");
       actor.send({ type: "RESUME" });
       expect(actor.getSnapshot().value).toBe("merging");
@@ -412,7 +412,7 @@ describe("shipMachine", () => {
       // Sending more events should not change state
       actor.send({ type: "GATE_ENTER" });
       expect(actor.getSnapshot().value).toBe("done");
-      actor.send({ type: "STOP" });
+      actor.send({ type: "PAUSE" });
       expect(actor.getSnapshot().value).toBe("done");
       actor.stop();
     });
@@ -428,21 +428,39 @@ describe("shipMachine", () => {
     });
   });
 
-  describe("ABANDON (stopped → done)", () => {
-    it("transitions stopped → done on ABANDON", () => {
+  describe("ABANDON (paused → abandoned)", () => {
+    it("transitions paused → abandoned on ABANDON", () => {
       const actor = createTestActor();
-      actor.send({ type: "STOP" });
-      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
       actor.send({ type: "ABANDON" });
-      expect(actor.getSnapshot().value).toBe("done");
-      expect(actor.getSnapshot().status).toBe("done");
+      expect(actor.getSnapshot().value).toBe("abandoned");
       actor.stop();
     });
 
-    it("ABANDON is only available in stopped state", () => {
+    it("ABANDON is only available in paused state", () => {
       const actor = createTestActor();
       // ABANDON in plan should be ignored
       actor.send({ type: "ABANDON" });
+      expect(actor.getSnapshot().value).toBe("plan");
+      actor.stop();
+    });
+  });
+
+  describe("REACTIVATE (abandoned → paused)", () => {
+    it("transitions abandoned → paused on REACTIVATE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "PAUSE" });
+      actor.send({ type: "ABANDON" });
+      expect(actor.getSnapshot().value).toBe("abandoned");
+      actor.send({ type: "REACTIVATE" });
+      expect(actor.getSnapshot().value).toBe("paused");
+      actor.stop();
+    });
+
+    it("REACTIVATE is only available in abandoned state", () => {
+      const actor = createTestActor();
+      actor.send({ type: "REACTIVATE" });
       expect(actor.getSnapshot().value).toBe("plan");
       actor.stop();
     });
@@ -462,7 +480,7 @@ describe("shipMachine", () => {
       // 2. SET_PHASE_BEFORE_STOPPED syncs from DB
       // 3. RESUME uses the synced value
       const actor = createTestActor();
-      actor.send({ type: "STOP" }); // phaseBeforeStopped = "plan"
+      actor.send({ type: "PAUSE" }); // phaseBeforeStopped = "plan"
       // Simulate context override from DB
       actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "merging" });
       expect(actor.getSnapshot().context.phaseBeforeStopped).toBe("merging");
@@ -488,8 +506,8 @@ describe("shipMachine", () => {
     it("RESUME with unrecognized phaseBeforeStopped goes to plan, not coding (#689)", () => {
       const actor = createTestActor();
       // Stop from plan (sets phaseBeforeStopped to "plan")
-      actor.send({ type: "STOP" });
-      expect(actor.getSnapshot().value).toBe("stopped");
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
       // Override phaseBeforeStopped to a value with no matching guard (no "wasDone" guard)
       // This simulates the edge case where phaseBeforeStopped is unknown/unexpected.
       actor.send({ type: "SET_PHASE_BEFORE_STOPPED", phase: "done" });
@@ -507,7 +525,8 @@ describe("stateValueToPhase", () => {
     expect(stateValueToPhase("plan-gate")).toBe("plan-gate");
     expect(stateValueToPhase("coding")).toBe("coding");
     expect(stateValueToPhase("done")).toBe("done");
-    expect(stateValueToPhase("stopped")).toBe("stopped");
+    expect(stateValueToPhase("paused")).toBe("paused");
+    expect(stateValueToPhase("abandoned")).toBe("abandoned");
   });
 });
 

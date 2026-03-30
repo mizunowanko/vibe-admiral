@@ -3,7 +3,7 @@ import { CommanderManager } from "./commander.js";
 
 /**
  * FlagshipManager handles Ship management sessions.
- * Responsible for: sortie, ship-status, ship-stop, ship-resume,
+ * Responsible for: sortie, ship-status, ship-pause, ship-resume, ship-abandon, ship-reactivate,
  * /hotfix, Lookout alerts, Gate monitoring.
  */
 export class FlagshipManager extends CommanderManager {

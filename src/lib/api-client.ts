@@ -61,6 +61,18 @@ export async function sortie(
   return data.result ?? "OK";
 }
 
+export async function pauseShip(
+  shipId: string,
+  fleetId?: string,
+): Promise<string> {
+  const data = await request(`/ship-pause`, {
+    method: "POST",
+    body: JSON.stringify({ shipId, fleetId }),
+  });
+  if (!data.ok) throw new Error(data.error ?? "Pause failed");
+  return data.result ?? "OK";
+}
+
 export async function resumeShip(
   shipId: string,
   fleetId?: string,
@@ -70,6 +82,30 @@ export async function resumeShip(
     body: JSON.stringify({ shipId, fleetId }),
   });
   if (!data.ok) throw new Error(data.error ?? "Resume failed");
+  return data.result ?? "OK";
+}
+
+export async function abandonShip(
+  shipId: string,
+  fleetId?: string,
+): Promise<string> {
+  const data = await request(`/ship-abandon`, {
+    method: "POST",
+    body: JSON.stringify({ shipId, fleetId }),
+  });
+  if (!data.ok) throw new Error(data.error ?? "Abandon failed");
+  return data.result ?? "OK";
+}
+
+export async function reactivateShip(
+  shipId: string,
+  fleetId?: string,
+): Promise<string> {
+  const data = await request(`/ship-reactivate`, {
+    method: "POST",
+    body: JSON.stringify({ shipId, fleetId }),
+  });
+  if (!data.ok) throw new Error(data.error ?? "Reactivate failed");
   return data.result ?? "OK";
 }
 

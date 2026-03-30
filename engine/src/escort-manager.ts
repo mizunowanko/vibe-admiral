@@ -522,11 +522,11 @@ export class EscortManager {
         `[escort-manager] Ship #${parentShip.issueNumber} (${parentShipId.slice(0, 8)}...) hit Escort fail limit ` +
         `(${context.escortFailCount}/${MAX_ESCORT_FAILS} consecutive failures) — auto-stopping to prevent infinite loop`,
       );
-      this.actorManager?.send(parentShipId, { type: "STOP" });
+      this.actorManager?.send(parentShipId, { type: "PAUSE" });
       this.actorManager?.send(parentShipId, { type: "ESCORT_FAIL_LIMIT" });
-      this.shipManager.updatePhase(parentShipId, "stopped", `Auto-stopped: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}`);
+      this.shipManager.updatePhase(parentShipId, "paused", `Auto-paused: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}`);
 
-      const stopMessage = `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) auto-stopped: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}. Manual intervention required.`;
+      const stopMessage = `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) auto-paused: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}. Manual intervention required.`;
       this.onEscortDeathCallback?.(parentShipId, stopMessage);
       return;
     }

@@ -53,7 +53,7 @@ function CommanderCard({
   const Icon = session.type === "flagship" ? Flag : Anchor;
   const description =
     session.type === "flagship"
-      ? "Ship management — sortie, monitor, stop, resume"
+      ? "Ship management — sortie, monitor, pause, resume"
       : "Issue management — triage, clarity, priority";
 
   return (
