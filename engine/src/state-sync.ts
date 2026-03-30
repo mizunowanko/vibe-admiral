@@ -360,26 +360,28 @@ export class StateSync {
         console.log(
           `[state-sync] Ship #${ship.issueNumber} exited but issue is already closed — treating as done`,
         );
-        await this.removeWorktreeWithRetry(ship.worktreePath);
-        // Transition to done via XState (sole authority for phase transitions)
-        this.actorManager?.send(shipId, { type: "NOTHING_TO_DO", reason: "Issue already closed on GitHub" });
-        this.shipManager.updatePhase(shipId, "done");
-
-        // Clean up Escort: kill process + mark DB record as done
-        this.escortManager?.cleanupForDoneShip(shipId);
-
-        try {
-          await this.auditDependencies(ship.repo, ship.issueNumber);
-        } catch (err) {
-          console.warn(
-            `[state-sync] Failed to audit dependencies for rescued #${ship.issueNumber}:`,
-            err,
-          );
-        }
-      } else {
-        // Genuinely failed: rollback sortied→ready (removes status/sortied label)
-        await this.rollbackLabel(ship.repo, ship.issueNumber);
+        await this.completeDoneCleanup(shipId, ship);
+        return;
       }
+
+      // --- Merging-phase PR merge rescue (#761) ---
+      // If Ship died in "merging" phase, check if the PR was actually merged.
+      // The Ship may have completed `gh pr merge --squash` but died before
+      // calling the phase-transition API to declare done. In this case the
+      // issue may still be open (e.g., PR body lacked "Closes #NNN").
+      if (ship.phase === "merging" && ship.branchName) {
+        const mergedPR = await this.rescueIfPRMerged(ship.repo, ship.branchName, ship.issueNumber);
+        if (mergedPR) {
+          console.log(
+            `[state-sync] Ship #${ship.issueNumber} died in merging but PR #${mergedPR.number} is merged — treating as done`,
+          );
+          await this.completeDoneCleanup(shipId, ship);
+          return;
+        }
+      }
+
+      // Genuinely failed: rollback sortied→ready (removes status/sortied label)
+      await this.rollbackLabel(ship.repo, ship.issueNumber);
     }
   }
 
@@ -424,6 +426,74 @@ export class StateSync {
     } catch {
       // gh CLI failed or no PR found — not a fallback scenario
       return false;
+    }
+  }
+
+  /**
+   * Shared cleanup for done transition: worktree removal, issue closure,
+   * Escort cleanup, and dependency audit. Used by both the success path
+   * and rescue paths to avoid duplication.
+   */
+  private async completeDoneCleanup(
+    shipId: string,
+    ship: { repo: string; issueNumber: number; worktreePath: string },
+  ): Promise<void> {
+    await this.removeWorktreeWithRetry(ship.worktreePath);
+    // Transition to done via XState (sole authority for phase transitions)
+    this.actorManager?.send(shipId, { type: "NOTHING_TO_DO", reason: "Rescued: PR merged or issue closed" });
+    this.shipManager.updatePhase(shipId, "done");
+
+    // Clean up Escort: kill process + mark DB record as done
+    this.escortManager?.cleanupForDoneShip(shipId);
+
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      try {
+        await this.statusManager.markDone(ship.repo, ship.issueNumber);
+        break;
+      } catch (err) {
+        if (attempt === 3) {
+          console.warn(
+            `[state-sync] Failed to mark #${ship.issueNumber} as done after ${attempt + 1} attempts:`,
+            err,
+          );
+        } else {
+          const delay = 500 * Math.pow(2, attempt);
+          console.warn(
+            `[state-sync] markDone attempt ${attempt + 1} failed for #${ship.issueNumber}, retrying in ${delay}ms`,
+          );
+          await sleep(delay);
+        }
+      }
+    }
+
+    try {
+      await this.auditDependencies(ship.repo, ship.issueNumber);
+    } catch (err) {
+      console.warn(
+        `[state-sync] Failed to audit dependencies for rescued #${ship.issueNumber}:`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * Check if a merged PR exists for the Ship's branch (#761).
+   * Used when Ship dies in merging phase — the PR may have been merged
+   * but the Ship died before calling the phase-transition API.
+   */
+  private async rescueIfPRMerged(
+    repo: string,
+    branchName: string,
+    issueNumber: number,
+  ): Promise<{ number: number; url: string } | null> {
+    try {
+      return await github.getMergedPRForBranch(repo, branchName);
+    } catch (err) {
+      console.warn(
+        `[state-sync] Failed to check merged PR for #${issueNumber} (branch: ${branchName}):`,
+        err,
+      );
+      return null;
     }
   }
 

@@ -565,10 +565,13 @@ export class EngineServer {
           console.warn(`[ws-server] Ship ${id} exited but is not tracked — skipping cleanup`);
           return;
         }
-        // Ship declares "done" via direct DB phase update.
+        // Ship declares "done" via phase-transition REST API before exiting.
         // If the process exits while in "done" phase, treat as success.
-        // If in "merging" phase (squash merge may kill the process), also treat as success.
-        const successPhases = new Set(["done", "merging", "stopped"]);
+        // "merging" is NOT treated as success — the Ship must explicitly
+        // transition to "done" after verifying PR merge. Process death in
+        // merging phase triggers the failure path, which has rescue logic
+        // to check if the PR was actually merged (#761).
+        const successPhases = new Set(["done", "stopped"]);
         if (successPhases.has(ship.phase)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else {

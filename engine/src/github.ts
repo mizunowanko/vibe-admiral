@@ -318,6 +318,30 @@ export async function getPRStatus(
   };
 }
 
+/**
+ * Check if a merged PR exists for a given branch.
+ * Returns the PR number if found, null otherwise.
+ */
+export async function getMergedPRForBranch(
+  repo: string,
+  branchName: string,
+): Promise<{ number: number; url: string } | null> {
+  try {
+    const raw = await gh([
+      "pr", "list",
+      "--head", branchName,
+      "--repo", repo,
+      "--state", "merged",
+      "--json", "number,url",
+      "--jq", ".[0]",
+    ]);
+    if (!raw) return null;
+    return JSON.parse(raw) as { number: number; url: string };
+  } catch {
+    return null;
+  }
+}
+
 export async function listSubIssues(
   repo: string,
   number: number,
