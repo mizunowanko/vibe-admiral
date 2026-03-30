@@ -12,7 +12,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import { spawn } from "node:child_process";
-import { ProcessManager, isRetryableError } from "../process-manager.js";
+import { ProcessManager, isRetryableError, COMMANDER_ALLOWED_TOOLS } from "../process-manager.js";
 
 /** Create a mock ChildProcess with readable stdout/stderr and writable stdin. */
 function createMockProcess(opts?: { withStdin?: boolean }) {
@@ -145,7 +145,7 @@ describe("ProcessManager", () => {
           "stream-json",
           "--verbose",
           "--allowedTools",
-          "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion",
+          COMMANDER_ALLOWED_TOOLS,
           "--append-system-prompt",
           "system prompt",
           "--add-dir",
@@ -204,12 +204,28 @@ describe("ProcessManager", () => {
           "stream-json",
           "--output-format",
           "stream-json",
+          "--allowedTools",
+          COMMANDER_ALLOWED_TOOLS,
         ]),
         expect.objectContaining({
           cwd: "/fleet",
           stdio: ["pipe", "pipe", "pipe"],
         }),
       );
+    });
+
+    it("uses the same allowedTools as launchCommander (no Agent/Write/Edit)", () => {
+      mockProc = createMockProcess({ withStdin: true });
+      vi.mocked(spawn).mockReturnValue(mockProc as unknown as ReturnType<typeof spawn>);
+
+      pm.resumeCommander("dock-fleet1", "sess-xyz", "/fleet", []);
+
+      const args = vi.mocked(spawn).mock.calls[0]![1] as string[];
+      const toolsIdx = args.indexOf("--allowedTools");
+      const tools = args[toolsIdx + 1];
+      expect(tools).not.toContain("Agent");
+      expect(tools).not.toContain("Write");
+      expect(tools).not.toContain("Edit");
     });
   });
 
