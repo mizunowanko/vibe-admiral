@@ -36,7 +36,8 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
     return fleetShips.filter(
       (s) =>
         s.phase !== "done" &&
-        s.phase !== "stopped" &&
+        s.phase !== "paused" &&
+        s.phase !== "abandoned" &&
         !s.processDead,
     );
   }, [fleetShips]);

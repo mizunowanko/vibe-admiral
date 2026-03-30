@@ -133,7 +133,7 @@ export function Sidebar() {
     try {
       const { summary } = await resumeAll();
       if (summary.resumed === 0 && summary.errors === 0) {
-        setResumeStatus("No stopped units");
+        setResumeStatus("No paused units");
       } else if (summary.errors > 0) {
         setResumeStatus(
           `Resumed ${summary.resumed}, ${summary.errors} error(s)`,

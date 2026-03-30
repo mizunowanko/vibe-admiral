@@ -198,7 +198,7 @@ describe("Ship lifecycle (integration)", () => {
       );
     });
 
-    it("cleans up done/stopped ships on new sortie", async () => {
+    it("cleans up done/paused ships on new sortie", async () => {
       vi.mocked(worktree.getRepoRoot).mockResolvedValue(tmpDir);
 
       // Pre-populate DB with a done ship
@@ -392,7 +392,7 @@ describe("Ship lifecycle (integration)", () => {
     });
   });
 
-  describe("stopShip", () => {
+  describe("pauseShip", () => {
     let shipId: string;
 
     beforeEach(async () => {
@@ -402,12 +402,12 @@ describe("Ship lifecycle (integration)", () => {
       phaseChanges.length = 0;
     });
 
-    it("kills process and transitions to stopped phase", () => {
-      const result = shipManager.stopShip(shipId);
+    it("kills process and transitions to paused phase", () => {
+      const result = shipManager.pauseShip(shipId);
 
       expect(result).toBe(true);
       const ship = shipManager.getShip(shipId);
-      expect(ship!.phase).toBe("stopped");
+      expect(ship!.phase).toBe("paused");
     });
   });
 
@@ -461,7 +461,7 @@ describe("Ship lifecycle (integration)", () => {
       expect(ship!.retryCount).toBe(2);
     });
 
-    it("preserves current phase for non-stopped process-dead ship with session (#689)", () => {
+    it("preserves current phase for non-paused process-dead ship with session (#689)", () => {
       // Ship is in "plan" phase (initial), set sessionId, kill process
       shipManager.setSessionId(shipId, "sess-plan");
       processManager.kill(shipId);

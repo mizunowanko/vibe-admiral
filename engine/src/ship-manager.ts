@@ -143,7 +143,7 @@ export class ShipManager {
     let previousShipId: string | null = null;
     if (this.fleetDb) {
       const existingShip = this.fleetDb.getShipByIssueAnyPhase(repo, issueNumber);
-      if (existingShip && (existingShip.phase === "done" || existingShip.phase === "stopped")) {
+      if (existingShip && (existingShip.phase === "done" || existingShip.phase === "paused" || existingShip.phase === "abandoned")) {
         reSortieContext = await this.collectReSortieContext(existingShip);
         previousShipId = existingShip.id;
 
@@ -151,7 +151,7 @@ export class ShipManager {
         // Gate phases → restart at work phase before the gate (gate was interrupted).
         // Work phases → start at that phase directly (passed gates are skipped).
         const lastPhase = this.fleetDb.getPhaseBeforeStopped(existingShip.id) ?? (existingShip.phase as Phase);
-        if (lastPhase !== "done" && lastPhase !== "stopped") {
+        if (lastPhase !== "done" && lastPhase !== "paused" && lastPhase !== "abandoned") {
           reSortieStartPhase = isGatePhase(lastPhase)
             ? GATE_PREV_PHASE[lastPhase]
             : lastPhase;
@@ -596,31 +596,45 @@ export class ShipManager {
     return escort ? this.mergeRuntime(escort) : undefined;
   }
 
-  stopShip(shipId: string): boolean {
+  pauseShip(shipId: string): boolean {
     const killed = this.processManager.kill(shipId);
     if (killed) {
       const rt = this.runtime.get(shipId);
       if (rt) rt.isCompacting = false;
-      this.actorManager?.send(shipId, { type: "STOP" });
-      this.updatePhase(shipId, "stopped", "Manually stopped");
+      this.actorManager?.send(shipId, { type: "PAUSE" });
+      this.updatePhase(shipId, "paused", "Manually paused");
     }
     return killed;
   }
 
   /**
-   * Abandon a Ship: transition from stopped → done.
-   * Used for zombie cleanup when a Ship cannot be resumed.
-   * Returns true if the ship was abandoned, false if not in "stopped" phase.
+   * Abandon a Ship: transition from paused → abandoned.
+   * Marks the Ship as permanently abandoned (not eligible for Resume All).
+   * Returns true if the ship was abandoned, false if not in "paused" phase.
    */
   abandonShip(shipId: string): boolean {
     const ship = this.getShip(shipId);
-    if (!ship || ship.phase !== "stopped") return false;
+    if (!ship || ship.phase !== "paused") return false;
 
     // Kill process if somehow still running
     this.processManager.kill(shipId);
 
     this.actorManager?.send(shipId, { type: "ABANDON" });
-    this.updatePhase(shipId, "done", "Abandoned (zombie cleanup)");
+    this.updatePhase(shipId, "abandoned", "Abandoned");
+    return true;
+  }
+
+  /**
+   * Reactivate an abandoned Ship: transition from abandoned → paused.
+   * Allows the Ship to be eligible for Resume All again.
+   * Returns true if the ship was reactivated, false if not in "abandoned" phase.
+   */
+  reactivateShip(shipId: string): boolean {
+    const ship = this.getShip(shipId);
+    if (!ship || ship.phase !== "abandoned") return false;
+
+    this.actorManager?.send(shipId, { type: "REACTIVATE" });
+    this.updatePhase(shipId, "paused", "Reactivated from abandoned");
     return true;
   }
 
@@ -1203,7 +1217,7 @@ Always use Bash with \`tee\` or \`cp\` instead.
 
     // Sync phaseBeforeStopped from DB into Actor context before RESUME,
     // so the RESUME guards have the correct phase to restore to.
-    if (ship.phase === "stopped") {
+    if (ship.phase === "paused") {
       const phaseBeforeStopped = this.fleetDb?.getPhaseBeforeStopped(shipId);
       if (phaseBeforeStopped) {
         this.actorManager?.send(shipId, {
@@ -1213,7 +1227,7 @@ Always use Bash with \`tee\` or \`cp\` instead.
       }
     }
 
-    // Send RESUME event to Actor (transitions from stopped to previous phase)
+    // Send RESUME event to Actor (transitions from paused to previous phase)
     this.actorManager?.send(shipId, { type: "RESUME" });
 
     // Notify frontend immediately — processDead changed from true to false,
@@ -1242,11 +1256,11 @@ Always use Bash with \`tee\` or \`cp\` instead.
           shipEnv,
           extraPrompt,
         );
-        // For stopped ships, restore to the phase before STOP.
-        // For non-stopped ships (process died without formal STOP, e.g. rate limit),
+        // For paused ships, restore to the phase before PAUSE.
+        // For non-paused ships (process died without formal PAUSE, e.g. rate limit),
         // preserve the current DB phase — do NOT fall back to "coding" which would
         // skip gate phases and cause XState/DB split-brain (#689).
-        const previousPhase = ship.phase === "stopped"
+        const previousPhase = ship.phase === "paused"
           ? (this.fleetDb?.getPhaseBeforeStopped(shipId) ?? ship.phase)
           : ship.phase;
         this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
@@ -1462,8 +1476,8 @@ Always use Bash with \`tee\` or \`cp\` instead.
         });
 
         // Restore XState Actor for this Ship
-        // For stopped Ships, restore phaseBeforeStopped from DB so RESUME guards work
-        const phaseBeforeStopped = ship.phase === "stopped"
+        // For paused Ships, restore phaseBeforeStopped from DB so RESUME guards work
+        const phaseBeforeStopped = ship.phase === "paused"
           ? this.fleetDb?.getPhaseBeforeStopped(ship.id) ?? null
           : null;
         this.actorManager?.restoreActor(ship, phaseBeforeStopped);

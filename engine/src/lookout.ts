@@ -53,7 +53,7 @@ export class Lookout {
 
   private scan(): void {
     const ships = this.shipManager.getAllShips();
-    const activeShips = ships.filter((s) => s.phase !== "done" && s.phase !== "stopped");
+    const activeShips = ships.filter((s) => s.phase !== "done" && s.phase !== "paused" && s.phase !== "abandoned");
 
     if (activeShips.length === 0) return;
 

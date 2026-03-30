@@ -282,7 +282,7 @@ describe("Lookout", () => {
     });
   });
 
-  describe("skips done/stopped Ships", () => {
+  describe("skips done/paused/abandoned Ships", () => {
     it("does not scan Ships in done phase", () => {
       const ship = makeShip({ phase: "done", retryCount: 5 });
       mockShipManager.getAllShips.mockReturnValue([ship]);
@@ -293,8 +293,8 @@ describe("Lookout", () => {
       expect(alerts).toHaveLength(0);
     });
 
-    it("does not scan Ships in stopped phase", () => {
-      const ship = makeShip({ phase: "stopped", retryCount: 5 });
+    it("does not scan Ships in paused phase", () => {
+      const ship = makeShip({ phase: "paused", retryCount: 5 });
       mockShipManager.getAllShips.mockReturnValue([ship]);
 
       lookout.start();

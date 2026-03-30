@@ -31,7 +31,7 @@ export interface ShipMachineContext {
   lastOutputAt: number | null;
   isCompacting: boolean;
   processDead: boolean;
-  /** Phase before entering "stopped" — used to resume to the correct state. */
+  /** Phase before entering "paused" — used to resume to the correct state. */
   phaseBeforeStopped: Phase | null;
   /** Whether QA (qa-gate) is required. Determined during planning. */
   qaRequired: boolean;
@@ -51,9 +51,10 @@ export type ShipMachineEvent =
   | { type: "GATE_REJECTED"; feedback?: string }
   | { type: "ESCORT_DIED"; exitCode: number | null; feedback?: string }
   | { type: "COMPLETE" }
-  | { type: "STOP" }
+  | { type: "PAUSE" }
   | { type: "RESUME" }
   | { type: "ABANDON" }
+  | { type: "REACTIVATE" }
   | { type: "PROCESS_DIED" }
   | { type: "PROCESS_OUTPUT"; timestamp: number }
   | { type: "COMPACT_START" }
@@ -181,8 +182,8 @@ export const shipMachine = setup({
           target: "plan-gate",
           actions: assign({ escortFailCount: () => 0 }),
         },
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "plan",
           }),
@@ -208,8 +209,8 @@ export const shipMachine = setup({
           target: "plan",
           actions: ["clearGateCheck", assign({ escortFailCount: ({ context }) => context.escortFailCount + 1 })],
         },
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "plan-gate",
           }),
@@ -223,8 +224,8 @@ export const shipMachine = setup({
           target: "coding-gate",
           actions: assign({ escortFailCount: () => 0 }),
         },
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "coding",
           }),
@@ -250,8 +251,8 @@ export const shipMachine = setup({
           target: "coding",
           actions: ["clearGateCheck", assign({ escortFailCount: ({ context }) => context.escortFailCount + 1 })],
         },
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "coding-gate",
           }),
@@ -271,8 +272,8 @@ export const shipMachine = setup({
             actions: assign({ escortFailCount: () => 0 }),
           },
         ],
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "qa",
           }),
@@ -298,8 +299,8 @@ export const shipMachine = setup({
           target: "qa",
           actions: ["clearGateCheck", assign({ escortFailCount: ({ context }) => context.escortFailCount + 1 })],
         },
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "qa-gate",
           }),
@@ -310,8 +311,8 @@ export const shipMachine = setup({
     merging: {
       on: {
         COMPLETE: { target: "done" },
-        STOP: {
-          target: "stopped",
+        PAUSE: {
+          target: "paused",
           actions: assign({
             phaseBeforeStopped: (): Phase | null => "merging",
           }),
@@ -327,10 +328,10 @@ export const shipMachine = setup({
       type: "final",
     },
 
-    stopped: {
+    paused: {
       on: {
         ABANDON: {
-          target: "done",
+          target: "abandoned",
         },
         RAPID_DEATH_LIMIT: {
           // Auto-stop: too many rapid deaths detected by Engine
@@ -414,6 +415,14 @@ export const shipMachine = setup({
             }),
           },
         ],
+      },
+    },
+
+    abandoned: {
+      on: {
+        REACTIVATE: {
+          target: "paused",
+        },
       },
     },
   },

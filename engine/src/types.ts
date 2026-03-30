@@ -11,7 +11,8 @@ export type Phase =
   | "qa-gate"
   | "merging"
   | "done"
-  | "stopped";
+  | "paused"
+  | "abandoned";
 
 /** @deprecated Use Phase instead. Kept as alias for migration compatibility. */
 export type ShipStatus = Phase;
@@ -287,9 +288,10 @@ export interface ServerMessage {
 export type FlagshipRequest =
   | { request: "sortie"; items: Array<{ repo: string; issueNumber: number; skill?: string }> }
   | { request: "ship-status" }
-  | { request: "ship-stop"; shipId: string }
+  | { request: "ship-pause"; shipId: string }
   | { request: "ship-resume"; shipId: string }
   | { request: "ship-abandon"; shipId: string }
+  | { request: "ship-reactivate"; shipId: string }
   | { request: "ship-delete"; shipId: string }
   | { request: "pr-review-result"; shipId: string; prNumber: number; verdict: "approve" | "request-changes"; comments?: string }
   | { request: "restart" }

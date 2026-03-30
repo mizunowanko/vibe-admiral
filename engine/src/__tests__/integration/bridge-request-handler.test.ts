@@ -10,7 +10,7 @@ type MockShipManager = {
   getAllShips: ReturnType<typeof vi.fn>;
   resolveShip: ReturnType<typeof vi.fn>;
   sortie: ReturnType<typeof vi.fn>;
-  stopShip: ReturnType<typeof vi.fn>;
+  pauseShip: ReturnType<typeof vi.fn>;
   retryShip: ReturnType<typeof vi.fn>;
   updatePhase: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
@@ -65,7 +65,7 @@ describe("FlagshipRequestHandler (integration)", () => {
       getAllShips: vi.fn().mockReturnValue([]),
       resolveShip: vi.fn(),
       sortie: vi.fn(),
-      stopShip: vi.fn(),
+      pauseShip: vi.fn(),
       retryShip: vi.fn(),
       updatePhase: vi.fn(),
       clearGateCheck: vi.fn(),
@@ -201,25 +201,25 @@ describe("FlagshipRequestHandler (integration)", () => {
     });
   });
 
-  describe("ship-stop", () => {
-    it("stops a running ship", async () => {
+  describe("ship-pause", () => {
+    it("pauses a running ship", async () => {
       const ship = makeShip();
       mockShipManager.resolveShip.mockReturnValue(ship);
-      mockShipManager.stopShip.mockReturnValue(true);
+      mockShipManager.pauseShip.mockReturnValue(true);
 
       const result = await handler.handle(
         "fleet-1",
-        { request: "ship-stop", shipId: "ship-aaa-111" },
+        { request: "ship-pause", shipId: "ship-aaa-111" },
         fleetRepos, repoRemotes,
       );
-      expect(result).toContain("Ship Stopped");
+      expect(result).toContain("Ship Paused");
     });
 
     it("returns error when ship not found", async () => {
       mockShipManager.resolveShip.mockReturnValue(undefined);
       const result = await handler.handle(
         "fleet-1",
-        { request: "ship-stop", shipId: "nonexistent" },
+        { request: "ship-pause", shipId: "nonexistent" },
         fleetRepos, repoRemotes,
       );
       expect(result).toContain("not found");

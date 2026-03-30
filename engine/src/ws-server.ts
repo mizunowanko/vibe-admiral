@@ -571,7 +571,7 @@ export class EngineServer {
         // transition to "done" after verifying PR merge. Process death in
         // merging phase triggers the failure path, which has rescue logic
         // to check if the PR was actually merged (#761).
-        const successPhases = new Set(["done", "stopped"]);
+        const successPhases = new Set(["done", "paused", "abandoned"]);
         if (successPhases.has(ship.phase)) {
           this.stateSync.onProcessExit(id, true).catch(console.error);
         } else {
@@ -1580,7 +1580,7 @@ export class EngineServer {
   private startProcessLivenessCheck(): void {
     this.processLivenessTimer = setInterval(() => {
       for (const ship of this.shipManager.getAllShips()) {
-        if (ship.phase !== "done" && ship.phase !== "stopped" && !this.processManager.isRunning(ship.id)) {
+        if (ship.phase !== "done" && ship.phase !== "paused" && ship.phase !== "abandoned" && !this.processManager.isRunning(ship.id)) {
           if (!ship.processDead) {
             this.shipManager.notifyProcessDead(ship.id);
           }
@@ -1591,8 +1591,8 @@ export class EngineServer {
   }
 
   /**
-   * Resume all stopped/dead Units across all Fleets.
-   * Ships: filter processDead or phase=stopped, call retryShip().
+   * Resume all paused/dead Units across all Fleets.
+   * Ships: filter processDead or phase=paused, call retryShip(). Abandoned ships are skipped.
    * Commanders (Flagship/Dock): check isRunning, re-launch if dead.
    */
   async resumeAllUnits(): Promise<ResumeAllUnitResult[]> {
@@ -1605,6 +1605,10 @@ export class EngineServer {
       for (const ship of ships) {
         if (ship.phase === "done") {
           results.push({ type: "ship", id: ship.id, fleetId: fleet.id, label: `Ship #${ship.issueNumber} (${ship.issueTitle})`, status: "skipped", reason: "already done" });
+          continue;
+        }
+        if (ship.phase === "abandoned") {
+          results.push({ type: "ship", id: ship.id, fleetId: fleet.id, label: `Ship #${ship.issueNumber} (${ship.issueTitle})`, status: "skipped", reason: "abandoned" });
           continue;
         }
         if (this.processManager.isRunning(ship.id)) {

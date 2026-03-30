@@ -7,7 +7,8 @@ describe("phaseDisplayName", () => {
     expect(phaseDisplayName("coding")).toBe("Coding");
     expect(phaseDisplayName("merging")).toBe("Merging");
     expect(phaseDisplayName("done")).toBe("Done");
-    expect(phaseDisplayName("stopped")).toBe("Stopped");
+    expect(phaseDisplayName("paused")).toBe("Paused");
+    expect(phaseDisplayName("abandoned")).toBe("Abandoned");
   });
 
   it("handles QA specially", () => {

@@ -1,8 +1,10 @@
-import { memo } from "react";
-import { Anchor, Flag } from "lucide-react";
+import { memo, useState, useCallback } from "react";
+import { Anchor, Flag, Pause, Play, XCircle, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { STATUS_CONFIG, PROCESS_DEAD_CONFIG, phaseDisplayName, gateTypeDisplayName } from "@/lib/ship-status";
+import { useShipStore } from "@/stores/shipStore";
 import type { Session, Ship } from "@/types";
 
 interface SessionHeaderProps {
@@ -58,7 +60,7 @@ function CommanderSessionHeader({
   );
 }
 
-/** Ship header with phase badge, metadata, and gate check banner. */
+/** Ship header with phase badge, action buttons, metadata, and gate check banner. */
 function ShipSessionHeader({
   ship,
   totalLogs,
@@ -85,6 +87,7 @@ function ShipSessionHeader({
             )}
             {ship.processDead ? "Error" : phaseDisplayName(ship.phase)}
           </Badge>
+          <ShipActions ship={ship} />
         </div>
         <p className="text-xs font-medium truncate">
           {ship.issueTitle || `Issue #${ship.issueNumber}`}
@@ -148,5 +151,94 @@ function ShipSessionHeader({
         </div>
       )}
     </>
+  );
+}
+
+/** Action buttons for Ship lifecycle management (pause/resume/abandon/reactivate). */
+function ShipActions({ ship }: { ship: Ship }) {
+  const { pauseShip, retryShip, abandonShip, reactivateShip } = useShipStore();
+  const [loading, setLoading] = useState(false);
+
+  const handleAction = useCallback(async (action: () => Promise<void>) => {
+    setLoading(true);
+    try {
+      await action();
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const isActive = ship.phase !== "done" && ship.phase !== "paused" && ship.phase !== "abandoned";
+
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      {/* Active ship: show pause button */}
+      {isActive && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-gray-400"
+          title="Pause"
+          disabled={loading}
+          onClick={(e) => { e.stopPropagation(); handleAction(() => pauseShip(ship.id)); }}
+        >
+          <Pause className="h-3.5 w-3.5" />
+        </Button>
+      )}
+
+      {/* Paused ship: show resume and abandon buttons */}
+      {ship.phase === "paused" && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-green-400"
+            title="Resume"
+            disabled={loading}
+            onClick={(e) => { e.stopPropagation(); handleAction(() => retryShip(ship.id)); }}
+          >
+            <Play className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-rose-400"
+            title="Abandon"
+            disabled={loading}
+            onClick={(e) => { e.stopPropagation(); handleAction(() => abandonShip(ship.id)); }}
+          >
+            <XCircle className="h-3.5 w-3.5" />
+          </Button>
+        </>
+      )}
+
+      {/* Process-dead ship (not paused/abandoned): show resume button */}
+      {ship.processDead && isActive && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-green-400"
+          title="Resume"
+          disabled={loading}
+          onClick={(e) => { e.stopPropagation(); handleAction(() => retryShip(ship.id)); }}
+        >
+          <Play className="h-3.5 w-3.5" />
+        </Button>
+      )}
+
+      {/* Abandoned ship: show reactivate button */}
+      {ship.phase === "abandoned" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-400"
+          title="Reactivate"
+          disabled={loading}
+          onClick={(e) => { e.stopPropagation(); handleAction(() => reactivateShip(ship.id)); }}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
   );
 }

@@ -44,7 +44,8 @@ const PHASE_REPLAY_EVENTS: Record<Phase, ShipMachineEvent[]> = {
   "qa-gate": [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }],
   merging: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
   done: [],
-  stopped: [],
+  paused: [],
+  abandoned: [],
 };
 
 export class ShipActorManager {
@@ -115,7 +116,7 @@ export class ShipActorManager {
     this.actors.set(ship.id, actor);
 
     // Replay events to advance XState to the DB phase.
-    // For "stopped" ships, replay to phaseBeforeStopped then send STOP.
+    // For "paused" ships, replay to phaseBeforeStopped then send PAUSE.
     const targetPhase = ship.phase as Phase;
     this.replayToPhase(ship.id, actor, targetPhase, phaseBeforeStopped ?? null);
 
@@ -332,17 +333,22 @@ export class ShipActorManager {
     targetPhase: Phase,
     phaseBeforeStopped: Phase | null,
   ): void {
-    // For "stopped" ships: replay to phaseBeforeStopped, then send STOP
-    const replayTarget = targetPhase === "stopped" && phaseBeforeStopped
+    // For "paused"/"abandoned" ships: replay to phaseBeforeStopped, then send PAUSE (+ ABANDON)
+    const isPaused = targetPhase === "paused";
+    const isAbandoned = targetPhase === "abandoned";
+    const replayTarget = (isPaused || isAbandoned) && phaseBeforeStopped
       ? phaseBeforeStopped
       : targetPhase;
 
     const events = PHASE_REPLAY_EVENTS[replayTarget];
     if (!events || events.length === 0) {
-      if (targetPhase === "stopped") {
-        // phaseBeforeStopped is "plan" or unknown — just send STOP from initial state
+      if (isPaused || isAbandoned) {
+        // phaseBeforeStopped is "plan" or unknown — just send PAUSE from initial state
         this.replayingShips.add(shipId);
-        actor.send({ type: "STOP" });
+        actor.send({ type: "PAUSE" });
+        if (isAbandoned) {
+          actor.send({ type: "ABANDON" });
+        }
         this.replayingShips.delete(shipId);
       }
       return;
@@ -352,8 +358,11 @@ export class ShipActorManager {
     for (const event of events) {
       actor.send(event);
     }
-    if (targetPhase === "stopped") {
-      actor.send({ type: "STOP" });
+    if (isPaused || isAbandoned) {
+      actor.send({ type: "PAUSE" });
+      if (isAbandoned) {
+        actor.send({ type: "ABANDON" });
+      }
     }
     this.replayingShips.delete(shipId);
   }

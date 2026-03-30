@@ -105,20 +105,20 @@ describe("ShipActorManager", () => {
       manager.stopAll();
     });
 
-    it("restores actor for stopped phase with phaseBeforeStopped", () => {
-      const ship = createMockShipProcess({ phase: "stopped" });
+    it("restores actor for paused phase with phaseBeforeStopped", () => {
+      const ship = createMockShipProcess({ phase: "paused" });
       manager.restoreActor(ship, "coding");
-      expect(manager.getPhase("ship-1")).toBe("stopped");
-      // Verify the actor is in stopped state and can resume to coding
+      expect(manager.getPhase("ship-1")).toBe("paused");
+      // Verify the actor is in paused state and can resume to coding
       manager.send("ship-1", { type: "RESUME" });
       expect(manager.getPhase("ship-1")).toBe("coding");
       manager.stopAll();
     });
 
-    it("restores stopped actor when phaseBeforeStopped is plan", () => {
-      const ship = createMockShipProcess({ phase: "stopped" });
+    it("restores paused actor when phaseBeforeStopped is plan", () => {
+      const ship = createMockShipProcess({ phase: "paused" });
       manager.restoreActor(ship, "plan");
-      expect(manager.getPhase("ship-1")).toBe("stopped");
+      expect(manager.getPhase("ship-1")).toBe("paused");
       manager.stopAll();
     });
 

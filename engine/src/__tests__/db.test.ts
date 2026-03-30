@@ -351,25 +351,25 @@ describe("FleetDatabase", () => {
   });
 
   describe("getPhaseBeforeStopped", () => {
-    it("returns the phase before the most recent stop", () => {
+    it("returns the phase before the most recent pause", () => {
       db.upsertShip(makeShip({ phase: "qa-gate" }));
-      db.recordPhaseTransition("ship-001", "qa-gate", "stopped", "engine");
-      db.updateShipPhase("ship-001", "stopped");
+      db.recordPhaseTransition("ship-001", "qa-gate", "paused", "engine");
+      db.updateShipPhase("ship-001", "paused");
 
       const phase = db.getPhaseBeforeStopped("ship-001");
       expect(phase).toBe("qa-gate");
     });
 
-    it("returns the most recent stop's from_phase when stopped multiple times", () => {
+    it("returns the most recent pause's from_phase when paused multiple times", () => {
       db.upsertShip(makeShip({ phase: "coding" }));
-      db.recordPhaseTransition("ship-001", "coding", "stopped", "engine");
-      db.updateShipPhase("ship-001", "stopped");
+      db.recordPhaseTransition("ship-001", "coding", "paused", "engine");
+      db.updateShipPhase("ship-001", "paused");
 
-      // Resume to implementing-gate, then stop again
-      db.recordPhaseTransition("ship-001", "stopped", "coding-gate", "engine");
+      // Resume to implementing-gate, then pause again
+      db.recordPhaseTransition("ship-001", "paused", "coding-gate", "engine");
       db.updateShipPhase("ship-001", "coding-gate");
-      db.recordPhaseTransition("ship-001", "coding-gate", "stopped", "engine");
-      db.updateShipPhase("ship-001", "stopped");
+      db.recordPhaseTransition("ship-001", "coding-gate", "paused", "engine");
+      db.updateShipPhase("ship-001", "paused");
 
       const phase = db.getPhaseBeforeStopped("ship-001");
       expect(phase).toBe("coding-gate");
