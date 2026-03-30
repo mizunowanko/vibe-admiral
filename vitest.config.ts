@@ -8,9 +8,22 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./src/test-utils/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+    projects: [
+      {
+        test: {
+          name: "frontend",
+          environment: "jsdom",
+          globals: true,
+          setupFiles: ["./src/test-utils/setup.ts"],
+          include: ["src/**/*.test.{ts,tsx}"],
+        },
+        resolve: {
+          alias: {
+            "@": path.resolve(__dirname, "./src"),
+          },
+        },
+      },
+      "./engine/vitest.config.ts",
+    ],
   },
 });
