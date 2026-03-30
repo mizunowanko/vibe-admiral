@@ -36,6 +36,9 @@ export interface ProcessEvents {
   "rate-limit": (id: string) => void;
 }
 
+/** CLI executable path — overridable via CLAUDE_CLI_PATH for E2E testing with stub CLI. */
+const CLI_PATH = process.env.CLAUDE_CLI_PATH ?? "claude";
+
 export class ProcessManager extends EventEmitter {
   private processes = new Map<string, ChildProcess>();
 
@@ -76,7 +79,7 @@ export class ProcessManager extends EventEmitter {
     }
 
     const proc = spawn(
-      "claude",
+      CLI_PATH,
       args,
       {
         cwd: worktreePath,
@@ -126,7 +129,7 @@ export class ProcessManager extends EventEmitter {
       "--verbose",
     ];
 
-    const proc = spawn("claude", args, {
+    const proc = spawn(CLI_PATH, args, {
       cwd,
       env: {
         ...process.env,
@@ -175,7 +178,7 @@ export class ProcessManager extends EventEmitter {
       ...additionalDirs.flatMap((d) => ["--add-dir", d]),
     ];
 
-    const proc = spawn("claude", args, {
+    const proc = spawn(CLI_PATH, args, {
       cwd: fleetPath,
       env: {
         ...process.env,
@@ -284,7 +287,7 @@ export class ProcessManager extends EventEmitter {
       ...additionalDirs.flatMap((d) => ["--add-dir", d]),
     ];
 
-    const proc = spawn("claude", args, {
+    const proc = spawn(CLI_PATH, args, {
       cwd: fleetPath,
       env: {
         ...process.env,
