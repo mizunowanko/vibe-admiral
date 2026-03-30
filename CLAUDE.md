@@ -122,6 +122,11 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - [ADR-0012: Unit 用語の導入](adr/0012-unit-terminology.md)
 - [ADR-0013: テスト戦略の全体設計](adr/0013-test-strategy-design.md)
 - [ADR-0014: Gate ポーリングを回数ベースに変更](adr/0014-count-based-gate-polling.md)
+- [ADR-0015: 型安全なメッセージルーティング層の導入](adr/0015-typesafe-message-routing.md)
+- [ADR-0016: Engine プロセス分離と Supervisor パターン](adr/0016-engine-process-isolation.md)
+- [ADR-0017: XState を Single Source of Truth にした DB スナップショット設計](adr/0017-xstate-snapshot-persistence.md)
+- [ADR-0018: Escort Gate Feedback の構造化](adr/0018-structured-gate-feedback.md)
+- [ADR-0019: Frontend ストア正規化と楽観的更新パターン](adr/0019-frontend-store-normalization.md)
 
 ## ラベル体系
 
