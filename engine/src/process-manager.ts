@@ -29,6 +29,14 @@ export function isRetryableError(text: string): boolean {
 /** @deprecated Use isRetryableError instead. Kept for backward compatibility. */
 export const isRateLimitError = isRetryableError;
 
+/**
+ * Shared allowedTools for Commander sessions (Flagship / Dock).
+ * Commanders are strictly read-only — no Write, Edit, or Agent.
+ * Dispatch is launched via Engine API (POST /api/dispatch), not Agent tool.
+ */
+export const COMMANDER_ALLOWED_TOOLS =
+  "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion";
+
 export interface ProcessEvents {
   data: (id: string, message: Record<string, unknown>) => void;
   exit: (id: string, code: number | null) => void;
@@ -171,7 +179,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion",
+      COMMANDER_ALLOWED_TOOLS,
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
@@ -280,7 +288,7 @@ export class ProcessManager extends EventEmitter {
       "stream-json",
       "--verbose",
       "--allowedTools",
-      "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,AskUserQuestion,Agent",
+      COMMANDER_ALLOWED_TOOLS,
       ...(systemPrompt
         ? ["--append-system-prompt", systemPrompt]
         : []),
