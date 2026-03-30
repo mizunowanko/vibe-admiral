@@ -18,10 +18,11 @@
     "noUncheckedIndexedAccess": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "shared"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test-utils"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

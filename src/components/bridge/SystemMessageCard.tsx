@@ -10,6 +10,7 @@ const ALERT_TYPE_LABELS: Record<LookoutAlertType, string> = {
   "no-output-stall": "no output",
   "gate-wait-stall": "gate wait",
   "excessive-retries": "retried",
+  "escort-death": "escort died",
 };
 
 function lookoutLabel(meta: SystemMessageMeta): string {
@@ -52,6 +53,7 @@ const STYLE: Record<
   "dispatch-log": null,
   "escort-log": null,
   "rate-limit-status": null,
+  "heads-up": null,
 };
 
 interface SystemMessageCardProps {

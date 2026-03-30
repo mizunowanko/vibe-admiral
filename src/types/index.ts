@@ -5,6 +5,23 @@ export type Phase = _Phase;
 export type GatePhase = _GatePhase;
 export { PHASE_ORDER, isGatePhase } from "./shared-phases";
 
+// Message types from shared (single source of truth for Engine ↔ Frontend).
+import type {
+  ImageAttachment as _ImageAttachment,
+  CaffeinateStatus as _CaffeinateStatus,
+} from "@shared/message-types";
+export type ImageAttachment = _ImageAttachment;
+export type CaffeinateStatus = _CaffeinateStatus;
+export type {
+  ServerMessage,
+  ServerMessageType,
+  ServerMessageOf,
+  StreamMessage,
+  StreamMessageSubtype,
+  SystemMessageMeta,
+  LookoutAlertType,
+} from "@shared/message-types";
+
 /** @deprecated Use Phase instead. Kept for migration compatibility. */
 export type ShipStatus = Phase;
 
@@ -31,11 +48,7 @@ export interface AdmiralSettings {
   caffeinateEnabled?: boolean;
 }
 
-/** Caffeinate process status broadcast by Engine. */
-export interface CaffeinateStatus {
-  enabled: boolean;
-  active: boolean;
-}
+// CaffeinateStatus is now re-exported from @shared/message-types above.
 
 // === Custom Instructions ===
 /** Per-actor custom instructions injected via --append-system-prompt. */
@@ -183,68 +196,12 @@ export interface Issue {
   state: "open" | "closed";
 }
 
-// === Stream Message (Claude Code stream-json output) ===
-export type StreamMessageSubtype =
-  | "ship-status"
-  | "compact-status"
-  | "commander-status"
-  | "request-result"
-  | "pr-review-request"
-  | "gate-check-request"
-  | "lookout-alert"
-  | "task-notification"
-  | "dispatch-log"
-  | "escort-log"
-  | "rate-limit-status";
-
-// === Lookout ===
-export type LookoutAlertType =
-  | "gate-wait-stall"
-  | "no-output-stall"
-  | "excessive-retries";
-
-export interface SystemMessageMeta {
-  category: StreamMessageSubtype;
-  issueNumber?: number;
-  issueTitle?: string;
-  gatePhase?: string;
-  gateType?: GateType;
-  prNumber?: number;
-  prUrl?: string;
-  url?: string;
-  checks?: string[];
-  alertType?: LookoutAlertType;
-  shipId?: string;
-  branchName?: string;
-}
-
-export interface StreamMessage {
-  type:
-    | "assistant"
-    | "user"
-    | "system"
-    | "result"
-    | "error"
-    | "tool_use"
-    | "tool_result"
-    | "history";
-  content?: string;
-  tool?: string;
-  toolInput?: Record<string, unknown>;
-  subtype?: StreamMessageSubtype;
-  meta?: SystemMessageMeta;
-  timestamp?: number;
-  images?: ImageAttachment[];
-  imageCount?: number;
-}
-
-// === Image Attachment ===
-export interface ImageAttachment {
-  base64: string;
-  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
-}
+// StreamMessage, StreamMessageSubtype, SystemMessageMeta, ImageAttachment
+// are now re-exported from @shared/message-types above.
 
 // === WebSocket Messages: Frontend → Engine ===
+// ClientMessage stays local because it references domain types (FleetRepo, etc.).
+// ServerMessage is re-exported from @shared/message-types above.
 export type ClientMessage =
   | { type: "fleet:create"; data: { name: string; repos: FleetRepo[] } }
   | { type: "fleet:list" }
@@ -281,111 +238,3 @@ export type ClientMessage =
   | { type: "issue:get"; data: { repo: string; number: number } }
   | { type: "fs:list-dir"; data: { path?: string } }
   | { type: "pong" };
-
-// === WebSocket Messages: Engine → Frontend ===
-export type ServerMessage =
-  | {
-      type: "flagship:stream";
-      data: { fleetId: string; message: StreamMessage };
-    }
-  | {
-      type: "flagship:question";
-      data: { fleetId: string; message: StreamMessage };
-    }
-  | {
-      type: "flagship:question-timeout";
-      data: { fleetId: string };
-    }
-  | {
-      type: "dock:stream";
-      data: { fleetId: string; message: StreamMessage };
-    }
-  | {
-      type: "dock:question";
-      data: { fleetId: string; message: StreamMessage };
-    }
-  | {
-      type: "dock:question-timeout";
-      data: { fleetId: string };
-    }
-  | {
-      type: "dispatch:stream";
-      data: {
-        id: string;
-        fleetId: string;
-        parentRole: CommanderRole;
-        message: StreamMessage;
-      };
-    }
-  | {
-      type: "dispatch:completed";
-      data: { fleetId: string; dispatch: Dispatch };
-    }
-  | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
-  | {
-      type: "escort:stream";
-      data: {
-        id: string;
-        escortId: string;
-        fleetId?: string;
-        issueNumber?: number;
-        message: StreamMessage;
-      };
-    }
-  | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
-  | {
-      type: "ship:updated";
-      data: { shipId: string };
-    }
-  | {
-      type: "ship:compacting";
-      data: { id: string; isCompacting: boolean };
-    }
-  | {
-      type: "ship:created";
-      data: { shipId: string };
-    }
-  | {
-      type: "ship:done";
-      data: { shipId: string };
-    }
-  | {
-      type: "ship:gate-pending";
-      data: {
-        id: string;
-        gatePhase: GatePhase;
-        gateType: GateType;
-        fleetId: string;
-        issueNumber: number;
-        issueTitle: string;
-      };
-    }
-  | {
-      type: "ship:gate-resolved";
-      data: {
-        id: string;
-        gatePhase: GatePhase;
-        gateType: GateType;
-        approved: boolean;
-        feedback?: string;
-      };
-    }
-  | { type: "ship:data"; data: Ship[] }
-  | { type: "fleet:data"; data: Fleet[] }
-  | { type: "fleet:created"; data: { id: string; fleets: Fleet[] } }
-  | { type: "admiral-settings:data"; data: AdmiralSettings }
-  | { type: "issue:data"; data: { repo: string; issues: Issue[] } }
-  | {
-      type: "fs:dir-listing";
-      data: {
-        path: string;
-        entries: Array<{ name: string; isDirectory: boolean }>;
-      };
-    }
-  | { type: "engine:restarting"; data: Record<string, never> }
-  | { type: "engine:restarted"; data: Record<string, never> }
-  | { type: "engine:previous-crash"; data: { timestamp: string; context: string; message: string; stack?: string } }
-  | { type: "rate-limit:detected"; data: { processId: string } }
-  | { type: "caffeinate:status"; data: CaffeinateStatus }
-  | { type: "ping" }
-  | { type: "error"; data: { source: string; message: string } };

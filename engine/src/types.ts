@@ -201,53 +201,14 @@ export interface Issue {
   state: "open" | "closed";
 }
 
-// === Stream Message ===
-export type StreamMessageSubtype =
-  | "ship-status"
-  | "compact-status"
-  | "commander-status"
-  | "request-result"
-  | "pr-review-request"
-  | "gate-check-request"
-  | "lookout-alert"
-  | "task-notification"
-  | "dispatch-log"
-  | "escort-log"
-  | "rate-limit-status"
-  | "heads-up";
-
-// === Lookout ===
-export type LookoutAlertType =
-  | "gate-wait-stall"
-  | "no-output-stall"
-  | "excessive-retries"
-  | "escort-death";
-
-export interface SystemMessageMeta {
-  category: StreamMessageSubtype;
-  issueNumber?: number;
-  issueTitle?: string;
-  gatePhase?: GatePhase;
-  gateType?: GateType;
-  prNumber?: number;
-  prUrl?: string;
-  url?: string;
-  checks?: string[];
-  alertType?: LookoutAlertType;
-  shipId?: string;
-  branchName?: string;
-}
-
-export interface StreamMessage {
-  type: string;
-  content?: string;
-  tool?: string;
-  toolInput?: Record<string, unknown>;
-  subtype?: StreamMessageSubtype;
-  meta?: SystemMessageMeta;
-  timestamp?: number;
-  [key: string]: unknown;
-}
+// === Stream Message (re-exported from shared) ===
+export type {
+  StreamMessage,
+  StreamMessageSubtype,
+  SystemMessageMeta,
+  LookoutAlertType,
+  ImageAttachment,
+} from "../../shared/message-types.js";
 
 // === Issue Status (GitHub label-based) ===
 export type IssueStatus = "ready" | "sortied" | "done";
@@ -274,14 +235,17 @@ export interface Worktree {
 }
 
 // === WebSocket Messages ===
+// ServerMessage discriminated union from shared (single source of truth for outgoing messages).
+export type {
+  ServerMessage,
+  ServerMessageType,
+  ServerMessageOf,
+} from "../../shared/message-types.js";
+
+/** Incoming client message (JSON-parsed, loose shape). */
 export interface ClientMessage {
   type: string;
   data?: Record<string, unknown>;
-}
-
-export interface ServerMessage {
-  type: string;
-  data: Record<string, unknown>;
 }
 
 // === Flagship Requests (Ship control operations via Flagship) ===

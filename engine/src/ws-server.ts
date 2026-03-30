@@ -34,7 +34,7 @@ import { initFleetDatabase } from "./db.js";
 import type { FleetDatabase } from "./db.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { createApiHandler } from "./api-server.js";
-import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification, ResumeAllUnitResult } from "./types.js";
+import type { Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType, CustomInstructions, ClientMessage, StreamMessage, CommanderRole, AdmiralSettings, SettingsLayer, HeadsUpNotification, ResumeAllUnitResult, ServerMessage } from "./types.js";
 import { applyTemplate } from "./deep-merge.js";
 import { readLastCrashLog, clearCrashLog } from "./crash-logger.js";
 import type { CrashLog } from "./crash-logger.js";
@@ -1153,7 +1153,7 @@ export class EngineServer {
   }
 
   // Messaging helpers
-  private sendTo(ws: WebSocket, msg: Record<string, unknown>): void {
+  private sendTo(ws: WebSocket, msg: ServerMessage): void {
     if (ws.readyState === ws.OPEN) {
       try {
         ws.send(JSON.stringify(msg));
@@ -1163,7 +1163,11 @@ export class EngineServer {
     }
   }
 
-  private broadcast(msg: Record<string, unknown>): void {
+  /**
+   * Type-safe broadcast: sends a ServerMessage to all connected WebSocket clients.
+   * The discriminated union ensures payload shape matches the message type.
+   */
+  private broadcast(msg: ServerMessage): void {
     const data = JSON.stringify(msg);
     for (const client of this.clients) {
       if (client.readyState === client.OPEN) {
