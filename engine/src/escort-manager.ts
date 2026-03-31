@@ -451,11 +451,12 @@ export class EscortManager {
 
       if (approveResult?.success) {
         try {
+          const snapshot = this.actorManager?.getPersistedSnapshot(parentShipId);
           db.persistPhaseTransition(parentShipId, approveResult.fromPhase, approveResult.toPhase, "escort", {
             gate_result: "approved",
             fallback: true,
             reason: `Escort died (code=${code}) but had declared approve intent — auto-approved`,
-          });
+          }, snapshot);
           this.shipManager.syncPhaseFromDb(parentShipId);
           this.shipManager.clearGateCheck(parentShipId);
         } catch (err) {
@@ -486,10 +487,11 @@ export class EscortManager {
     // If XState approved the revert, persist to DB
     if (result?.success) {
       try {
+        const snapshot = this.actorManager?.getPersistedSnapshot(parentShipId);
         db.persistPhaseTransition(parentShipId, result.fromPhase, result.toPhase, "escort", {
           gate_result: "rejected",
           feedback,
-        });
+        }, snapshot);
         this.shipManager.syncPhaseFromDb(parentShipId);
       } catch (err) {
         console.error(`[escort-manager] Failed to persist phase revert for Ship ${parentShipId.slice(0, 8)}...:`, err);
@@ -500,10 +502,11 @@ export class EscortManager {
       const xstatePhase = result?.currentPhase;
       if (xstatePhase) {
         try {
+          const snapshot = this.actorManager?.getPersistedSnapshot(parentShipId);
           db.persistPhaseTransition(parentShipId, currentPhase as Phase, xstatePhase, "escort", {
             gate_result: "rejected",
             feedback: `${feedback} (XState rejected ESCORT_DIED, forcing DB sync to ${xstatePhase})`,
-          });
+          }, snapshot);
           this.shipManager.syncPhaseFromDb(parentShipId);
         } catch (err) {
           console.error(`[escort-manager] Failed to force DB sync for Ship ${parentShipId.slice(0, 8)}...:`, err);

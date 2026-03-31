@@ -295,6 +295,7 @@ describe("EscortManager", () => {
         send: ReturnType<typeof vi.fn>;
         requestTransition: ReturnType<typeof vi.fn>;
         getContext: ReturnType<typeof vi.fn>;
+        getPersistedSnapshot: ReturnType<typeof vi.fn>;
       };
       let deathHandler: ReturnType<typeof vi.fn>;
 
@@ -303,6 +304,7 @@ describe("EscortManager", () => {
           send: vi.fn().mockReturnValue(true),
           requestTransition: vi.fn(),
           getContext: vi.fn().mockReturnValue({ escortFailCount: 0 }),
+          getPersistedSnapshot: vi.fn().mockReturnValue({ value: "plan", context: {} }),
         };
         deathHandler = vi.fn();
 
@@ -339,6 +341,7 @@ describe("EscortManager", () => {
           "plan",
           "escort",
           expect.objectContaining({ gate_result: "rejected" }),
+          expect.anything(),
         );
 
         expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
@@ -369,6 +372,7 @@ describe("EscortManager", () => {
           "coding",
           "escort",
           expect.objectContaining({ feedback: expect.stringContaining("forcing DB sync") }),
+          expect.anything(),
         );
         expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
       });
@@ -428,6 +432,7 @@ describe("EscortManager", () => {
             gate_result: "approved",
             fallback: true,
           }),
+          expect.anything(),
         );
 
         expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
@@ -473,6 +478,7 @@ describe("EscortManager", () => {
           "coding",
           "escort",
           expect.objectContaining({ gate_result: "rejected" }),
+          expect.anything(),
         );
       });
 
