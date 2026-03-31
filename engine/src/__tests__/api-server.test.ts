@@ -460,11 +460,11 @@ describe("API Server", () => {
           expect(res.status).toBe(200);
           expect(res.data.phase).toBe("coding");
           expect(depsWithDb._requestTransition).toHaveBeenCalledWith(
-            "ship-1", { type: "GATE_REJECTED", feedback: "Tests are missing" },
+            "ship-1", { type: "GATE_REJECTED", feedback: { summary: "Tests are missing", items: [] } },
           );
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "coding-gate", "coding", "escort",
-            { gate_result: "rejected", feedback: "Tests are missing" },
+            { gate_result: "rejected", feedback: { summary: "Tests are missing", items: [] } },
             expect.anything(),
           );
         } finally {

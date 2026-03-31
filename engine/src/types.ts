@@ -75,7 +75,7 @@ export interface GateCheckState {
   gatePhase: GatePhase;
   gateType: GateType;
   status: GateStatus;
-  feedback?: string;
+  feedback?: string | GateVerdictFeedback;
   requestedAt: string;
 }
 
@@ -167,7 +167,7 @@ export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 // === Gate Intent (Escort pre-verdict declaration) ===
 export interface GateIntent {
   verdict: "approve" | "reject";
-  feedback?: string;
+  feedback?: string | GateVerdictFeedback;
   declaredAt: string;
 }
 
@@ -375,4 +375,42 @@ export interface ResumeAllUnitResult {
   label: string;
   status: "resumed" | "skipped" | "error";
   reason?: string;
+}
+
+// === Structured Gate Feedback (ADR-0018) ===
+
+/** Category of a gate feedback item. */
+export type GateFeedbackCategory = "plan" | "code" | "test" | "style" | "security" | "performance";
+
+/** Severity of a gate feedback item. */
+export type GateFeedbackSeverity = "blocker" | "warning" | "suggestion";
+
+/** Individual feedback item from a gate review. */
+export interface GateFeedbackItem {
+  category: GateFeedbackCategory;
+  severity: GateFeedbackSeverity;
+  message: string;
+  file?: string;
+  line?: number;
+}
+
+/** Structured feedback payload for gate verdicts. */
+export interface GateVerdictFeedback {
+  summary: string;
+  items: GateFeedbackItem[];
+  previouslyRejected?: string[];
+}
+
+/**
+ * Normalize gate verdict feedback to a structured format.
+ * Accepts both legacy string feedback and structured feedback objects.
+ */
+export function normalizeGateFeedback(
+  feedback: string | GateVerdictFeedback | undefined,
+): GateVerdictFeedback | undefined {
+  if (feedback === undefined || feedback === "") return undefined;
+  if (typeof feedback === "string") {
+    return { summary: feedback, items: [] };
+  }
+  return feedback;
 }

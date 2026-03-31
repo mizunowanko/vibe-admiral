@@ -113,8 +113,10 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
-     -d '{"verdict": "<approve or reject>", "feedback": "<reject の場合のみ>"}'
+     -d '{"verdict": "<approve or reject>", "feedback": {"summary": "<結果の要約>", "items": [{"category": "<test|code|style|security|performance>", "severity": "<blocker|warning|suggestion>", "message": "<指摘内容>"}]}}'
    ```
+
+   > reject の場合のみ `feedback` を付与する。approve の場合は `feedback` を省略する。
 
 6. **ここで終了する。以降の手順は実行しない。**
 
@@ -259,12 +261,27 @@ curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
   -d '{"verdict": "approve"}'
 ```
 
-拒否の場合（1 つ以上の項目が fail）:
+拒否の場合（1 つ以上の項目が fail、構造化フィードバック付き）:
 ```bash
 curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
   -H 'Content-Type: application/json' \
-  -d '{"verdict": "reject", "feedback": "<fail した項目と修正すべき点の要約>"}'
+  -d '{
+    "verdict": "reject",
+    "feedback": {
+      "summary": "<fail した項目の要約>",
+      "items": [
+        {
+          "category": "<test|code|style|security|performance>",
+          "severity": "<blocker|warning|suggestion>",
+          "message": "<具体的な指摘内容>",
+          "file": "<対象ファイルパス（任意）>"
+        }
+      ]
+    }
+  }'
 ```
+
+> **構造化フィードバック**: 各 fail 項目に `category` と `severity` を付与する。`blocker` は修正必須、`warning` は推奨。
 
 ### Step 7: 結果を PR コメントとして書き込む（verdict 送信後に実行）
 

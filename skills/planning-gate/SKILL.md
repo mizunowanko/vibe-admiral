@@ -52,7 +52,7 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
      ```bash
      curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
        -H 'Content-Type: application/json' \
-       -d '{"verdict": "reject", "feedback": "Plan が issue comment に記載されていません"}'
+       -d '{"verdict": "reject", "feedback": {"summary": "Plan が issue comment に記載されていません", "items": [{"category": "plan", "severity": "blocker", "message": "Implementation Plan セクションが issue コメントに存在しない"}]}}'
      ```
      ここで処理を終了する。以降のステップには進まない。
    - 存在する場合 → Step 5 以降の通常レビューフローに進む
@@ -97,12 +97,26 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
      -d '{"verdict": "approve"}'
    ```
 
-   拒否の場合:
+   拒否の場合（構造化フィードバック付き）:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
-     -d '{"verdict": "reject", "feedback": "<修正すべき点>"}'
+     -d '{
+       "verdict": "reject",
+       "feedback": {
+         "summary": "<1-2文の要約>",
+         "items": [
+           {
+             "category": "<plan|code|test|style|security|performance>",
+             "severity": "<blocker|warning|suggestion>",
+             "message": "<具体的な指摘内容>"
+           }
+         ]
+       }
+     }'
    ```
+
+   > **構造化フィードバック**: 各指摘に `category`（plan/code/test/style/security/performance）と `severity`（blocker/warning/suggestion）を付与する。`blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
 
 10. **GitHub にレビュー結果を記録**（verdict 送信後に実行）:
    ```bash

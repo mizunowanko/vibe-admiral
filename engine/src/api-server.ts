@@ -7,7 +7,7 @@ import type { EscortManager } from "./escort-manager.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { DispatchManager } from "./dispatch-manager.js";
 import type { FlagshipRequest, FleetRepo, FleetSkillSources, CustomInstructions, Phase, GatePhase, DispatchType, CommanderRole, AdmiralSettings, HeadsUpNotification, HeadsUpSeverity, ResumeAllUnitResult } from "./types.js";
-import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER } from "./types.js";
+import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER, normalizeGateFeedback } from "./types.js";
 import { resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
 
@@ -535,9 +535,10 @@ async function handleShipRoute(
     }
 
     const escortManager = deps.getEscortManager();
+    const intentFeedback = normalizeGateFeedback(body.feedback as Parameters<typeof normalizeGateFeedback>[0]);
     escortManager.setGateIntent(shipId, {
       verdict,
-      feedback: body.feedback as string | undefined,
+      feedback: intentFeedback,
       declaredAt: new Date().toISOString(),
     });
 
@@ -565,7 +566,8 @@ async function handleShipRoute(
       return;
     }
 
-    const feedback = body.feedback as string | undefined;
+    const rawFeedback = body.feedback as string | Record<string, unknown> | undefined;
+    const structuredFeedback = normalizeGateFeedback(rawFeedback as Parameters<typeof normalizeGateFeedback>[0]);
 
     // XState is the sole authority: request transition through XState first
     const actorManager = deps.getActorManager();
@@ -578,7 +580,7 @@ async function handleShipRoute(
 
     const xstateEvent: import("./ship-machine.js").ShipMachineEvent = verdict === "approve"
       ? { type: "GATE_APPROVED" }
-      : { type: "GATE_REJECTED", feedback: feedback ?? "" };
+      : { type: "GATE_REJECTED", feedback: structuredFeedback ?? "" };
 
     const result = actorManager.requestTransition(shipId, xstateEvent);
     if (!result.success) {
@@ -589,7 +591,7 @@ async function handleShipRoute(
     // XState approved — persist to DB
     const metadata: Record<string, unknown> = verdict === "approve"
       ? { gate_result: "approved" }
-      : { gate_result: "rejected", feedback: feedback ?? "" };
+      : { gate_result: "rejected", feedback: structuredFeedback ?? "" };
 
     const verdictSnapshot = actorManager.getPersistedSnapshot(shipId);
     try {

@@ -168,9 +168,14 @@ export type SupervisorToChild = {
   type: "supervisor:shutdown";
 };
 
-export type ChildToSupervisor = {
-  type: "child:ready";
+/** Sent by WS child to request a graceful restart of all children (prod-mode restart). */
+export type ChildRestartRequest = {
+  type: "child:restart-request";
 };
+
+export type ChildToSupervisor =
+  | { type: "child:ready" }
+  | ChildRestartRequest;
 
 /** Request state dump from ProcessManager Worker (sent by Supervisor after WS child restart). */
 export type IpcRequestStateDump = {
