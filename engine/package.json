@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --format esm --target node20",
+    "build": "tsup src/index.ts src/supervisor/supervisor.ts src/supervisor/ws-server-child.ts src/supervisor/process-manager-worker.ts --format esm --target node20",
     "start": "node dist/index.js",
     "test": "vitest run"
   },

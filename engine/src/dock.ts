@@ -1,4 +1,4 @@
-import { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import { CommanderManager } from "./commander.js";
 
 /**
@@ -7,7 +7,7 @@ import { CommanderManager } from "./commander.js";
  * /investigate, /issue-manage.
  */
 export class DockManager extends CommanderManager {
-  constructor(processManager: ProcessManager) {
+  constructor(processManager: ProcessManagerLike) {
     super(processManager, "dock");
   }
 

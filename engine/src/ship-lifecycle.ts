@@ -2,7 +2,7 @@
  * Ship/Escort lifecycle event processing and process event routing.
  * Extracted from ws-server.ts (ADR-0016 Phase 1).
  */
-import { ProcessManager, isRetryableError } from "./process-manager.js";
+import { isRetryableError, type ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FlagshipManager } from "./flagship.js";
 import type { DockManager } from "./dock.js";
@@ -19,7 +19,7 @@ import {
 import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification } from "./types.js";
 
 export interface ShipLifecycleDeps {
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   shipManager: ShipManager;
   flagshipManager: FlagshipManager;
   dockManager: DockManager;
@@ -519,7 +519,7 @@ export function setupProcessEvents(deps: ShipLifecycleDeps): void {
 export interface ShipStatusDeps {
   shipManager: ShipManager;
   flagshipManager: FlagshipManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   broadcast: (msg: ServerMessage) => void;
 }
 
@@ -587,7 +587,7 @@ export function setupShipCreatedHandler(
 export interface LookoutDeps {
   shipManager: ShipManager;
   flagshipManager: FlagshipManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   escortManager: EscortManager;
   lookout: Lookout;
   broadcast: (msg: ServerMessage) => void;
@@ -671,7 +671,7 @@ export function setupLookout(deps: LookoutDeps): void {
 export interface HeadsUpDeps {
   flagshipManager: FlagshipManager;
   dockManager: DockManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   broadcast: (msg: ServerMessage) => void;
 }
 

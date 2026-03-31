@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-import type { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FlagshipManager } from "./flagship.js";
 import type { DockManager } from "./dock.js";
@@ -196,7 +196,7 @@ async function deleteFleet(
 
 export interface MessageHandlerDeps {
   shipManager: ShipManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   flagshipManager: FlagshipManager;
   dockManager: DockManager;
   caffeinateManager: CaffeinateManager;

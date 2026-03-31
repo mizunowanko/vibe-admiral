@@ -1,5 +1,5 @@
 import type { ShipManager } from "./ship-manager.js";
-import type { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import type { EscortManager } from "./escort-manager.js";
 import type { LookoutAlertType, ShipProcess } from "./types.js";
 
@@ -20,13 +20,13 @@ const SCAN_INTERVAL_MS = 30_000;
 
 export class Lookout {
   private shipManager: ShipManager;
-  private processManager: ProcessManager;
+  private processManager: ProcessManagerLike;
   private escortManager: EscortManager;
   private timer: ReturnType<typeof setInterval> | null = null;
   private onAlert: ((alert: LookoutAlert) => void) | null = null;
   private alertsSent = new Map<string, number>();
 
-  constructor(shipManager: ShipManager, processManager: ProcessManager, escortManager: EscortManager) {
+  constructor(shipManager: ShipManager, processManager: ProcessManagerLike, escortManager: EscortManager) {
     this.shipManager = shipManager;
     this.processManager = processManager;
     this.escortManager = escortManager;

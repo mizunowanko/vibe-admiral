@@ -3,7 +3,7 @@
  * Extracted from ws-server.ts (ADR-0016 Phase 1).
  */
 import type { WebSocket } from "ws";
-import type { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FlagshipManager } from "./flagship.js";
 import type { DockManager } from "./dock.js";
@@ -15,7 +15,7 @@ import type { ServerMessage, StreamMessage, CommanderRole, Fleet, ResumeAllUnitR
 export interface QuestionTimeoutDeps {
   flagshipManager: FlagshipManager;
   dockManager: DockManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   broadcast: (msg: ServerMessage) => void;
   QUESTION_TIMEOUT_MS: number;
 }
@@ -95,7 +95,7 @@ function scanQuestionTimeouts(deps: QuestionTimeoutDeps): void {
 
 export interface ProcessLivenessDeps {
   shipManager: ShipManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
 }
 
 export function startProcessLivenessCheck(deps: ProcessLivenessDeps): ReturnType<typeof setInterval> {
@@ -148,7 +148,7 @@ export function startHeartbeat(deps: HeartbeatDeps): ReturnType<typeof setInterv
 
 export interface ResumeAllUnitsDeps {
   shipManager: ShipManager;
-  processManager: ProcessManager;
+  processManager: ProcessManagerLike;
   flagshipManager: FlagshipManager;
   dockManager: DockManager;
   loadFleets: () => Promise<Fleet[]>;

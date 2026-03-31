@@ -1,6 +1,6 @@
 # ADR-0016: Engine プロセス分離と Supervisor パターン
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-03-30
 - **Issue**: [#764](https://github.com/mizunowanko/vibe-admiral/issues/764)
 - **Tags**: engine, reliability, process-isolation, supervisor
@@ -44,12 +44,22 @@ Engine は単一の Node.js プロセスで以下の全責務を担っている:
 
 分割の基準: 「1 つの `uncaughtException` の影響範囲を特定しやすくする」こと。モジュール境界で try-catch を配置し、非致命的エラーの伝播を防ぐ。
 
-#### Phase 2: プロセス分離（将来検討）
+#### Phase 2: プロセス分離（実施済み — #786）
 
-Phase 1 の分割が安定した後、以下を検討:
+Phase 1 の分割完了後、以下を実装:
 
-1. **Supervisor プロセス**: 軽量な親プロセスが Engine 本体を子プロセスとして管理。crash 時に自動再起動
-2. **IPC 分離**: ProcessManager を別プロセスに分離し、Claude CLI の stdout/stderr パースを Engine 本体から切り離す
+```
+[Supervisor]  (supervisor/supervisor.ts)
+  ├─ [WS/API Server]     (child_process.fork → ws-server-child.ts)
+  └─ [ProcessManager]    (child_process.fork → process-manager-worker.ts)
+```
+
+1. **Supervisor プロセス**: 軽量な親プロセスが 2 つの子プロセスを `fork()` で起動・監視。crash 時は指数バックオフで自動再起動
+2. **IPC 分離**: ProcessManager を別プロセスに分離し、Claude CLI の stdout/stderr パースを WS/API サーバーから完全に切り離し
+3. **IpcProcessManager**: WS/API サーバー内で ProcessManager と同じインターフェースを提供する IPC プロキシ。ローカル state mirror により sync API 互換を維持
+4. **State dump プロトコル**: WS child 再起動後、PM worker から running processes の状態を再同期
+5. **Graceful shutdown**: SIGINT/SIGTERM → WS Server → ProcessManager の順で停止し、orphan CLI プロセスを防止
+6. **Standalone モード**: `ENGINE_NO_SUPERVISOR=1` で従来の単一プロセスモードも引き続き利用可能（テスト用）
 
 ### 検討した代替案
 
@@ -70,7 +80,7 @@ Phase 1 の分割が安定した後、以下を検討:
 
 - モジュール間のインターフェース設計が必要
 - 循環依存のリスク（特に Ship lifecycle ↔ WS broadcast）
-- Phase 1 だけでは uncaughtException での即死問題は解決しない
+- Phase 1 だけでは uncaughtException での即死問題は解決しない（Phase 2 で解決済み）
 
 ### Risk Mitigation
 

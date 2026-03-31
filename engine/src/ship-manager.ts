@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { access, copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
-import { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import { parseStreamMessage } from "./stream-parser.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
@@ -84,7 +84,7 @@ export class ShipManager {
    * Ship display data (phase, issueNumber, worktreePath, etc.) is read from DB.
    */
   private runtime = new Map<string, ShipRuntime>();
-  private processManager: ProcessManager;
+  private processManager: ProcessManagerLike;
   private statusManager: StatusManager;
   private fleetDb: FleetDatabase | null = null;
   private actorManager: ShipActorManager | null = null;
@@ -96,7 +96,7 @@ export class ShipManager {
     | null = null;
 
   constructor(
-    processManager: ProcessManager,
+    processManager: ProcessManagerLike,
     statusManager: StatusManager,
   ) {
     this.processManager = processManager;
