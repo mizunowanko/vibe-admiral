@@ -20,16 +20,24 @@ import { useUIStore } from "@/stores/uiStore";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   Anchor,
   GripVertical,
   Moon,
   Play,
   Plus,
+  RotateCcw,
   Settings,
   Ship,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { resumeAll } from "@/lib/api-client";
+import { resumeAll, restartEngine } from "@/lib/api-client";
 import type { Fleet } from "@/types";
 
 function SortableFleetItem({
@@ -104,6 +112,7 @@ export function Sidebar() {
 
   const [resumeLoading, setResumeLoading] = useState(false);
   const [resumeStatus, setResumeStatus] = useState<string | null>(null);
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -125,6 +134,15 @@ export function Sidebar() {
     },
     [reorderFleets],
   );
+
+  const handleRestart = useCallback(async () => {
+    setRestartDialogOpen(false);
+    try {
+      await restartEngine();
+    } catch (err) {
+      console.error("Failed to restart engine:", err);
+    }
+  }, []);
 
   const handleResumeAll = useCallback(async () => {
     setResumeLoading(true);
@@ -257,6 +275,38 @@ export function Sidebar() {
         {resumeStatus && (
           <p className="px-2 text-xs text-muted-foreground">{resumeStatus}</p>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2"
+          disabled={!engineConnected}
+          onClick={() => setRestartDialogOpen(true)}
+        >
+          <RotateCcw className="h-4 w-4" />
+          Restart Engine
+        </Button>
+        <Dialog open={restartDialogOpen} onOpenChange={setRestartDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Restart Engine?</DialogTitle>
+              <DialogDescription>
+                All running Ships and Commanders will be stopped. They will
+                automatically resume after the Engine restarts.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setRestartDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleRestart}>
+                Restart
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
         <Button
           variant={mainView === "admiral-settings" ? "secondary" : "ghost"}
           size="sm"

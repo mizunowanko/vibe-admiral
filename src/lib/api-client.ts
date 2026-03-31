@@ -109,6 +109,12 @@ export async function reactivateShip(
   return data.result ?? "OK";
 }
 
+export async function restartEngine(): Promise<ApiResponse> {
+  const data = await request("/restart", { method: "POST" });
+  if (!data.ok) throw new Error(data.error ?? "Restart failed");
+  return data;
+}
+
 export async function resumeAll(): Promise<ResumeAllResponse> {
   const res = await fetch(`${BASE_URL}/resume-all`, {
     method: "POST",
