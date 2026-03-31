@@ -67,8 +67,19 @@ TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf ht
 - `qa` に遷移済み → Escort が承認。`/implement-merge` に進む
 - `coding` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得し、PR レビューコメントを確認して修正 → commit & push → 再度 gate に遷移 → Engine が Escort を再起動:
   ```bash
-  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
+  # 構造化フィードバックを取得（ADR-0018: summary + items[]）
+  TRANSITION_JSON=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1")
+  # summary を抽出
+  FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"summary":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # items の message と file/line を抽出（code-review は file/line 付き）
+  FEEDBACK_ITEMS=$(echo "$TRANSITION_JSON" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
+  FEEDBACK_FILES=$(echo "$TRANSITION_JSON" | grep -o '"file":"[^"]*"' | cut -d'"' -f4)
+  # フォールバック: 旧形式（string feedback）
+  if [ -z "$FEEDBACK_SUMMARY" ]; then
+    FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"feedback":"[^"]*"' | head -1 | cut -d'"' -f4)
+  fi
   ```
+  取得したフィードバックの `summary` と各 `items[].message` を確認し、`file` / `line` で指摘箇所を特定して修正する。`severity: blocker` の項目は必ず対応すること。
 
 ### VIBE_ADMIRAL 未設定時
 
