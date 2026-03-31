@@ -42,6 +42,78 @@ export interface ProcessEvents {
   exit: (id: string, code: number | null) => void;
   error: (id: string, error: Error) => void;
   "rate-limit": (id: string) => void;
+  spawn: (id: string) => void;
+}
+
+/**
+ * ProcessManager interface — used by IpcProcessManager proxy to maintain
+ * API compatibility when the real ProcessManager runs in a separate process.
+ */
+export interface ProcessManagerLike {
+  // Spawn methods
+  sortie(
+    id: string,
+    worktreePath: string,
+    issueNumber: number,
+    extraPrompt?: string,
+    skill?: string,
+    extraEnv?: Record<string, string>,
+  ): void;
+  dispatchSortie(
+    id: string,
+    cwd: string,
+    prompt: string,
+    type: "investigate" | "modify",
+    extraEnv?: Record<string, string>,
+  ): void;
+  launchCommander(
+    id: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+    extraEnv?: Record<string, string>,
+  ): void;
+  resumeCommander(
+    id: string,
+    sessionId: string,
+    fleetPath: string,
+    additionalDirs: string[],
+    systemPrompt?: string,
+    extraEnv?: Record<string, string>,
+  ): void;
+  resumeSession(
+    id: string,
+    sessionId: string,
+    message: string,
+    cwd: string,
+    extraEnv?: Record<string, string>,
+    appendSystemPrompt?: string,
+    logFileName?: string,
+  ): void;
+
+  // Communication methods
+  sendMessage(
+    id: string,
+    message: string,
+    images?: Array<{ base64: string; mediaType: string }>,
+  ): unknown;
+  sendToolResult(id: string, toolUseId: string, result: string): unknown;
+
+  // Lifecycle methods
+  kill(id: string): boolean;
+  killAll(): void;
+
+  // Query methods
+  isRunning(id: string): boolean;
+  getActiveCount(): number;
+  getPid(id: string): number | undefined;
+
+  // EventEmitter methods (use `any` to match Node.js EventEmitter signature)
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  on(event: string, listener: (...args: any[]) => void): this;
+  emit(event: string, ...args: any[]): boolean;
+  removeAllListeners(event?: string): this;
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 /** CLI executable path — overridable via CLAUDE_CLI_PATH for E2E testing with stub CLI. */

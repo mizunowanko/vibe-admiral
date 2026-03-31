@@ -1,6 +1,6 @@
 import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import type { StreamMessage, PersistedCommanderSession, CommanderRole, Dispatch, DispatchStatus } from "./types.js";
 
@@ -30,11 +30,11 @@ export interface CommanderSession {
  */
 export class CommanderManager {
   private sessions = new Map<string, CommanderSession>();
-  protected processManager: ProcessManager;
+  protected processManager: ProcessManagerLike;
   private appendCount = 0;
   protected readonly role: CommanderRole;
 
-  constructor(processManager: ProcessManager, role: CommanderRole) {
+  constructor(processManager: ProcessManagerLike, role: CommanderRole) {
     this.processManager = processManager;
     this.role = role;
   }

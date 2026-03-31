@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
@@ -24,7 +24,7 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
  *   5. onEscortExit() handles cleanup or phase revert (if no verdict)
  */
 export class EscortManager {
-  private processManager: ProcessManager;
+  private processManager: ProcessManagerLike;
   private shipManager: ShipManager;
   private getDatabase: () => FleetDatabase | null;
   private actorManager: ShipActorManager | null = null;
@@ -36,7 +36,7 @@ export class EscortManager {
   private gateIntents = new Map<string, GateIntent>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
 
-  constructor(processManager: ProcessManager, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
+  constructor(processManager: ProcessManagerLike, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
     this.processManager = processManager;
     this.shipManager = shipManager;
     this.getDatabase = getDatabase;

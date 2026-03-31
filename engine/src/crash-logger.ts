@@ -5,7 +5,13 @@ import { getAdmiralHome } from "./admiral-home.js";
 const LOGS_DIR = join(getAdmiralHome(), "logs");
 const CRASH_LOG_FILE = join(LOGS_DIR, "engine-crash.log");
 
-export type CrashContext = "uncaughtException" | "unhandledRejection";
+export type CrashContext =
+  | "uncaughtException"
+  | "unhandledRejection"
+  | "supervisor:uncaughtException"
+  | "supervisor:unhandledRejection"
+  | "ws-child:uncaughtException"
+  | "ws-child:unhandledRejection";
 
 export interface CrashLog {
   timestamp: string;

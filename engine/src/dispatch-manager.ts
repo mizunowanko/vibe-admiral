@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import type { DispatchProcess, DispatchType, CommanderRole, Dispatch } from "./types.js";
 
 export interface DispatchRequest {
@@ -20,12 +20,12 @@ export interface DispatchRequest {
  */
 export class DispatchManager {
   private dispatches = new Map<string, DispatchProcess>();
-  private processManager: ProcessManager;
+  private processManager: ProcessManagerLike;
 
   /** Callback invoked when a Dispatch completes, to notify the parent Commander. */
   private onCompleteHandler: ((dispatch: DispatchProcess) => void) | null = null;
 
-  constructor(processManager: ProcessManager) {
+  constructor(processManager: ProcessManagerLike) {
     this.processManager = processManager;
   }
 

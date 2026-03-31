@@ -9,6 +9,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ProcessManager } from "./process-manager.js";
+import type { ProcessManagerLike } from "./process-manager.js";
 import { ShipManager } from "./ship-manager.js";
 import { FlagshipManager } from "./flagship.js";
 import { DockManager } from "./dock.js";
@@ -36,7 +37,7 @@ import { startQuestionTimeoutScanner, startProcessLivenessCheck, startHeartbeat,
 export class EngineServer {
   private httpServer: HttpServer;
   private wss: WebSocketServer;
-  private processManager: ProcessManager;
+  private processManager: ProcessManagerLike;
   private shipManager: ShipManager;
   private flagshipManager: FlagshipManager;
   private dockManager: DockManager;
@@ -67,8 +68,8 @@ export class EngineServer {
   /** Deps object for message handler (created once, reused). */
   private messageHandlerDeps: MessageHandlerDeps;
 
-  constructor(port: number) {
-    this.processManager = new ProcessManager();
+  constructor(port: number, externalProcessManager?: ProcessManagerLike) {
+    this.processManager = externalProcessManager ?? new ProcessManager();
     this.statusManager = new StatusManager();
     this.shipManager = new ShipManager(
       this.processManager,
