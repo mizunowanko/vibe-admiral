@@ -70,6 +70,7 @@ export function useEngine() {
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
   const setRateLimitActive = useUIStore((s) => s.setRateLimitActive);
   const setCaffeinateActive = useUIStore((s) => s.setCaffeinateActive);
+  const setEngineRestarting = useUIStore((s) => s.setEngineRestarting);
   const setPreviousCrash = useUIStore((s) => s.setPreviousCrash);
   const fetchFleets = useFleetStore((s) => s.fetchFleets);
   const setAdmiralSettings = useAdmiralSettingsStore((s) => s.setSettings);
@@ -91,7 +92,7 @@ export function useEngine() {
         registerSession(createCommanderSession("flagship", selectedId));
         const currentFocus = useSessionStore.getState().focusedSessionId;
         if (!currentFocus) {
-          setFocus(commanderSessionId("flagship", selectedId));
+          setFocus(commanderSessionId("flagship", selectedId), "fleet-change");
         }
       }
     });
@@ -117,7 +118,7 @@ export function useEngine() {
       setMainView("command");
       registerSession(createCommanderSession("dock", created.id));
       registerSession(createCommanderSession("flagship", created.id));
-      setFocus(commanderSessionId("flagship", created.id));
+      setFocus(commanderSessionId("flagship", created.id), "fleet-change");
     });
 
     r.on("ship:created", (msg) => {
@@ -241,11 +242,11 @@ export function useEngine() {
     });
 
     r.on("engine:restarting", () => {
-      // Could show a UI notification
+      setEngineRestarting(true);
     });
 
     r.on("engine:restarted", () => {
-      // Could trigger data refresh
+      setEngineRestarting(false);
     });
 
     r.on("engine:previous-crash", (msg) => {
@@ -274,6 +275,7 @@ export function useEngine() {
     syncShips,
     updateShipFromApi,
     setEngineConnected,
+    setEngineRestarting,
     setRateLimitActive,
     setCaffeinateActive,
     setPreviousCrash,
@@ -298,6 +300,10 @@ export function useEngine() {
 
     // Fetch data on every connect/reconnect
     const unsubConnect = wsClient.onConnect(() => {
+      // Clear restarting state on reconnect (covers case where engine:restarted was missed)
+      if (useUIStore.getState().engineRestarting) {
+        setEngineRestarting(false);
+      }
       fetchFleets();
       fetchAdmiralSettings();
       wsClient.send({ type: "caffeinate:get" });
@@ -324,6 +330,7 @@ export function useEngine() {
   }, [
     registry,
     setEngineConnected,
+    setEngineRestarting,
     fetchFleets,
     fetchAdmiralSettings,
     fetchShips,

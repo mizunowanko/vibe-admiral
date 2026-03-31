@@ -2,6 +2,7 @@ import { useEngine } from "@/hooks/useEngine";
 import { Sidebar } from "./Sidebar";
 import { MainPanel } from "./MainPanel";
 import { CrashBanner } from "./CrashBanner";
+import { RestartOverlay } from "./RestartOverlay";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -13,6 +14,7 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden">
+      <RestartOverlay />
       <CrashBanner />
       <ResizablePanelGroup
         orientation="horizontal"

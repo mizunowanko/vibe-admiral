@@ -271,6 +271,7 @@ export class EngineServer {
       loadAdmiralSettings: () => loadAdmiralSettings(),
       loadFleets: () => loadFleets(),
       shutdown: () => this.shutdown(),
+      resumeAllUnits: () => this.resumeAllUnits(),
     });
 
     this.questionTimeoutTimer = startQuestionTimeoutScanner({

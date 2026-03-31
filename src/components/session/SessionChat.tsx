@@ -10,61 +10,10 @@ import { Loader2, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StreamMessage } from "@/types";
 import { groupToolMessages, isToolGroup } from "@/lib/group-tool-messages";
+import { filterSessionMessages } from "@/lib/message-filters";
 import { ToolUseGroup } from "@/components/chat/ToolUseGroup";
 
 type DisplayMessage = StreamMessage & { repeatCount?: number };
-
-/**
- * System subtypes that are explicitly rendered by SessionMessage or ChatMessage.
- * Any system message whose subtype is NOT in this set (and has no special
- * meta.category) will be rendered as null by ChatMessage — filter them out
- * so they don't break tool_use grouping.
- *
- * Keep in sync with:
- * - SessionMessage.tsx render-level guards & SystemMessageCard routing
- * - ChatMessage.tsx system subtype handlers
- */
-const RENDERED_SYSTEM_SUBTYPES = new Set([
-  "ship-status",
-  "compact-status",
-  "task-notification",
-  "request-result",
-  "gate-check-request",
-  "pr-review-request",
-  "lookout-alert",
-  "commander-status",
-  "escort-log",
-  "dispatch-log",
-  "rate-limit-status",
-]);
-
-/**
- * Pre-filter messages that SessionMessage/ChatMessage would suppress (return null).
- * Removing them before groupToolMessages() prevents invisible messages
- * from breaking consecutive tool_use grouping.
- */
-function filterSessionMessages(msgs: StreamMessage[], context: "ship" | "command"): StreamMessage[] {
-  const isShip = context === "ship";
-  return msgs.filter((msg) => {
-    const isSystem = msg.type === "system";
-    // Ship sessions never show User messages
-    if (isShip && msg.type === "user") return false;
-    // Lookout alerts: suppress in Ship
-    if (isSystem && msg.subtype === "lookout-alert" && isShip) return false;
-    // Commander status: suppress in Ship
-    if (isSystem && msg.subtype === "commander-status" && isShip) return false;
-    // Escort log: suppress in non-Ship.
-    // Check meta.category (not subtype) — Escort messages are type "assistant", not "system" (#729).
-    if (msg.meta?.category === "escort-log" && !isShip) return false;
-    // System messages with unrecognized subtypes render as null in ChatMessage.
-    // Messages with meta.category (e.g. escort-log, dispatch-log) are handled
-    // separately and should pass through.
-    if (isSystem && !RENDERED_SYSTEM_SUBTYPES.has(msg.subtype ?? "") && !msg.meta?.category) return false;
-    // Messages with no displayable content (ChatMessage L291 guard)
-    if (!msg.content && msg.type !== "system" && msg.type !== "tool_use") return false;
-    return true;
-  });
-}
 
 /**
  * Collapse consecutive ship-status messages into groups.
