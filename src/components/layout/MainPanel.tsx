@@ -31,7 +31,7 @@ export function MainPanel() {
     registerSession(createCommanderSession("dock", selectedFleetId));
     registerSession(createCommanderSession("flagship", selectedFleetId));
     // Always focus this fleet's Flagship when fleet changes
-    focus(commanderSessionId("flagship", selectedFleetId));
+    focus(commanderSessionId("flagship", selectedFleetId), "fleet-change");
   }, [selectedFleetId]);
 
   // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships, ? or Ctrl+/ → help
@@ -69,11 +69,11 @@ export function MainPanel() {
       e.preventDefault();
 
       if (num === 1) {
-        setFocus(commanderSessionId("dock", selectedFleetId));
+        setFocus(commanderSessionId("dock", selectedFleetId), "keyboard-shortcut");
         return;
       }
       if (num === 2) {
-        setFocus(commanderSessionId("flagship", selectedFleetId));
+        setFocus(commanderSessionId("flagship", selectedFleetId), "keyboard-shortcut");
         return;
       }
 
@@ -86,7 +86,7 @@ export function MainPanel() {
       const shipIndex = num - 3;
       const target = shipSessions[shipIndex];
       if (shipIndex >= 0 && target) {
-        setFocus(target.id);
+        setFocus(target.id, "keyboard-shortcut");
       }
     },
     [selectedFleetId, setFocus],

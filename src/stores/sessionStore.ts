@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Session, SessionType, Dispatch, StreamMessage, CommanderRole } from "@/types";
+import type { Session, SessionType, Dispatch, StreamMessage, CommanderRole, FocusSource } from "@/types";
 
 interface SessionState {
   sessions: Map<string, Session>;
@@ -11,14 +11,22 @@ interface SessionState {
   dispatches: Map<string, Dispatch>;
   /** Dispatch logs keyed by dispatch process ID. */
   dispatchLogs: Map<string, StreamMessage[]>;
+  /** Commander messages keyed by session ID. */
+  commanderMessages: Map<string, StreamMessage[]>;
+  /** Commander loading state keyed by session ID. */
+  commanderLoading: Map<string, boolean>;
 
   registerSession: (session: Session) => void;
   unregisterSession: (id: string) => void;
-  setFocus: (sessionId: string | null) => void;
+  setFocus: (sessionId: string | null, source?: FocusSource) => void;
   setInputDraft: (sessionId: string, value: string) => void;
   addDispatch: (dispatch: Dispatch) => void;
   updateDispatch: (dispatch: Dispatch) => void;
   addDispatchLog: (dispatchId: string, message: StreamMessage) => void;
+  addCommanderMessage: (sessionId: string, msg: StreamMessage) => void;
+  setCommanderLoading: (sessionId: string, loading: boolean) => void;
+  mergeCommanderHistory: (sessionId: string, history: StreamMessage[], requestedAt: number) => void;
+  clearCommanderMessages: (sessionId: string) => void;
 
   /** Get the focused session object. */
   getFocusedSession: () => Session | null;
@@ -97,6 +105,8 @@ export const useSessionStore = create<SessionState>()(
       inputDrafts: {},
       dispatches: new Map(),
       dispatchLogs: new Map(),
+      commanderMessages: new Map(),
+      commanderLoading: new Map(),
 
       registerSession: (session) => {
         set((state) => {
@@ -127,7 +137,7 @@ export const useSessionStore = create<SessionState>()(
         });
       },
 
-      setFocus: (sessionId) => set({ focusedSessionId: sessionId }),
+      setFocus: (sessionId, _source) => set({ focusedSessionId: sessionId }),
 
       setInputDraft: (sessionId, value) =>
         set((s) => ({ inputDrafts: { ...s.inputDrafts, [sessionId]: value } })),
@@ -154,6 +164,57 @@ export const useSessionStore = create<SessionState>()(
           const existing = dispatchLogs.get(dispatchId) ?? [];
           dispatchLogs.set(dispatchId, [...existing, message]);
           return { dispatchLogs };
+        });
+      },
+
+      addCommanderMessage: (sessionId, msg) => {
+        set((state) => {
+          const commanderMessages = new Map(state.commanderMessages);
+          const existing = commanderMessages.get(sessionId) ?? [];
+          commanderMessages.set(sessionId, [...existing, { ...msg, timestamp: msg.timestamp ?? Date.now() }]);
+          return { commanderMessages };
+        });
+      },
+
+      setCommanderLoading: (sessionId, loading) => {
+        set((state) => {
+          const commanderLoading = new Map(state.commanderLoading);
+          commanderLoading.set(sessionId, loading);
+          return { commanderLoading };
+        });
+      },
+
+      mergeCommanderHistory: (sessionId, history, requestedAt) => {
+        set((state) => {
+          const commanderMessages = new Map(state.commanderMessages);
+          const prev = commanderMessages.get(sessionId) ?? [];
+          // Preserve optimistic messages added after history was requested
+          const optimistic = prev.filter(
+            (m) => (m.timestamp ?? 0) >= requestedAt && (m.type === "user" || m.type === "assistant"),
+          );
+          if (optimistic.length === 0) {
+            commanderMessages.set(sessionId, history);
+          } else {
+            // Deduplicate: skip optimistic messages already in server history
+            const historySet = new Set(
+              history.map((h) => `${h.timestamp}:${h.content}`),
+            );
+            const unique = optimistic.filter(
+              (m) => !historySet.has(`${m.timestamp}:${m.content}`),
+            );
+            commanderMessages.set(sessionId, unique.length > 0 ? [...history, ...unique] : history);
+          }
+          return { commanderMessages };
+        });
+      },
+
+      clearCommanderMessages: (sessionId) => {
+        set((state) => {
+          const commanderMessages = new Map(state.commanderMessages);
+          commanderMessages.delete(sessionId);
+          const commanderLoading = new Map(state.commanderLoading);
+          commanderLoading.delete(sessionId);
+          return { commanderMessages, commanderLoading };
         });
       },
 

@@ -98,7 +98,7 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
               session={session}
               ship={ship}
               isFocused={focusedSessionId === sessionId}
-              onFocus={() => setFocus(sessionId)}
+              onFocus={() => setFocus(sessionId, "user-click")}
             />
           );
         })}
@@ -177,13 +177,13 @@ export const SessionCardList = memo(function SessionCardList({
                 <SessionCard
                   session={dockSession}
                   isFocused={focusedSessionId === dockSessionId}
-                  onFocus={() => setFocus(dockSessionId)}
+                  onFocus={() => setFocus(dockSessionId, "user-click")}
                 />
               )}
               <DispatchCards
                 dispatches={dockDispatches}
                 focusedSessionId={focusedSessionId}
-                onFocusDispatch={(id) => setFocus(`dispatch-${id}`)}
+                onFocusDispatch={(id) => setFocus(`dispatch-${id}`, "user-click")}
               />
             </div>
           )}
@@ -198,13 +198,13 @@ export const SessionCardList = memo(function SessionCardList({
                 <SessionCard
                   session={flagshipSession}
                   isFocused={focusedSessionId === flagshipSessionId}
-                  onFocus={() => setFocus(flagshipSessionId)}
+                  onFocus={() => setFocus(flagshipSessionId, "user-click")}
                 />
               )}
               <DispatchCards
                 dispatches={flagshipDispatches}
                 focusedSessionId={focusedSessionId}
-                onFocusDispatch={(id) => setFocus(`dispatch-${id}`)}
+                onFocusDispatch={(id) => setFocus(`dispatch-${id}`, "user-click")}
               />
             </div>
           )}

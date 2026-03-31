@@ -200,10 +200,28 @@ export const useShipStore = create<ShipState>((set) => ({
   syncShips: (shipList) => {
     set((state) => {
       const ships = new Map(state.ships);
-      for (const s of shipList) {
-        // Server is the source of truth — always prefer server state.
-        ships.set(s.id, s);
+      const serverIds = new Set(shipList.map((s) => s.id));
+
+      // Remove ships that no longer exist on the server
+      for (const id of ships.keys()) {
+        if (!serverIds.has(id)) ships.delete(id);
       }
+
+      // Merge server state while preserving local-only fields
+      for (const serverShip of shipList) {
+        const existing = ships.get(serverShip.id);
+        if (existing) {
+          ships.set(serverShip.id, {
+            ...serverShip,
+            // Preserve local-only transient state that the server doesn't track
+            isCompacting: existing.isCompacting,
+            gateCheck: existing.gateCheck,
+          });
+        } else {
+          ships.set(serverShip.id, serverShip);
+        }
+      }
+
       return { ships };
     });
   },

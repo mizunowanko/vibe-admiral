@@ -118,6 +118,13 @@ export interface Session {
   parentSessionId?: string;
 }
 
+// === Focus Source ===
+export type FocusSource =
+  | "user-click"
+  | "keyboard-shortcut"
+  | "fleet-change"
+  | "session-created";
+
 // === PR Review Status ===
 export type PRReviewStatus = "pending" | "approved" | "changes-requested";
 

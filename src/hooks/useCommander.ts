@@ -1,10 +1,18 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { wsClient } from "@/lib/ws-client";
+import { useSessionStore } from "@/stores/sessionStore";
 import type { ServerMessage, StreamMessage, ImageAttachment, CommanderRole } from "@/types";
 
+const EMPTY_MESSAGES: StreamMessage[] = [];
+
 export function useCommander(sessionId: string | null, fleetId: string | null, role: CommanderRole) {
-  const [messages, setMessages] = useState<StreamMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const messages = useSessionStore((s) =>
+    sessionId ? s.commanderMessages.get(sessionId) ?? EMPTY_MESSAGES : EMPTY_MESSAGES,
+  );
+  const isLoading = useSessionStore((s) =>
+    sessionId ? s.commanderLoading.get(sessionId) ?? false : false,
+  );
+
   const historyLoadedRef = useRef(false);
   // Track the timestamp when we requested history so we can identify
   // which optimistic messages arrived after the request and must be preserved.
@@ -19,12 +27,18 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
       return;
     }
 
+    const {
+      addCommanderMessage,
+      setCommanderLoading,
+      mergeCommanderHistory,
+      clearCommanderMessages,
+    } = useSessionStore.getState();
+
     // Only clear messages when sessionId actually changed to prevent
     // cross-session leakage. sessionId encodes both fleetId and role,
     // so a single comparison covers fleet switches and role switches.
     if (prevSessionIdRef.current && prevSessionIdRef.current !== sessionId) {
-      setMessages([]);
-      setIsLoading(false);
+      clearCommanderMessages(prevSessionIdRef.current);
       historyLoadedRef.current = false;
     }
     prevSessionIdRef.current = sessionId;
@@ -45,26 +59,7 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
               const history = JSON.parse(
                 data.message.content ?? "[]",
               ) as StreamMessage[];
-              // Merge: preserve any optimistic messages (user messages added
-              // after the history request) that aren't in the server history.
-              const requestedAt = historyRequestedAtRef.current;
-              setMessages((prev) => {
-                // Collect messages the user added optimistically after we
-                // requested history — these won't be in the server payload yet.
-                const optimistic = prev.filter(
-                  (m) => (m.timestamp ?? 0) >= requestedAt && (m.type === "user" || m.type === "assistant"),
-                );
-                if (optimistic.length === 0) return history;
-                // Deduplicate: if the history already contains a message with
-                // the same timestamp+content, skip it.
-                const historySet = new Set(
-                  history.map((h) => `${h.timestamp}:${h.content}`),
-                );
-                const unique = optimistic.filter(
-                  (m) => !historySet.has(`${m.timestamp}:${m.content}`),
-                );
-                return unique.length > 0 ? [...history, ...unique] : history;
-              });
+              mergeCommanderHistory(sessionId, history, historyRequestedAtRef.current);
               historyLoadedRef.current = true;
             } catch {
               // ignore parse errors
@@ -75,9 +70,9 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
             // should not affect loading state to avoid unnecessary re-renders
             // that could disrupt scroll position during sortie.
             if (data.message.type !== "system") {
-              setIsLoading(false);
+              setCommanderLoading(sessionId, false);
             }
-            setMessages((prev) => [...prev, { ...data.message, timestamp: data.message.timestamp ?? Date.now() }]);
+            addCommanderMessage(sessionId, data.message);
           }
         }
       }
@@ -88,11 +83,12 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
           errorData.source === `${role}-${fleetId}` ||
           errorData.source === `${role}:send`
         ) {
-          setIsLoading(false);
-          setMessages((prev) => [
-            ...prev,
-            { type: "error", content: errorData.message, timestamp: Date.now() },
-          ]);
+          setCommanderLoading(sessionId, false);
+          addCommanderMessage(sessionId, {
+            type: "error",
+            content: errorData.message,
+            timestamp: Date.now(),
+          });
         }
       }
 
@@ -120,17 +116,15 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
 
   const sendMessage = useCallback(
     (message: string, images?: ImageAttachment[]) => {
-      if (!fleetId) return;
-      setMessages((prev) => [
-        ...prev,
-        {
-          type: "user",
-          content: message,
-          timestamp: Date.now(),
-          ...(images && images.length > 0 ? { images } : {}),
-        },
-      ]);
-      setIsLoading(true);
+      if (!fleetId || !sessionId) return;
+      const { addCommanderMessage, setCommanderLoading } = useSessionStore.getState();
+      addCommanderMessage(sessionId, {
+        type: "user",
+        content: message,
+        timestamp: Date.now(),
+        ...(images && images.length > 0 ? { images } : {}),
+      });
+      setCommanderLoading(sessionId, true);
       wsClient.send({
         type: `${role}:send`,
         data: {
@@ -140,7 +134,7 @@ export function useCommander(sessionId: string | null, fleetId: string | null, r
         },
       });
     },
-    [fleetId, role],
+    [fleetId, sessionId, role],
   );
 
   return { messages, sendMessage, isLoading };
