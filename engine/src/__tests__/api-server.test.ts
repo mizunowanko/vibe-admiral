@@ -54,7 +54,8 @@ function createMockDepsWithDb() {
   const requestTransition = vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
   const assertPhaseConsistency = vi.fn().mockReturnValue(true);
   const reconcilePhase = vi.fn().mockReturnValue(false);
-  deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition, assertPhaseConsistency, reconcilePhase });
+  const getPersistedSnapshot = vi.fn().mockReturnValue({ value: "plan", context: {} });
+  deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition, assertPhaseConsistency, reconcilePhase, getPersistedSnapshot });
 
   return {
     ...deps,
@@ -354,6 +355,7 @@ describe("API Server", () => {
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "plan", "plan-gate", "ship",
             { planCommentUrl: "https://example.com" },
+            expect.anything(),
           );
           expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
         } finally {
@@ -437,6 +439,7 @@ describe("API Server", () => {
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "plan-gate", "coding", "escort",
             { gate_result: "approved" },
+            expect.anything(),
           );
           expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
         } finally {
@@ -462,6 +465,7 @@ describe("API Server", () => {
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "coding-gate", "coding", "escort",
             { gate_result: "rejected", feedback: { summary: "Tests are missing", items: [] } },
+            expect.anything(),
           );
         } finally {
           s2.server.close();
@@ -516,6 +520,7 @@ describe("API Server", () => {
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "plan", "done", "ship",
             { reason: "Issue already resolved", nothingToDo: true },
+            expect.anything(),
           );
         } finally {
           s2.server.close();

@@ -1475,12 +1475,13 @@ Always use Bash with \`tee\` or \`cp\` instead.
           lastRateLimitAt: null,
         });
 
-        // Restore XState Actor for this Ship
+        // Restore XState Actor for this Ship (ADR-0017: snapshot-first, replay fallback)
         // For paused Ships, restore phaseBeforeStopped from DB so RESUME guards work
         const phaseBeforeStopped = ship.phase === "paused"
           ? this.fleetDb?.getPhaseBeforeStopped(ship.id) ?? null
           : null;
-        this.actorManager?.restoreActor(ship, phaseBeforeStopped);
+        const actorSnapshot = this.fleetDb?.getActorSnapshot(ship.id) ?? undefined;
+        this.actorManager?.restoreActor(ship, phaseBeforeStopped, actorSnapshot);
 
         restored++;
       }

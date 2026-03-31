@@ -377,7 +377,8 @@ async function handleShipRoute(
       return;
     }
 
-    // XState approved — persist to DB
+    // XState approved — persist to DB (phase + snapshot in same transaction, ADR-0017)
+    const actorSnapshot = actorManager.getPersistedSnapshot(shipId);
     try {
       db.persistPhaseTransition(
         shipId,
@@ -385,6 +386,7 @@ async function handleShipRoute(
         result.toPhase,
         triggeredBy,
         metadata,
+        actorSnapshot,
       );
     } catch (err) {
       // DB failed but XState already transitioned — revert XState to prevent split-brain (#694)
@@ -418,11 +420,12 @@ async function handleShipRoute(
         console.log(`[api-server] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
         const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
         if (autoResult.success) {
+          const autoSnapshot = actorManager.getPersistedSnapshot(shipId);
           try {
             db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
               gate_result: "approved",
               feedback: `Auto-approved: ${reason}`,
-            });
+            }, autoSnapshot);
           } catch (err) {
             console.error(`[api-server] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
           }
@@ -493,11 +496,12 @@ async function handleShipRoute(
           feedback: "Escort launch failed — reverting to pre-gate phase for retry",
         });
         if (revertResult.success) {
+          const revertSnapshot = actorManager.getPersistedSnapshot(shipId);
           try {
             db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
               gate_result: "rejected",
               feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-            });
+            }, revertSnapshot);
           } catch (revertErr) {
             console.error(`[api-server] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
           }
@@ -589,8 +593,9 @@ async function handleShipRoute(
       ? { gate_result: "approved" }
       : { gate_result: "rejected", feedback: structuredFeedback ?? "" };
 
+    const verdictSnapshot = actorManager.getPersistedSnapshot(shipId);
     try {
-      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata);
+      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata, verdictSnapshot);
     } catch (err) {
       // DB failed but XState already transitioned — revert XState to prevent split-brain (#694)
       console.error(`[api-server] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
@@ -628,8 +633,9 @@ async function handleShipRoute(
     }
 
     // XState approved — persist to DB
+    const nothingToDoSnapshot = actorManager.getPersistedSnapshot(shipId);
     try {
-      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "ship", { reason, nothingToDo: true });
+      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "ship", { reason, nothingToDo: true }, nothingToDoSnapshot);
     } catch (err) {
       console.error(`[api-server] DB persist failed after nothing-to-do for Ship ${shipId.slice(0, 8)}...:`, err);
     }

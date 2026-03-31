@@ -87,16 +87,18 @@ export class ShipActorManager {
 
   /**
    * Restore an Actor for a Ship that was persisted in DB.
-   * Replays events to advance the XState actor to the DB phase.
+   * Uses snapshot-based restoration (ADR-0017) when a persisted snapshot is available,
+   * falling back to event replay for legacy Ships without snapshots.
    * Called during Engine startup reconciliation.
    */
-  restoreActor(ship: ShipProcess, phaseBeforeStopped?: Phase | null): Actor<typeof shipMachine> | null {
+  restoreActor(ship: ShipProcess, phaseBeforeStopped?: Phase | null, persistedSnapshot?: unknown): Actor<typeof shipMachine> | null {
     // Don't restore terminal states
     if (ship.phase === "done") return null;
 
     // Stop existing actor if somehow present
     this.stopActor(ship.id);
 
+    // Build input for XState (required even when restoring from snapshot)
     const input: ShipMachineInput = {
       shipId: ship.id,
       fleetId: ship.fleetId,
@@ -110,6 +112,43 @@ export class ShipActorManager {
       phaseBeforeStopped: phaseBeforeStopped ?? null,
     };
 
+    // ADR-0017: Snapshot-based restoration (O(1), no replay needed)
+    if (persistedSnapshot) {
+      try {
+        const actor = createActor(shipMachine, {
+          input,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          snapshot: persistedSnapshot as any,
+        });
+        this.setupSubscription(ship.id, actor, { suppressInitial: true });
+        actor.start();
+        this.actors.set(ship.id, actor);
+
+        // Verify snapshot restoration matches DB phase
+        const restoredPhase = this.getPhase(ship.id);
+        if (restoredPhase === (ship.phase as Phase)) {
+          console.log(
+            `[ship-actor-manager] Restored Ship ${ship.id.slice(0, 8)}... from snapshot (phase=${restoredPhase})`,
+          );
+          return actor;
+        }
+
+        // Snapshot/DB mismatch — fall through to replay
+        console.warn(
+          `[ship-actor-manager] Snapshot/DB phase mismatch for Ship ${ship.id.slice(0, 8)}...: ` +
+          `snapshot=${restoredPhase}, DB=${ship.phase} — falling back to replay`,
+        );
+        this.stopActor(ship.id);
+      } catch (err) {
+        console.warn(
+          `[ship-actor-manager] Snapshot restoration failed for Ship ${ship.id.slice(0, 8)}... — falling back to replay:`,
+          err,
+        );
+        this.stopActor(ship.id);
+      }
+    }
+
+    // Fallback: replay-based restoration (legacy Ships without snapshots)
     const actor = createActor(shipMachine, { input });
     this.setupSubscription(ship.id, actor, { suppressInitial: true });
     actor.start();
@@ -179,6 +218,17 @@ export class ShipActorManager {
     const actor = this.actors.get(shipId);
     if (!actor) return undefined;
     return actor.getSnapshot().context;
+  }
+
+  /**
+   * Get the persisted snapshot for a Ship's Actor (ADR-0017).
+   * Returns the serializable snapshot suitable for DB storage and later restoration
+   * via `createActor(shipMachine, { snapshot })`.
+   */
+  getPersistedSnapshot(shipId: string): unknown | undefined {
+    const actor = this.actors.get(shipId);
+    if (!actor) return undefined;
+    return actor.getPersistedSnapshot();
   }
 
   /**
@@ -252,7 +302,7 @@ export class ShipActorManager {
    *
    * @see https://github.com/mizunowanko/vibe-admiral/issues/694
    */
-  reconcilePhase(shipId: string, dbPhase: Phase): boolean {
+  reconcilePhase(shipId: string, dbPhase: Phase, persistedSnapshot?: unknown): boolean {
     const actorPhase = this.getPhase(shipId);
 
     // No actor — nothing to reconcile
@@ -286,7 +336,7 @@ export class ShipActorManager {
     // Stop the out-of-sync actor
     this.stopActor(shipId);
 
-    // Re-create with the same input and replay to DB phase
+    // Build input for re-creation (used by both snapshot and replay paths)
     const input: ShipMachineInput = {
       shipId,
       fleetId: oldContext?.fleetId ?? "",
@@ -300,6 +350,42 @@ export class ShipActorManager {
       phaseBeforeStopped: oldContext?.phaseBeforeStopped ?? null,
     };
 
+    // ADR-0017: Try snapshot-based reconciliation first
+    if (persistedSnapshot) {
+      try {
+        const actor = createActor(shipMachine, {
+          input,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          snapshot: persistedSnapshot as any,
+        });
+        this.setupSubscription(shipId, actor, { suppressInitial: true });
+        actor.start();
+        this.actors.set(shipId, actor);
+
+        const restoredPhase = this.getPhase(shipId);
+        if (restoredPhase === dbPhase) {
+          console.log(
+            `[ship-actor-manager] reconcilePhase: Ship ${shipId.slice(0, 8)}... repaired from snapshot to ${dbPhase}`,
+          );
+          return true;
+        }
+
+        // Snapshot doesn't match DB phase — fall through to replay
+        console.warn(
+          `[ship-actor-manager] reconcilePhase: snapshot mismatch for Ship ${shipId.slice(0, 8)}...: ` +
+          `snapshot=${restoredPhase}, DB=${dbPhase} — falling back to replay`,
+        );
+        this.stopActor(shipId);
+      } catch (err) {
+        console.warn(
+          `[ship-actor-manager] reconcilePhase: snapshot restoration failed for Ship ${shipId.slice(0, 8)}... — falling back to replay:`,
+          err,
+        );
+        this.stopActor(shipId);
+      }
+    }
+
+    // Fallback: replay-based reconciliation
     const actor = createActor(shipMachine, { input });
     this.setupSubscription(shipId, actor, { suppressInitial: true });
     actor.start();

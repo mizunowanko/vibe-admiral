@@ -20,6 +20,7 @@ export interface ShipRow {
   phase: string;
   created_at: string;
   completed_at: string | null;
+  actor_snapshot: string | null;
 }
 
 /** Persisted escort row stored in SQLite. */
@@ -92,6 +93,9 @@ export class FleetDatabase {
     }
     if (version < 10) {
       this.applyV10();
+    }
+    if (version < 11) {
+      this.applyV11();
     }
   }
 
@@ -476,6 +480,16 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV11(): void {
+    // V11: Add actor_snapshot column for XState snapshot persistence (ADR-0017).
+    // Stores serialized XState Actor snapshot for O(1) restoration on Engine restart.
+    this.db.exec(`
+      ALTER TABLE ships ADD COLUMN actor_snapshot TEXT;
+
+      INSERT INTO schema_version (version) VALUES (11);
+    `);
+  }
+
   /** Ensure a repo row exists and return its ID. */
   ensureRepo(owner: string, name: string): number {
     const existing = this.db.prepare(
@@ -700,6 +714,7 @@ export class FleetDatabase {
     newPhase: Phase,
     triggeredBy: string,
     metadata?: Record<string, unknown>,
+    actorSnapshot?: unknown,
   ): boolean {
     const txn = this.db.transaction(() => {
       // Optimistic lock: verify current phase matches expected
@@ -747,8 +762,16 @@ export class FleetDatabase {
           updated_at = excluded.updated_at
       `).run(shipId, newPhase);
 
-      // Update ships table
-      this.db.prepare("UPDATE ships SET phase = ? WHERE id = ?").run(newPhase, shipId);
+      // Update ships table (phase + snapshot in same transaction for consistency)
+      if (actorSnapshot !== undefined) {
+        this.db.prepare("UPDATE ships SET phase = ?, actor_snapshot = ? WHERE id = ?").run(
+          newPhase,
+          JSON.stringify(actorSnapshot),
+          shipId,
+        );
+      } else {
+        this.db.prepare("UPDATE ships SET phase = ? WHERE id = ?").run(newPhase, shipId);
+      }
 
       return true;
     });
@@ -950,6 +973,26 @@ export class FleetDatabase {
       createdAt: row.created_at,
       completedAt: row.completed_at,
     };
+  }
+
+  /** Get the persisted XState actor snapshot for a ship (ADR-0017). */
+  getActorSnapshot(shipId: string): unknown | null {
+    const row = this.db.prepare(
+      "SELECT actor_snapshot FROM ships WHERE id = ?",
+    ).get(shipId) as { actor_snapshot: string | null } | undefined;
+    if (!row?.actor_snapshot) return null;
+    try {
+      return JSON.parse(row.actor_snapshot);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Update the actor snapshot for a ship (standalone, outside phase transitions). */
+  updateActorSnapshot(shipId: string, snapshot: unknown): void {
+    this.db.prepare(
+      "UPDATE ships SET actor_snapshot = ? WHERE id = ?",
+    ).run(JSON.stringify(snapshot), shipId);
   }
 
   private rowToShipProcess(row: ShipJoinRow): ShipProcess {
