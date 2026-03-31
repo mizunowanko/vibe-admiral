@@ -1,6 +1,6 @@
 # ADR-0018: Escort Gate Feedback の構造化
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-03-30
 - **Issue**: [#764](https://github.com/mizunowanko/vibe-admiral/issues/764)
 - **Tags**: escort, gate, feedback, quality

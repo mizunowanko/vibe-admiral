@@ -76,12 +76,28 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
      -d '{"verdict": "approve"}'
    ```
 
-   拒否の場合:
+   拒否の場合（構造化フィードバック付き）:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
-     -d '{"verdict": "reject", "feedback": "<修正すべき点>"}'
+     -d '{
+       "verdict": "reject",
+       "feedback": {
+         "summary": "<1-2文の要約>",
+         "items": [
+           {
+             "category": "<plan|code|test|style|security|performance>",
+             "severity": "<blocker|warning|suggestion>",
+             "message": "<具体的な指摘内容>",
+             "file": "<対象ファイルパス（任意）>",
+             "line": <対象行番号（任意）>
+           }
+         ]
+       }
+     }'
    ```
+
+   > **構造化フィードバック**: 各指摘に `category`（plan/code/test/style/security/performance）と `severity`（blocker/warning/suggestion）を付与する。`file` と `line` は code-review 特有のフィールドで、対象箇所を特定する。`blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
 
 10. **GitHub にレビュー結果を記録**（verdict 送信後に実行 — プロセスが死んでも verdict は保全済み）:
    - 承認: `gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>"`

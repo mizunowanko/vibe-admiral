@@ -11,7 +11,7 @@
  * @see https://stately.ai/docs/machines
  */
 import { setup, assign } from "xstate";
-import type { Phase, GatePhase, GateCheckState, PRReviewStatus } from "./types.js";
+import type { Phase, GatePhase, GateCheckState, PRReviewStatus, GateVerdictFeedback } from "./types.js";
 import { DEFAULT_GATE_TYPES } from "./types.js";
 
 // === Context ===
@@ -48,8 +48,8 @@ export interface ShipMachineContext {
 export type ShipMachineEvent =
   | { type: "GATE_ENTER" }
   | { type: "GATE_APPROVED" }
-  | { type: "GATE_REJECTED"; feedback?: string }
-  | { type: "ESCORT_DIED"; exitCode: number | null; feedback?: string }
+  | { type: "GATE_REJECTED"; feedback?: string | GateVerdictFeedback }
+  | { type: "ESCORT_DIED"; exitCode: number | null; feedback?: string | GateVerdictFeedback }
   | { type: "COMPLETE" }
   | { type: "PAUSE" }
   | { type: "RESUME" }
