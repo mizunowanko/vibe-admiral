@@ -21,6 +21,7 @@ export interface StartupDeps {
   loadAdmiralSettings(): Promise<AdmiralSettings>;
   loadFleets(): Promise<Fleet[]>;
   shutdown(): void;
+  resumeAllUnits(): Promise<unknown>;
 }
 
 export function runStartupReconciliation(deps: StartupDeps): void {
@@ -33,6 +34,13 @@ export function runStartupReconciliation(deps: StartupDeps): void {
     .then((fleets) => {
       const allRepos = fleets.flatMap((f) => f.repos);
       return deps.stateSync.reconcileOnStartup(allRepos);
+    })
+    .then(() => {
+      // Auto-resume all units after a restart (dev-runner sets RESTARTED=1)
+      if (process.env.RESTARTED === "1") {
+        console.log("[engine] Post-restart: auto-resuming all units");
+        return deps.resumeAllUnits();
+      }
     })
     .catch((err) => {
       if (!deps.getFleetDb()) {
