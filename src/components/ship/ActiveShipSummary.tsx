@@ -65,7 +65,7 @@ export const ActiveShipSummary = memo(function ActiveShipSummary({ fleetId }: Ac
             {shipsInPhase.map((ship) => (
               <button
                 key={ship.id}
-                onClick={() => setFocus(shipSessionId(ship.id))}
+                onClick={() => setFocus(shipSessionId(ship.id), "user-click")}
                 className={cn(
                   "inline-flex items-center gap-0.5 rounded-md px-1 py-0 text-[10px] transition-colors",
                   "hover:ring-1 hover:ring-primary/50 cursor-pointer",

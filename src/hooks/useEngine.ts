@@ -92,7 +92,7 @@ export function useEngine() {
         registerSession(createCommanderSession("flagship", selectedId));
         const currentFocus = useSessionStore.getState().focusedSessionId;
         if (!currentFocus) {
-          setFocus(commanderSessionId("flagship", selectedId));
+          setFocus(commanderSessionId("flagship", selectedId), "fleet-change");
         }
       }
     });
@@ -118,7 +118,7 @@ export function useEngine() {
       setMainView("command");
       registerSession(createCommanderSession("dock", created.id));
       registerSession(createCommanderSession("flagship", created.id));
-      setFocus(commanderSessionId("flagship", created.id));
+      setFocus(commanderSessionId("flagship", created.id), "fleet-change");
     });
 
     r.on("ship:created", (msg) => {
