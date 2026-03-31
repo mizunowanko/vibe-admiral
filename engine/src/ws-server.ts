@@ -23,6 +23,8 @@ import { DispatchManager } from "./dispatch-manager.js";
 import { CaffeinateManager } from "./caffeinate-manager.js";
 import type { FleetDatabase } from "./db.js";
 import { createApiHandler } from "./api-server.js";
+import { createStaticHandler } from "./static-server.js";
+import { config } from "./config.js";
 import { Lookout } from "./lookout.js";
 import type { ClientMessage, StreamMessage, HeadsUpNotification, ResumeAllUnitResult, ServerMessage } from "./types.js";
 import { readLastCrashLog, clearCrashLog } from "./crash-logger.js";
@@ -179,14 +181,25 @@ export class EngineServer {
       requestRestart: () => {
         console.log("[engine] Restart requested via API");
         this.broadcast({ type: "engine:restarting", data: {} });
-        try {
-          const markerPath = join(import.meta.dirname, "..", "..", ".restart");
-          writeFileSync(markerPath, String(Date.now()));
-        } catch (err) {
-          console.warn("[engine] Failed to write .restart marker:", err);
+
+        if (typeof process.send === "function") {
+          // Supervisor mode (prod): request restart via IPC — Supervisor reforks children
+          try {
+            process.send({ type: "child:restart-request" });
+          } catch (err) {
+            console.error("[engine] Failed to send restart request to supervisor:", err);
+          }
+        } else {
+          // Standalone / dev-runner mode: write .restart marker for dev-runner.mjs
+          try {
+            const markerPath = join(import.meta.dirname, "..", "..", ".restart");
+            writeFileSync(markerPath, String(Date.now()));
+          } catch (err) {
+            console.warn("[engine] Failed to write .restart marker:", err);
+          }
+          this.shutdown();
+          process.exit(0);
         }
-        this.shutdown();
-        process.exit(0);
       },
       broadcastRequestResult: (fleetId, result) => {
         const resultMessage: StreamMessage = {
@@ -215,7 +228,17 @@ export class EngineServer {
       resumeAllUnits: () => this.resumeAllUnits(),
     });
 
-    this.httpServer = createServer(apiHandler);
+    // In production, serve Vite build output as static files.
+    // The dist/ directory is at the repo root (../../dist relative to engine/src/).
+    const staticHandler = config.isProd
+      ? createStaticHandler(join(import.meta.dirname, "..", "..", "dist"))
+      : null;
+
+    this.httpServer = createServer((req, res) => {
+      // Try static files first (prod only), then fall through to API
+      if (staticHandler && staticHandler(req, res)) return;
+      apiHandler(req, res);
+    });
     this.wss = new WebSocketServer({ noServer: true });
 
     this.httpServer.on("upgrade", (request, socket, head) => {

@@ -53,6 +53,7 @@ const wsState: ChildState = {
 };
 
 let isShuttingDown = false;
+let isRestarting = false;
 
 // ── Script paths (resolve relative to this file's location) ──
 
@@ -130,6 +131,10 @@ function forkWsChild(): ChildProcess {
       }
       return;
     }
+    if (typed.type === "child:restart-request") {
+      gracefulRestart();
+      return;
+    }
     // Relay WS commands to PM worker
     if (pmState.process?.connected) {
       try {
@@ -182,6 +187,67 @@ function scheduleRestart(
     console.log(`[supervisor] Forking ${label}...`);
     forkFn();
   }, delay);
+}
+
+// ── Graceful restart (prod-mode: WS child requests restart via IPC) ──
+
+function gracefulRestart(): void {
+  if (isRestarting || isShuttingDown) return;
+  isRestarting = true;
+  console.log("[supervisor] Graceful restart requested — shutting down children for restart");
+
+  const shutdownMsg: SupervisorToChild = { type: "supervisor:shutdown" };
+
+  let wsExited = false;
+  let pmExited = false;
+
+  const tryRefork = () => {
+    if (!wsExited || !pmExited) return;
+    console.log("[supervisor] All children exited — reforking with RESTARTED=1");
+    process.env.RESTARTED = "1";
+    isRestarting = false;
+    wsState.restartCount = 0;
+    pmState.restartCount = 0;
+    wsState.shuttingDown = false;
+    pmState.shuttingDown = false;
+    forkPmWorker();
+    forkWsChild();
+  };
+
+  // Track WS child exit
+  if (wsState.process) {
+    wsState.shuttingDown = true;
+    const wsChild = wsState.process;
+    wsChild.once("exit", () => { wsExited = true; tryRefork(); });
+    try { wsChild.send(shutdownMsg); } catch { wsChild.kill("SIGTERM"); }
+  } else {
+    wsExited = true;
+  }
+
+  // Shut down PM worker after WS (2s delay)
+  setTimeout(() => {
+    if (pmState.process) {
+      pmState.shuttingDown = true;
+      const pmChild = pmState.process;
+      pmChild.once("exit", () => { pmExited = true; tryRefork(); });
+      try { pmChild.send(shutdownMsg); } catch { pmChild.kill("SIGTERM"); }
+    } else {
+      pmExited = true;
+      tryRefork();
+    }
+
+    // Force refork after timeout
+    setTimeout(() => {
+      if (!wsExited || !pmExited) {
+        console.warn("[supervisor] Force killing remaining children for restart");
+        if (!wsExited && wsState.process) wsState.process.kill("SIGKILL");
+        if (!pmExited && pmState.process) pmState.process.kill("SIGKILL");
+        wsExited = true;
+        pmExited = true;
+        tryRefork();
+      }
+    }, 5_000);
+  }, 2_000);
 }
 
 // ── Graceful shutdown (WS first, then PM) ──

@@ -10,7 +10,10 @@
  *
  * For standalone mode (no process isolation), set ENGINE_NO_SUPERVISOR=1.
  */
+import { config } from "./config.js";
 export {};
+
+console.log(`[engine] Environment: ${config.env}`);
 
 const noSupervisor = process.env.ENGINE_NO_SUPERVISOR === "1";
 
