@@ -214,6 +214,34 @@ export class EngineServer {
           data: { fleetId, message: resultMessage },
         });
       },
+      notifyGateSkip: (shipId, gatePhase, reason) => {
+        const ship = this.shipManager.getShip(shipId);
+        if (!ship) return;
+        const skipMessage: StreamMessage = {
+          type: "system",
+          subtype: "gate-skip",
+          content: `Escort skipped (${reason})`,
+          meta: {
+            category: "gate-skip",
+            shipId,
+            issueNumber: ship.issueNumber,
+            issueTitle: ship.issueTitle,
+            gatePhase,
+          },
+          timestamp: Date.now(),
+        };
+        // Inject into Ship chat log
+        this.broadcast({
+          type: "ship:stream",
+          data: { id: shipId, message: skipMessage },
+        });
+        // Inject into Flagship chat for visibility
+        this.flagshipManager.addToHistory(ship.fleetId, skipMessage);
+        this.broadcast({
+          type: "flagship:stream",
+          data: { fleetId: ship.fleetId, message: skipMessage },
+        });
+      },
       deliverHeadsUp: (notification: HeadsUpNotification) => {
         return deliverHeadsUp(
           {
