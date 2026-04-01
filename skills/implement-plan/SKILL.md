@@ -104,9 +104,9 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
 
 **`VIBE_ADMIRAL` 設定時**: Engine REST API で `plan-gate` に遷移する。Engine が Escort を起動して plan-review を実施する。
 
-### Gate ポーリング（plan-review）
+### Gate Long-Poll（plan-review）
 
-`/implement` の Gate 待ちテンプレートを使用。phase 名マッピング:
+`/implement` の Gate 待ちテンプレート（HTTP Long-Poll）を使用。phase 名マッピング:
 - `<expected-next-phase>` → `coding`（承認）
 - `<rejection-phase>` → `plan`（reject）
 - `<current-gate-phase>` → `plan-gate`
