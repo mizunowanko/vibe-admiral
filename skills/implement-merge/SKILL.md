@@ -77,7 +77,7 @@ gh pr checks "$PR_NUM" --watch
 ### 4a. main との同期（マージ前に必須）
 
 squash merge の前に、PR ブランチが main の最新と同期済みであることを確認する。
-Gate 待機中（acceptance-test, code-review）に main に入った PR との競合を防ぐため。
+Gate 待機中（QA, code-review）に main に入った PR との競合を防ぐため。
 
 ```bash
 DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
