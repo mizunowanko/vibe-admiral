@@ -15,7 +15,9 @@ import type { LookoutAlert } from "./lookout.js";
 import {
   parseStreamMessage,
   extractSessionId,
+  extractResultUsage,
 } from "./stream-parser.js";
+import type { FleetDatabase } from "./db.js";
 import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification } from "./types.js";
 
 export interface ShipLifecycleDeps {
@@ -27,6 +29,7 @@ export interface ShipLifecycleDeps {
   escortManager: EscortManager;
   dispatchManager: DispatchManager;
   lookout: Lookout;
+  getDatabase: () => FleetDatabase | null;
   commanderFirstData: Set<string>;
   broadcast: (msg: ServerMessage) => void;
   syncCaffeinateCount: () => void;
@@ -178,7 +181,7 @@ function logShipMessage(
 export function setupProcessEvents(deps: ShipLifecycleDeps): void {
   const {
     processManager, shipManager, flagshipManager, dockManager,
-    stateSync, escortManager, dispatchManager,
+    stateSync, escortManager, dispatchManager, getDatabase,
     commanderFirstData, broadcast, syncCaffeinateCount,
   } = deps;
 
@@ -221,6 +224,19 @@ export function setupProcessEvents(deps: ShipLifecycleDeps): void {
         const sessionId = extractSessionId(msg);
         if (sessionId) {
           escortManager.setEscortSessionId(id, sessionId);
+        }
+
+        // Extract token usage from Escort result messages and accumulate in DB (#800)
+        const resultUsage = extractResultUsage(msg);
+        if (resultUsage) {
+          const db = getDatabase();
+          if (db) {
+            db.updateEscortUsage(id, resultUsage.inputTokens, resultUsage.outputTokens, resultUsage.costUsd);
+            console.log(
+              `[escort-usage] Escort ${id.slice(0, 8)}... for Ship ${parentShipId.slice(0, 8)}...: ` +
+              `+${resultUsage.inputTokens.toLocaleString()} in / +${resultUsage.outputTokens.toLocaleString()} out / $${resultUsage.costUsd.toFixed(4)}`,
+            );
+          }
         }
 
         if (parsed && parsed.type !== "result") {

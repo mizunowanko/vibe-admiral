@@ -180,6 +180,9 @@ export class EscortManager {
       phase: "plan",
       createdAt: new Date().toISOString(),
       completedAt: null,
+      totalInputTokens: null,
+      totalOutputTokens: null,
+      costUsd: null,
     };
 
     // Persist to escorts table
