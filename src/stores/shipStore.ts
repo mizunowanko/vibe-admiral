@@ -49,6 +49,7 @@ interface ShipState {
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
 
   updateShipFromApi: (shipId: string) => Promise<void>;
+  upsertShip: (ship: Ship) => void;
   syncShips: (ships: Ship[]) => void;
   fetchShips: (fleetId?: string) => Promise<void>;
   sortie: (fleetId: string, repo: string, issueNumber: number) => Promise<void>;
@@ -190,11 +191,28 @@ export const useShipStore = create<ShipState>((set) => ({
     try {
       const ship = await api.fetchShip(shipId);
       if (ship) {
-        useShipStore.getState().syncShips([ship]);
+        useShipStore.getState().upsertShip(ship);
       }
     } catch (err) {
       console.error("[shipStore] updateShipFromApi failed:", err);
     }
+  },
+
+  upsertShip: (serverShip) => {
+    set((state) => {
+      const ships = new Map(state.ships);
+      const existing = ships.get(serverShip.id);
+      if (existing) {
+        ships.set(serverShip.id, {
+          ...serverShip,
+          isCompacting: existing.isCompacting,
+          gateCheck: existing.gateCheck,
+        });
+      } else {
+        ships.set(serverShip.id, serverShip);
+      }
+      return { ships };
+    });
   },
 
   syncShips: (shipList) => {
