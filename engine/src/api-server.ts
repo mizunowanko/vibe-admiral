@@ -923,13 +923,16 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
 
       // GET /api/ships — Ship list as JSON array (for Frontend)
       // Escorts are in a separate table; attach escort info to parent ships.
+      // fleetId is required to prevent cross-fleet context contamination (#814).
       if (route === "ships" && req.method === "GET") {
-        const fleetId = url.searchParams.get("fleetId") ?? undefined;
+        const fleetId = url.searchParams.get("fleetId");
+        if (!fleetId) {
+          sendJson(res, 400, { ok: false, error: "fleetId query parameter is required" });
+          return;
+        }
         const shipManager = deps.getShipManager();
         const escortManager = deps.getEscortManager();
-        const ships = fleetId
-          ? shipManager.getShipsByFleet(fleetId)
-          : shipManager.getAllShips();
+        const ships = shipManager.getShipsByFleet(fleetId);
 
         // Attach escort info from escorts table
         const enriched = ships.map((s) => {

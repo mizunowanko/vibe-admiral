@@ -105,8 +105,10 @@ export class EngineAPI {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.baseUrl}/api/ships`);
-      return res.ok;
+      // Use a simple fetch to check if the server is responding.
+      // Any non-network-error response (including 404) means the server is alive.
+      const res = await fetch(`${this.baseUrl}/api/ships?fleetId=_healthcheck`);
+      return res.status !== 500;
     } catch {
       return false;
     }
