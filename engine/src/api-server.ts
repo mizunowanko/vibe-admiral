@@ -428,7 +428,7 @@ async function handleShipRoute(
 
       // Gate disabled, auto-approve, or qaRequired=false: skip Escort, auto-transition to next phase
       const refreshedShipForGate = db.getShipById(shipId);
-      const qaRequiredFalse = refreshedShipForGate && !refreshedShipForGate.qaRequired;
+      const qaRequiredFalse = refreshedShipForGate?.qaRequired === false;
       if (gateType === null || gateType === "auto-approve" || qaRequiredFalse) {
         const reason = gateType === null ? "gate disabled" : gateType === "auto-approve" ? "auto-approve" : "qaRequired: false";
         console.log(`[api-server] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
@@ -445,7 +445,9 @@ async function handleShipRoute(
           }
           shipManager.syncPhaseFromDb(shipId);
         }
-        deps.notifyGateSkip(shipId, gatePhase, reason);
+        if (qaRequiredFalse) {
+          deps.notifyGateSkip(shipId, gatePhase, reason);
+        }
         sendJson(res, 200, { ok: true, phase: autoResult.success ? autoResult.toPhase : result.toPhase });
         return;
       }
