@@ -268,6 +268,7 @@ export class EngineServer {
       escortManager: this.escortManager,
       dispatchManager: this.dispatchManager,
       lookout: this.lookout,
+      getDatabase: () => this.fleetDb,
       commanderFirstData: this.commanderFirstData,
       broadcast: (msg: ServerMessage) => this.broadcast(msg),
       syncCaffeinateCount: () => this.syncCaffeinateCount(),
