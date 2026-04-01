@@ -127,6 +127,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - [ADR-0017: XState を Single Source of Truth にした DB スナップショット設計](adr/0017-xstate-snapshot-persistence.md)
 - [ADR-0018: Escort Gate Feedback の構造化](adr/0018-structured-gate-feedback.md)
 - [ADR-0019: Frontend ストア正規化と楽観的更新パターン](adr/0019-frontend-store-normalization.md)
+- [ADR-0020: Escort セッション蓄積のトークン追跡と最適化方針](adr/0020-escort-token-tracking.md)
 
 ## ラベル体系
 

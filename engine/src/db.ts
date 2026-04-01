@@ -32,6 +32,9 @@ export interface EscortRow {
   phase: string;
   created_at: string;
   completed_at: string | null;
+  total_input_tokens: number | null;
+  total_output_tokens: number | null;
+  cost_usd: number | null;
 }
 
 /** Row returned by the ships+repos join query. */
@@ -96,6 +99,9 @@ export class FleetDatabase {
     }
     if (version < 11) {
       this.applyV11();
+    }
+    if (version < 12) {
+      this.applyV12();
     }
   }
 
@@ -487,6 +493,18 @@ export class FleetDatabase {
       ALTER TABLE ships ADD COLUMN actor_snapshot TEXT;
 
       INSERT INTO schema_version (version) VALUES (11);
+    `);
+  }
+
+  private applyV12(): void {
+    // V12: Add token usage tracking columns to escorts table (#800).
+    // Tracks cumulative input/output tokens and cost per Escort across gate sessions.
+    this.db.exec(`
+      ALTER TABLE escorts ADD COLUMN total_input_tokens INTEGER;
+      ALTER TABLE escorts ADD COLUMN total_output_tokens INTEGER;
+      ALTER TABLE escorts ADD COLUMN cost_usd REAL;
+
+      INSERT INTO schema_version (version) VALUES (12);
     `);
   }
 
@@ -963,6 +981,34 @@ export class FleetDatabase {
     this.db.prepare("DELETE FROM escorts WHERE id = ?").run(id);
   }
 
+  /** Accumulate token usage for an Escort (adds to existing totals). */
+  updateEscortUsage(id: string, inputTokens: number, outputTokens: number, costUsd: number): void {
+    this.db.prepare(`
+      UPDATE escorts SET
+        total_input_tokens = COALESCE(total_input_tokens, 0) + ?,
+        total_output_tokens = COALESCE(total_output_tokens, 0) + ?,
+        cost_usd = COALESCE(cost_usd, 0) + ?
+      WHERE id = ?
+    `).run(inputTokens, outputTokens, costUsd, id);
+  }
+
+  /** Get Escort usage for a parent Ship (returns the active or most recent Escort). */
+  getEscortUsageByShipId(shipId: string): {
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    costUsd: number;
+  } | null {
+    const row = this.db.prepare(
+      "SELECT total_input_tokens, total_output_tokens, cost_usd FROM escorts WHERE ship_id = ? ORDER BY created_at DESC LIMIT 1",
+    ).get(shipId) as { total_input_tokens: number | null; total_output_tokens: number | null; cost_usd: number | null } | undefined;
+    if (!row) return null;
+    return {
+      totalInputTokens: row.total_input_tokens ?? 0,
+      totalOutputTokens: row.total_output_tokens ?? 0,
+      costUsd: row.cost_usd ?? 0,
+    };
+  }
+
   private rowToEscortProcess(row: EscortRow): EscortProcess {
     return {
       id: row.id,
@@ -972,6 +1018,9 @@ export class FleetDatabase {
       phase: row.phase,
       createdAt: row.created_at,
       completedAt: row.completed_at,
+      totalInputTokens: row.total_input_tokens,
+      totalOutputTokens: row.total_output_tokens,
+      costUsd: row.cost_usd,
     };
   }
 

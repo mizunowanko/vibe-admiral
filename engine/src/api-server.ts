@@ -274,6 +274,17 @@ async function handleShipRoute(
     return;
   }
 
+  // GET /api/ship/:shipId/escort-usage — Escort token usage for a Ship (#800)
+  if (action === "escort-usage" && req.method === "GET") {
+    const usage = db.getEscortUsageByShipId(shipId);
+    if (!usage) {
+      sendJson(res, 404, { ok: false, error: `No Escort found for Ship ${shipId}` });
+      return;
+    }
+    sendJson(res, 200, { ok: true, ...usage });
+    return;
+  }
+
   // POST-only routes below
   if (req.method !== "POST") {
     sendJson(res, 405, { ok: false, error: "Method not allowed" });

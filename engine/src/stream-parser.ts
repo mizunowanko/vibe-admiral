@@ -1,4 +1,4 @@
-import type { StreamMessage, StreamMessageSubtype } from "./types.js";
+import type { StreamMessage, StreamMessageSubtype, ResultUsage } from "./types.js";
 
 interface ContentBlock {
   type: string;
@@ -20,6 +20,32 @@ export function extractSessionId(
   if (raw.subtype !== "init") return null;
   const sessionId = raw.session_id as string | undefined;
   return sessionId ?? null;
+}
+
+/**
+ * Extract token usage and cost from a raw result message.
+ * Claude CLI emits a `result` message at session end that may contain
+ * `cost_usd` (session total) and `usage` (input/output token counts).
+ * Returns null if the message is not a result or lacks usage data.
+ */
+export function extractResultUsage(
+  raw: Record<string, unknown>,
+): ResultUsage | null {
+  if (raw.type !== "result") return null;
+
+  const costUsd = raw.cost_usd as number | undefined;
+  const usage = raw.usage as
+    | { input_tokens?: number; output_tokens?: number }
+    | undefined;
+
+  // Require at least cost or usage to be present
+  if (costUsd === undefined && !usage) return null;
+
+  return {
+    inputTokens: usage?.input_tokens ?? 0,
+    outputTokens: usage?.output_tokens ?? 0,
+    costUsd: costUsd ?? 0,
+  };
 }
 
 /**

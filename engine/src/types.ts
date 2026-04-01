@@ -303,6 +303,20 @@ export interface EscortProcess {
   phase: string;
   createdAt: string;
   completedAt: string | null;
+  /** Cumulative input tokens across all gate sessions. */
+  totalInputTokens: number | null;
+  /** Cumulative output tokens across all gate sessions. */
+  totalOutputTokens: number | null;
+  /** Cumulative cost in USD across all gate sessions. */
+  costUsd: number | null;
+}
+
+// === Result Usage (extracted from Claude CLI result message) ===
+/** Token usage and cost extracted from a Claude CLI session result message. */
+export interface ResultUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
 }
 
 // === Dispatch (Engine-managed independent CLI process) ===
