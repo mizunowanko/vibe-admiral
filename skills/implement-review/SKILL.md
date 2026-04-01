@@ -57,7 +57,7 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
   -d '{"phase": "coding-gate", "metadata": {}}'
 ```
 
-`/implement` の Gate 待ちテンプレートを使用。phase 名マッピング:
+`/implement` の Gate 待ちテンプレート（HTTP Long-Poll）を使用。phase 名マッピング:
 - `<expected-next-phase>` → `qa`（承認）
 - `<rejection-phase>` → `coding`（reject）
 - `<current-gate-phase>` → `coding-gate`
