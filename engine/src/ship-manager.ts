@@ -946,7 +946,11 @@ export class ShipManager {
       throw new Error(`Failed to deploy /implement skill: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Deploy Admiral sub-skills and shared skills (non-fatal individually)
+    // Deploy Admiral sub-skills and shared skills (non-fatal individually).
+    // Only Ship-essential skills are deployed at sortie time to minimize
+    // token consumption (~9,350 tokens saved per Ship).
+    // Escort-only skills are deployed on-demand before gate transitions
+    // via deployEscortSkills().
     const admiralSkills = [
       // Ship sub-skills
       "implement-setup",
@@ -954,18 +958,9 @@ export class ShipManager {
       "implement-code",
       "implement-review",
       "implement-merge",
-      // Gate skills (deployed to worktree for reference by Escort)
-      "planning-gate",
-      "implementing-gate",
-      "acceptance-test-gate",
-      // Persistent Escort skill (unified gate reviewer)
-      "escort",
       // Shared skills (Bridge/Ship common)
       "admiral-protocol",
       "read-issue",
-      // Other Admiral skills
-      "adr",
-      "admiral-issue",
     ];
     for (const skillName of admiralSkills) {
       const src = join(admiralSkillsDir, skillName, "SKILL.md");
@@ -992,9 +987,40 @@ export class ShipManager {
   }
 
   /**
-   * Re-deploy all skills to a Ship's worktree, overwriting stale copies.
-   * Called before Escort launch at gate phase transitions so that skill
-   * changes made by the Ship during implementation are picked up.
+   * Deploy Escort-only skills to a Ship's worktree.
+   * Called before Escort launch at gate phase transitions so the Escort
+   * has access to gate-specific skills without bloating Ship's context.
+   */
+  private async deployEscortSkills(
+    repoRoot: string,
+    worktreePath: string,
+    skillSources?: FleetSkillSources,
+  ): Promise<void> {
+    const admiralSkillsDir = skillSources?.admiralSkillsDir
+      ?? join(repoRoot, "skills");
+
+    const escortSkills = [
+      // Gate-specific skills (used by Escort for each review phase)
+      "planning-gate",
+      "implementing-gate",
+      "acceptance-test-gate",
+      // Unified gate reviewer skill
+      "escort",
+    ];
+    for (const skillName of escortSkills) {
+      const src = join(admiralSkillsDir, skillName, "SKILL.md");
+      try {
+        await this.deploySkill(skillName, src, worktreePath, true);
+      } catch {
+        console.warn(`[ship-manager] Failed to deploy Escort skill /${skillName}`);
+      }
+    }
+  }
+
+  /**
+   * Re-deploy skills to a Ship's worktree before Escort launch.
+   * Refreshes Ship skills (force overwrite) and deploys Escort-only
+   * skills that were omitted from the initial sortie deployment.
    */
   async redeploySkills(
     shipId: string,
@@ -1007,7 +1033,8 @@ export class ShipManager {
     }
     const repoRoot = await worktree.getRepoRoot(ship.worktreePath);
     await this.deploySkills(repoRoot, ship.worktreePath, skillSources, true);
-    console.log(`[ship-manager] Re-deployed skills to ${ship.worktreePath}`);
+    await this.deployEscortSkills(repoRoot, ship.worktreePath, skillSources);
+    console.log(`[ship-manager] Re-deployed skills (Ship + Escort) to ${ship.worktreePath}`);
   }
 
   /**
