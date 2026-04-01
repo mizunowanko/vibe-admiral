@@ -47,6 +47,7 @@ export const SessionMessage = memo(function SessionMessage({
     isSystem &&
     (message.subtype === "ship-status" ||
       message.subtype === "gate-check-request" ||
+      message.subtype === "gate-skip" ||
       message.subtype === "pr-review-request" ||
       message.subtype === "lookout-alert")
   ) {
@@ -68,6 +69,7 @@ export const SessionMessage = memo(function SessionMessage({
     isSystem &&
     message.meta &&
     (message.subtype === "gate-check-request" ||
+      message.subtype === "gate-skip" ||
       message.subtype === "pr-review-request" ||
       message.subtype === "lookout-alert")
   ) {

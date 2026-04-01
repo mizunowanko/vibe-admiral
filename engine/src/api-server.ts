@@ -74,6 +74,7 @@ interface ApiDeps {
   loadRules: (paths: string[]) => Promise<string>;
   loadAdmiralSettings: () => Promise<AdmiralSettings>;
   broadcastRequestResult: (fleetId: string, result: string) => void;
+  notifyGateSkip: (shipId: string, gatePhase: GatePhase, reason: string) => void;
   deliverHeadsUp: (notification: HeadsUpNotification) => boolean;
   resumeAllUnits: () => Promise<ResumeAllUnitResult[]>;
   requestRestart: () => void;
@@ -516,9 +517,11 @@ async function handleShipRoute(
       });
       const gateType = resolveGateType(gatePhase, mergedGateSettings.gates);
 
-      // Gate disabled or auto-approve: skip Escort, auto-transition to next phase
-      if (gateType === null || gateType === "auto-approve") {
-        const reason = gateType === null ? "gate disabled" : "auto-approve";
+      // Gate disabled, auto-approve, or qaRequired=false: skip Escort, auto-transition to next phase
+      const refreshedShipForGate = db.getShipById(shipId);
+      const qaRequiredFalse = refreshedShipForGate?.qaRequired === false;
+      if (gateType === null || gateType === "auto-approve" || qaRequiredFalse) {
+        const reason = gateType === null ? "gate disabled" : gateType === "auto-approve" ? "auto-approve" : "qaRequired: false";
         console.log(`[api-server] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
         const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
         if (autoResult.success) {
@@ -526,12 +529,15 @@ async function handleShipRoute(
           try {
             db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
               gate_result: "approved",
-              feedback: `Auto-approved: ${reason}`,
+              feedback: `Escort skipped (${reason})`,
             }, autoSnapshot);
           } catch (err) {
             console.error(`[api-server] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
           }
           shipManager.syncPhaseFromDb(shipId);
+        }
+        if (qaRequiredFalse) {
+          deps.notifyGateSkip(shipId, gatePhase, reason);
         }
         sendJson(res, 200, { ok: true, phase: autoResult.success ? autoResult.toPhase : result.toPhase });
         return;

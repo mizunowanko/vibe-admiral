@@ -18,6 +18,7 @@ const MESSAGE_FILTER_RULES: FilterRule[] = [
   { subtype: "task-notification", contexts: ["ship", "command"], render: true },
   { subtype: "request-result", contexts: ["ship", "command"], render: true },
   { subtype: "gate-check-request", contexts: ["ship", "command"], render: true },
+  { subtype: "gate-skip", contexts: ["ship", "command"], render: true },
   { subtype: "pr-review-request", contexts: ["ship", "command"], render: true },
   { subtype: "rate-limit-status", contexts: ["ship", "command"], render: true },
   { subtype: "lookout-alert", contexts: ["command"], render: true },

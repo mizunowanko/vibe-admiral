@@ -32,6 +32,12 @@ const STYLE: Record<
     bg: "bg-indigo-500/10",
     text: "text-indigo-300",
   },
+  "gate-skip": {
+    icon: "⏭",
+    border: "border-green-500/30",
+    bg: "bg-green-500/10",
+    text: "text-green-300",
+  },
   "pr-review-request": {
     icon: "📝",
     border: "border-sky-500/30",
@@ -71,6 +77,9 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
   switch (subtype) {
     case "gate-check-request":
       label = `${issueRef} ${gateTypeDisplayName(meta.gateType)}開始`;
+      break;
+    case "gate-skip":
+      label = `${issueRef} Escort スキップ (qaRequired: false)`;
       break;
     case "pr-review-request":
       label = meta.prNumber
