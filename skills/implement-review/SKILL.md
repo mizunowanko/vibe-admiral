@@ -57,29 +57,13 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
   -d '{"phase": "coding-gate", "metadata": {}}'
 ```
 
-Engine が Escort プロセスを起動して code-review を実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
-**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
+`/implement` の Gate 待ちテンプレートを使用。phase 名マッピング:
+- `<expected-next-phase>` → `qa`（承認）
+- `<rejection-phase>` → `coding`（reject）
+- `<current-gate-phase>` → `coding-gate`
 
-```bash
-TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in qa) echo "Gate approved"; break ;; coding) echo "Gate rejected"; break ;; coding-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
-```
-
-- `qa` に遷移済み → Escort が承認。`/implement-merge` に進む
-- `coding` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得し、PR レビューコメントを確認して修正 → commit & push → 再度 gate に遷移 → Engine が Escort を再起動:
-  ```bash
-  # 構造化フィードバックを取得（ADR-0018: summary + items[]）
-  TRANSITION_JSON=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1")
-  # summary を抽出
-  FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"summary":"[^"]*"' | head -1 | cut -d'"' -f4)
-  # items の message と file/line を抽出（code-review は file/line 付き）
-  FEEDBACK_ITEMS=$(echo "$TRANSITION_JSON" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
-  FEEDBACK_FILES=$(echo "$TRANSITION_JSON" | grep -o '"file":"[^"]*"' | cut -d'"' -f4)
-  # フォールバック: 旧形式（string feedback）
-  if [ -z "$FEEDBACK_SUMMARY" ]; then
-    FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"feedback":"[^"]*"' | head -1 | cut -d'"' -f4)
-  fi
-  ```
-  取得したフィードバックの `summary` と各 `items[].message` を確認し、`file` / `line` で指摘箇所を特定して修正する。`severity: blocker` の項目は必ず対応すること。
+- `qa` に遷移 → Escort 承認。`/implement-merge` に進む
+- `coding` に戻った → Escort reject。`/implement` の構造化フィードバック取得テンプレートでフィードバックを取得し、修正 → commit & push → 再度 gate に遷移
 
 ### VIBE_ADMIRAL 未設定時
 

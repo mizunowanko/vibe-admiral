@@ -95,6 +95,24 @@ done
 [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
+**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
+
+### 構造化フィードバック取得（rejection 時）
+
+Gate reject 後、phase-transition-log API からフィードバックを取得する（ADR-0018 形式）:
+
+```bash
+TRANSITION_JSON=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1")
+FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"summary":"[^"]*"' | head -1 | cut -d'"' -f4)
+FEEDBACK_ITEMS=$(echo "$TRANSITION_JSON" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
+# フォールバック: 旧形式（string feedback）
+if [ -z "$FEEDBACK_SUMMARY" ]; then
+  FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"feedback":"[^"]*"' | head -1 | cut -d'"' -f4)
+fi
+```
+
+`severity: blocker` の項目は必ず対応すること。code-review では `file` / `line` フィールドで指摘箇所を特定する。
+
 ### Gate フロー（Engine Escort 方式）
 
 1. Ship が Engine REST API で gate phase に遷移（例: `plan` → `plan-gate`）

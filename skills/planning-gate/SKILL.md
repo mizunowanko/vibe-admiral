@@ -14,18 +14,12 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
 
 ## 環境変数
 
-- `VIBE_ADMIRAL_SHIP_ID`: レビュー対象の Ship ID
-- `VIBE_ADMIRAL_MAIN_REPO`: リポジトリ（owner/repo）
-- `VIBE_ADMIRAL_ENGINE_PORT`: Engine API ポート（default: 9721）
-- `VIBE_ADMIRAL_QA_REQUIRED_PATHS`: qaRequired 強制パス（JSON 配列、未設定時はチェックスキップ）
+- `/escort` の Common Setup を参照。追加: `VIBE_ADMIRAL_QA_REQUIRED_PATHS`（qaRequired 強制パス、JSON 配列）
 
 ## Procedure
 
-1. リポ情報を取得:
+1. `/escort` の Common Setup でセットアップ済み。追加変数:
    ```bash
-   REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
-   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-   ENGINE_PORT="${VIBE_ADMIRAL_ENGINE_PORT:-9721}"
    QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    ```
 
@@ -81,44 +75,9 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    - 実現可能で適切なスコープか
    - re-review の場合、前回のフィードバックが反映されているか
 
-8. **Gate intent を宣言**（verdict 前のフォールバック用）:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-intent \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "<approve or reject>"}'
-   ```
+8. **Gate intent → verdict → GitHub 記録**: `/escort` の Common Gate Protocol に従う。
 
-9. **Engine REST API で gate verdict を送信**（GitHub コメントより先に実行 — プロセス終了による verdict 喪失を防止）:
-
-   承認の場合:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}'
-   ```
-
-   拒否の場合（構造化フィードバック付き）:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "verdict": "reject",
-       "feedback": {
-         "summary": "<1-2文の要約>",
-         "items": [
-           {
-             "category": "<plan|code|test|style|security|performance>",
-             "severity": "<blocker|warning|suggestion>",
-             "message": "<具体的な指摘内容>"
-           }
-         ]
-       }
-     }'
-   ```
-
-   > **構造化フィードバック**: 各指摘に `category`（plan/code/test/style/security/performance）と `severity`（blocker/warning/suggestion）を付与する。`blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
-
-10. **GitHub にレビュー結果を記録**（verdict 送信後に実行）:
+9. **GitHub にレビュー結果を記録**（verdict 送信後に実行）:
    ```bash
    gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
 

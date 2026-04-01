@@ -26,19 +26,13 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
   -d '{"phase": "qa-gate", "metadata": {}}'
 ```
 
-Engine が Escort プロセスを起動して Playwright テストを実施する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
-**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
+`/implement` の Gate 待ちテンプレートを使用。phase 名マッピング:
+- `<expected-next-phase>` → `merging`（承認）
+- `<rejection-phase>` → `qa`（reject）
+- `<current-gate-phase>` → `qa-gate`
 
-```bash
-TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in merging) echo "Gate approved"; break ;; qa) echo "Gate rejected"; break ;; qa-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
-```
-
-- `merging` に遷移済み → Escort が承認。Step 2 へ
-- `qa` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して修正:
-  ```bash
-  FEEDBACK=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1" | grep -o '"feedback":"[^"]*"' | cut -d'"' -f4)
-  ```
-  フィードバックに基づいて修正 → commit & push → 再度 `qa-gate` に遷移 → Engine が Escort 再起動
+- `merging` に遷移 → Escort 承認。Step 2 へ
+- `qa` に戻った → Escort reject。`/implement` の構造化フィードバック取得テンプレートでフィードバックを取得し、修正 → commit & push → 再度 `qa-gate` に遷移
 
 ### VIBE_ADMIRAL 未設定時
 
@@ -193,15 +187,8 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
 
 ## Step 7: CI 失敗時の修正ループ
 
-1. `gh run view <run-id> --log-failed` で失敗ログを取得
+1. `/implement` の CI 失敗ログの取得方法を参照してログを取得
 2. エラーを分析
 3. ローカルで修正（CLAUDE.md の Commands テーブル参照）
 4. 修正をコミット & push
 5. Step 2 に戻る
-
-## CI 失敗ログの取得方法
-
-```bash
-gh run list --limit=3
-gh run view <run-id> --log-failed
-```
