@@ -35,132 +35,75 @@ Gate 3 (qa-gate):
   Escort resumed (--resume sessionId) → QA → verdict → exit
 ```
 
-## Gate Detection
-
-Detect which gate the parent Ship is in:
+## Common Setup
 
 ```bash
 PARENT_SHIP_ID="${VIBE_ADMIRAL_PARENT_SHIP_ID}"
+REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
 ENGINE_PORT="${VIBE_ADMIRAL_ENGINE_PORT:-9721}"
+```
 
+## Gate Detection
+
+```bash
 RESULT=$(curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/phase")
 PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4)
 ```
 
-Based on `$PHASE`, execute the corresponding review below. If the phase is not a gate
-phase, something is wrong — log an error and exit.
+Based on `$PHASE`, execute the corresponding gate skill (`/planning-gate`, `/implementing-gate`, `/acceptance-test-gate`). If not a gate phase — log an error and exit.
 
-## Planning Gate Review
+## Common Gate Protocol
 
-When `PHASE` is `plan-gate`:
+All gate skills share this verdict submission flow. **Individual gate skills reference this section.**
+Gate API は親 Ship（`PARENT_SHIP_ID`）に対して実行する。`SHIP_ID`（Escort 自身）ではない。
 
-1. Read the Issue and its comments to find the Implementation Plan comment:
-   ```bash
-   gh issue view $ISSUE_NUMBER --repo "$REPO" --json number,title,body,labels,comments
-   ```
+### 1. Gate intent（verdict 前のフォールバック）
 
-2. Review the plan for:
-   - Alignment with Issue requirements
-   - Feasibility and completeness
-   - Impact analysis accuracy
-   - Test plan adequacy
-
-3. Declare gate intent (fallback if process dies before verdict):
-   ```bash
-   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent" \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}' # or "reject"
-   ```
-
-4. Submit verdict (before posting comment — prevents verdict loss on process exit):
-   ```bash
-   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict" \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}' # or "reject" with "feedback": "..."
-   ```
-
-5. Post review findings as an Issue comment, then exit
-
-## Implementing Gate Review
-
-When `PHASE` is `coding-gate`:
-
-1. Get the PR URL from the parent Ship or find it via gh:
-   ```bash
-   gh pr list --head "<branch-name>" --repo "$REPO" --json number,url --jq '.[0]'
-   ```
-
-2. Review the PR diff:
-   ```bash
-   gh pr diff <pr-number> --repo "$REPO"
-   ```
-
-3. Check for:
-   - Code quality and consistency
-   - **Alignment with the approved plan** (you reviewed the plan in plan-gate — leverage that context)
-   - Test coverage
-   - No security issues
-
-4. Declare gate intent (fallback if process dies before verdict):
-   ```bash
-   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent" \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}' # or "reject"
-   ```
-
-5. Submit verdict (before posting comment — prevents verdict loss on process exit):
-   ```bash
-   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict" \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}' # or "reject" with "feedback": "..."
-   ```
-
-6. Post review findings as a PR comment, then exit
-
-## Acceptance Test Gate Review
-
-When `PHASE` is `qa-gate`:
-
-### Step 0: QA Required Check
-
-Check if QA is required by reading the plan-gate transition metadata:
 ```bash
-TRANSITIONS=$(curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/phase-transition-log?limit=50")
-QA_REQUIRED=$(echo "$TRANSITIONS" | grep -o '"toPhase":"plan-gate"[^}]*"metadata":{[^}]*"qaRequired":[^,}]*' | grep -o '"qaRequired":[^,}]*' | cut -d: -f2 | head -1)
-QA_REQUIRED="${QA_REQUIRED:-true}"
+curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
+  -H 'Content-Type: application/json' \
+  -d '{"verdict": "<approve or reject>"}'
 ```
 
-If `QA_REQUIRED` is `false`:
-1. Submit `approve` verdict immediately
-2. Post a QA skip comment on the PR
-3. Exit
+### 2. Gate verdict（GitHub コメントより先に実行）
 
-### Steps (when QA is required):
+承認:
+```bash
+curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+  -H 'Content-Type: application/json' \
+  -d '{"verdict": "approve"}'
+```
 
-1. Read the Issue to understand acceptance criteria
+拒否（構造化フィードバック付き — ADR-0018）:
+```bash
+curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "verdict": "reject",
+    "feedback": {
+      "summary": "<1-2文の要約>",
+      "items": [
+        {
+          "category": "<plan|code|test|style|security|performance>",
+          "severity": "<blocker|warning|suggestion>",
+          "message": "<具体的な指摘内容>",
+          "file": "<対象ファイルパス（任意・code-review 用）>",
+          "line": "<対象行番号（任意・code-review 用）>"
+        }
+      ]
+    }
+  }'
+```
 
-2. Run Playwright E2E tests if applicable:
-   ```bash
-   npx playwright test
-   ```
+> `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
 
-3. Verify acceptance criteria are met
+### 3. GitHub に記録（verdict 送信後）
 
-4. Declare gate intent (fallback if process dies before verdict):
-   ```bash
-   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent" \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}' # or "reject"
-   ```
+- Plan review → `gh issue comment`
+- Code review / QA → `gh pr comment`
 
-5. Submit verdict (before posting comment — prevents verdict loss on process exit):
-   ```bash
-   curl -sf "http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict" \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}' # or "reject" with "feedback": "..."
-   ```
-
-6. Post test results as a PR comment, then exit
+> Ship と Escort は同じ GitHub アカウントのため `gh pr review --approve` は使えない。コメントを使用する。
 
 ## Key Advantages (Session Resume Model)
 

@@ -106,28 +106,13 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
 
 ### Gate ポーリング（plan-review）
 
-Phase 遷移後、Engine が Escort プロセスを起動する。ポーリングして phase 変更を検知（タイムアウト付き単一コマンド）。
-**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
+`/implement` の Gate 待ちテンプレートを使用。phase 名マッピング:
+- `<expected-next-phase>` → `coding`（承認）
+- `<rejection-phase>` → `plan`（reject）
+- `<current-gate-phase>` → `plan-gate`
 
-```bash
-TIMEOUT=900; ELAPSED=0; while [ $ELAPSED -lt $TIMEOUT ]; do RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase); PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4); case "$PHASE" in coding) echo "Gate approved"; break ;; plan) echo "Gate rejected"; break ;; plan-gate) sleep 60 ;; *) echo "UNEXPECTED_PHASE: $PHASE"; break ;; esac; ELAPSED=$((ELAPSED + 60)); done; [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
-```
-
-- `coding` に遷移済み → Escort が承認。`/implement-code` に進む
-- `plan` に戻された → Escort が reject した。phase-transition-log API からフィードバックを取得して計画を修正、再度 gate に遷移 → Engine が Escort を再起動:
-  ```bash
-  # 構造化フィードバックを取得（ADR-0018: summary + items[]）
-  TRANSITION_JSON=$(curl -sf "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition-log?limit=1")
-  # summary を抽出
-  FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"summary":"[^"]*"' | head -1 | cut -d'"' -f4)
-  # items の message を抽出（複数行）
-  FEEDBACK_ITEMS=$(echo "$TRANSITION_JSON" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
-  # フォールバック: 旧形式（string feedback）
-  if [ -z "$FEEDBACK_SUMMARY" ]; then
-    FEEDBACK_SUMMARY=$(echo "$TRANSITION_JSON" | grep -o '"feedback":"[^"]*"' | head -1 | cut -d'"' -f4)
-  fi
-  ```
-  取得したフィードバックの `summary` と各 `items[].message` を確認し、指摘事項を反映して計画を修正する。`severity: blocker` の項目は必ず対応すること。
+- `coding` に遷移 → Escort 承認。`/implement-code` に進む
+- `plan` に戻った → Escort reject。`/implement` の構造化フィードバック取得テンプレートでフィードバックを取得し、計画を修正して再度 gate に遷移
 
 ## 完了後
 

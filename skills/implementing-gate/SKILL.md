@@ -14,17 +14,12 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
 
 ## 環境変数
 
-- `VIBE_ADMIRAL_SHIP_ID`: レビュー対象の Ship ID
-- `VIBE_ADMIRAL_MAIN_REPO`: リポジトリ（owner/repo）
-- `VIBE_ADMIRAL_ENGINE_PORT`: Engine API ポート（default: 9721）
+- `/escort` の Common Setup を参照
 
 ## Procedure
 
-1. リポ情報を取得:
+1. `/escort` の Common Setup でセットアップ済み。追加:
    ```bash
-   REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
-   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
-   ENGINE_PORT="${VIBE_ADMIRAL_ENGINE_PORT:-9721}"
    BRANCH_NAME=$(git branch --show-current)
    ```
 
@@ -60,46 +55,9 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
    - テストカバレッジ
    - re-review の場合、前回の指摘が修正されているか
 
-8. **Gate intent を宣言**（verdict 前のフォールバック用。プロセスが verdict 前に死んでも Engine が intent に基づいて自動承認できる）:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-intent \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "<approve or reject>"}'
-   ```
+8. **Gate intent → verdict → GitHub 記録**: `/escort` の Common Gate Protocol に従う。code-review では `file` / `line` フィールドで指摘箇所を特定する。
 
-9. **Engine REST API で gate verdict を送信**（GitHub コメントより先に実行 — プロセス終了による verdict 喪失を防止）:
-
-   承認の場合:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}'
-   ```
-
-   拒否の場合（構造化フィードバック付き）:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "verdict": "reject",
-       "feedback": {
-         "summary": "<1-2文の要約>",
-         "items": [
-           {
-             "category": "<plan|code|test|style|security|performance>",
-             "severity": "<blocker|warning|suggestion>",
-             "message": "<具体的な指摘内容>",
-             "file": "<対象ファイルパス（任意）>",
-             "line": <対象行番号（任意）>
-           }
-         ]
-       }
-     }'
-   ```
-
-   > **構造化フィードバック**: 各指摘に `category`（plan/code/test/style/security/performance）と `severity`（blocker/warning/suggestion）を付与する。`file` と `line` は code-review 特有のフィールドで、対象箇所を特定する。`blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
-
-10. **GitHub にレビュー結果を記録**（verdict 送信後に実行 — プロセスが死んでも verdict は保全済み）:
+9. **GitHub にレビュー結果を記録**（verdict 送信後に実行 — プロセスが死んでも verdict は保全済み）:
    - 承認: `gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>"`
    - 拒否: `gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "<detailed feedback>"`
 
