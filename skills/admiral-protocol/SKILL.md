@@ -35,11 +35,11 @@ curl -s http://localhost:9721/api/sortie \
 ### 2. ship-status — Get Ship Status
 
 ```bash
-curl -s http://localhost:9721/api/ships | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
+curl -s "http://localhost:9721/api/ships?fleetId=${VIBE_ADMIRAL_FLEET_ID}" | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
 ```
 
-- Returns all Ships with current phase, processDead status, gate info, etc.
-- For a specific fleet: `curl -s "http://localhost:9721/api/ships?fleetId=..."`
+- Returns Ships for this Fleet with current phase, processDead status, gate info, etc.
+- `fleetId` is **required** — omitting it returns a 400 error.
 - Phase transition history: `curl -s "http://localhost:9721/api/ship/<shipId>/phase-transition-log?limit=10"`
 
 ### 3. ship-stop — Stop a Ship
@@ -127,7 +127,7 @@ Flagship can check `ok` field or HTTP status code to detect failures.
 
 Flagship MUST follow these rules when dealing with Ship state information:
 
-1. **Always query via API before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first run `curl -s http://localhost:9721/api/ships`. Never rely on Ship information from your conversation history.
+1. **Always query via API before reporting to the user.** Whenever you mention Ship status — whether proactively or in response to a question — you MUST first run `curl -s "http://localhost:9721/api/ships?fleetId=${VIBE_ADMIRAL_FLEET_ID}"`. Never rely on Ship information from your conversation history.
 
 2. **Context-cached Ship data is stale.** After context compaction or session resumption, Ship information in your history is outdated. Treat it as hints for planning, never as facts for reporting.
 

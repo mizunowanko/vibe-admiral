@@ -12,10 +12,10 @@ Engine REST API を通じて Ship 状態を取得する。
 ## Query
 
 ```bash
-curl -s http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ships | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
+curl -s "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ships?fleetId=${VIBE_ADMIRAL_FLEET_ID}" | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
 ```
 
-- For a specific fleet: `curl -s "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ships?fleetId=..."`
+- `fleetId` is **required** — omitting it returns a 400 error.
 - Phase transition history: `curl -s "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/<shipId>/phase-transition-log?limit=10"`
 
 ## Ship Status Confirmation Rules
@@ -36,7 +36,7 @@ sqlite3 -header -column "$VIBE_ADMIRAL_DB_PATH" \
   "SELECT s.id, s.issue_number, s.issue_title, p.phase, s.created_at
    FROM ships s
    JOIN phases p ON s.id = p.ship_id
-   WHERE s.completed_at IS NULL
+   WHERE s.completed_at IS NULL AND s.fleet_id = '$VIBE_ADMIRAL_FLEET_ID'
    ORDER BY s.created_at DESC;"
 ```
 

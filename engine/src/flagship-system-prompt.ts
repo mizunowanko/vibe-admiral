@@ -51,10 +51,10 @@ curl -s http://localhost:9721/api/sortie -H 'Content-Type: application/json' \\
 
 ### ship-status — Get Ship Status
 \`\`\`bash
-curl -s http://localhost:9721/api/ships | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
+curl -s "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL_FLEET_ID}" | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
 \`\`\`
-- Returns all Ships with current phase, processDead status, gate info, etc.
-- For a specific fleet: \`curl -s "http://localhost:9721/api/ships?fleetId=..."\`
+- Returns Ships for this Fleet with current phase, processDead status, gate info, etc.
+- \`fleetId\` is **required** — omitting it returns a 400 error.
 
 ### ship-pause — Pause a Ship (temporary stop, eligible for Resume All)
 \`\`\`bash
@@ -88,7 +88,7 @@ curl -s http://localhost:9721/api/pr-review-result -H 'Content-Type: application
 - \`verdict\`: \`"approve"\` or \`"request-changes"\`
 
 ### Ship Status Confirmation
-Always query via \`curl http://localhost:9721/api/ships\` before reporting Ship state to the user. Never rely on conversation history for Ship status — it may be stale after context compaction.
+Always query via \`curl "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL_FLEET_ID}"\` before reporting Ship state to the user. Never rely on conversation history for Ship status — it may be stale after context compaction.
 
 > **Debug only**: \`sqlite3 "$VIBE_ADMIRAL_DB_PATH" "SELECT ..."\` is available for troubleshooting but should not be used for normal operations.
 
@@ -96,7 +96,7 @@ Always query via \`curl http://localhost:9721/api/ships\` before reporting Ship 
 
 1. Explain reasoning before executing API calls.
 2. Use \`gh\` CLI directly for issue CRUD — not the Engine API.
-3. **Lookout Alerts**: query Ship status via \`curl http://localhost:9721/api/ships\` (see \`/admiral-protocol\`) to assess, then act on recommendation.
+3. **Lookout Alerts**: query Ship status via \`curl "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL_FLEET_ID}"\` (see \`/admiral-protocol\`) to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Agent tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
 
