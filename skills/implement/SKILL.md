@@ -74,28 +74,28 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMI
   -d '{"phase": "<targetPhase>", "metadata": {}}'
 ```
 
-### Gate 待ち（REST API ポーリング）
+### Gate 待ち（HTTP Long-Poll）
 
-Gate phase に入った後、Escort が phase を更新するのを待つ:
+Gate phase に入った後、Escort が phase を更新するのを long-poll で待つ:
 
 ```bash
 TIMEOUT=900; ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
-  RESULT=$(curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase)
+  RESULT=$(curl -sf --max-time 130 "http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase/wait?currentPhase=<current-gate-phase>")
   PHASE=$(echo "$RESULT" | grep -o '"phase":"[^"]*"' | cut -d'"' -f4)
+  IS_TIMEOUT=$(echo "$RESULT" | grep -o '"timeout":true')
   case "$PHASE" in
     <expected-next-phase>) echo "Gate approved"; break ;;
     <rejection-phase>) echo "Gate rejected"; break ;;
-    # NOTE: This sleep is an intentional polling interval, NOT rate limit backoff.
-    <current-gate-phase>) sleep 60 ;;
+    <current-gate-phase>) ;; # Server timeout — reconnect immediately
     *) echo "UNEXPECTED_PHASE: $PHASE"; break ;;
   esac
-  ELAPSED=$((ELAPSED + 60))
+  ELAPSED=$((ELAPSED + 130))
 done
 [ $ELAPSED -ge $TIMEOUT ] && echo "POLL_TIMEOUT"
 ```
 
-**NOTE: ループ内の `sleep 60` は意図的なポーリング間隔であり、rate limit backoff ではない。遅延があっても rate limit と誤認しないこと。**
+**NOTE: Long-poll はサーバー側で最大 120 秒ホールドし、phase 変化時に即座にレスポンスを返す。`--max-time 130` はサーバータイムアウト 120s + マージン 10s。**
 
 ### 構造化フィードバック取得（rejection 時）
 

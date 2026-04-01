@@ -14,6 +14,40 @@ import { mergeSettings } from "./deep-merge.js";
 /** Admiral repo's skills/ directory, resolved from Engine's own source location. */
 const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
 
+// ── Long-poll infrastructure for gate phase waiting ──
+
+const LONG_POLL_TIMEOUT_MS = 120_000; // 120 seconds
+
+interface PendingLongPoll {
+  res: ServerResponse;
+  timer: ReturnType<typeof setTimeout>;
+  currentPhase: string;
+}
+
+/** shipId → Set of pending long-poll responses waiting for phase change. */
+const pendingPhaseWaiters = new Map<string, Set<PendingLongPoll>>();
+
+/**
+ * Notify all long-poll waiters for a ship that its phase has changed.
+ * Called from ship-lifecycle.ts when a phase transition occurs.
+ */
+export function notifyPhaseWaiters(shipId: string, newPhase: string): void {
+  const waiters = pendingPhaseWaiters.get(shipId);
+  if (!waiters || waiters.size === 0) return;
+
+  for (const waiter of waiters) {
+    // Only respond if the phase actually changed from what the client was watching
+    if (waiter.currentPhase !== newPhase) {
+      clearTimeout(waiter.timer);
+      if (!waiter.res.writableEnded) {
+        sendJson(waiter.res, 200, { ok: true, phase: newPhase, timeout: false } as ApiResponse & { timeout: boolean });
+      }
+    }
+  }
+  // Clear all waiters for this ship (even if phase didn't change for some, they'll reconnect)
+  pendingPhaseWaiters.delete(shipId);
+}
+
 const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
 interface ApiDeps {
@@ -246,6 +280,63 @@ async function handleShipRoute(
       return;
     }
     sendJson(res, 200, { ok: true, phase: ship.phase });
+    return;
+  }
+
+  // GET /api/ship/:shipId/phase/wait?currentPhase=xxx — long-poll for phase change
+  if (action === "phase/wait" && req.method === "GET") {
+    const ship = db.getShipById(shipId);
+    if (!ship) {
+      sendJson(res, 404, { ok: false, error: `Ship ${shipId} not found` });
+      return;
+    }
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const currentPhase = url.searchParams.get("currentPhase");
+    if (!currentPhase) {
+      sendJson(res, 400, { ok: false, error: "currentPhase query parameter is required" });
+      return;
+    }
+
+    // If phase already changed, respond immediately
+    if (ship.phase !== currentPhase) {
+      sendJson(res, 200, { ok: true, phase: ship.phase, timeout: false } as ApiResponse & { timeout: boolean });
+      return;
+    }
+
+    // Hold the response until phase changes or timeout
+    const waiter: PendingLongPoll = {
+      res,
+      currentPhase,
+      timer: setTimeout(() => {
+        // Timeout: respond with current phase and timeout flag
+        const waiters = pendingPhaseWaiters.get(shipId);
+        if (waiters) {
+          waiters.delete(waiter);
+          if (waiters.size === 0) pendingPhaseWaiters.delete(shipId);
+        }
+        if (!res.writableEnded) {
+          const freshShip = db.getShipById(shipId);
+          const phase = freshShip?.phase ?? currentPhase;
+          sendJson(res, 200, { ok: true, phase, timeout: true } as ApiResponse & { timeout: boolean });
+        }
+      }, LONG_POLL_TIMEOUT_MS),
+    };
+
+    if (!pendingPhaseWaiters.has(shipId)) {
+      pendingPhaseWaiters.set(shipId, new Set());
+    }
+    pendingPhaseWaiters.get(shipId)!.add(waiter);
+
+    // Clean up if client disconnects
+    req.on("close", () => {
+      clearTimeout(waiter.timer);
+      const waiters = pendingPhaseWaiters.get(shipId);
+      if (waiters) {
+        waiters.delete(waiter);
+        if (waiters.size === 0) pendingPhaseWaiters.delete(shipId);
+      }
+    });
+
     return;
   }
 

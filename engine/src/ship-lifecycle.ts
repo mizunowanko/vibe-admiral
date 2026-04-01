@@ -19,6 +19,7 @@ import {
 } from "./stream-parser.js";
 import type { FleetDatabase } from "./db.js";
 import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification } from "./types.js";
+import { notifyPhaseWaiters } from "./api-server.js";
 
 export interface ShipLifecycleDeps {
   processManager: ProcessManagerLike;
@@ -544,6 +545,9 @@ export function setupShipStatusHandler(deps: ShipStatusDeps): void {
 
   shipManager.setPhaseChangeHandler((id, phase, detail) => {
     const ship = shipManager.getShip(id);
+
+    // Resolve any pending long-poll requests waiting for this ship's phase change
+    notifyPhaseWaiters(id, phase);
 
     // Event Notification pattern: send minimal notification, Frontend fetches via REST API
     if (phase === "done") {
