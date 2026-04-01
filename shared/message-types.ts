@@ -21,6 +21,7 @@ export type StreamMessageSubtype =
   | "request-result"
   | "pr-review-request"
   | "gate-check-request"
+  | "gate-skip"
   | "lookout-alert"
   | "task-notification"
   | "dispatch-log"
