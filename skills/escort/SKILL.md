@@ -56,11 +56,12 @@ Based on `$PHASE`, execute the corresponding gate skill (`/planning-gate`, `/imp
 ## Common Gate Protocol
 
 All gate skills share this verdict submission flow. **Individual gate skills reference this section.**
+Gate API は親 Ship（`PARENT_SHIP_ID`）に対して実行する。`SHIP_ID`（Escort 自身）ではない。
 
 ### 1. Gate intent（verdict 前のフォールバック）
 
 ```bash
-curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-intent \
+curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
   -H 'Content-Type: application/json' \
   -d '{"verdict": "<approve or reject>"}'
 ```
@@ -69,14 +70,14 @@ curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-intent \
 
 承認:
 ```bash
-curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
+curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
   -H 'Content-Type: application/json' \
   -d '{"verdict": "approve"}'
 ```
 
 拒否（構造化フィードバック付き — ADR-0018）:
 ```bash
-curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
+curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
   -H 'Content-Type: application/json' \
   -d '{
     "verdict": "reject",

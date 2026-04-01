@@ -31,7 +31,7 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
 
 `QA_REQUIRED` が `false` の場合:
 
-1. **フォールバックチェック**: `QA_REQUIRED_PATHS` が設定されている場合、実際の変更ファイルを確認する（`REPO`, `SHIP_ID`, `ENGINE_PORT` は `/escort` Common Setup で設定済み）:
+1. **フォールバックチェック**: `QA_REQUIRED_PATHS` が設定されている場合、実際の変更ファイルを確認する（`REPO`, `PARENT_SHIP_ID`, `ENGINE_PORT` は `/escort` Common Setup で設定済み）:
    ```bash
    BRANCH_NAME=$(git branch --show-current)
    ```
@@ -63,7 +63,7 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
 
    即 gate-verdict approve を送信:
    ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}'
    ```
@@ -106,7 +106,7 @@ QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
 
 5. gate-verdict を送信（結果に応じて approve or reject）:
    ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "<approve or reject>", "feedback": {"summary": "<結果の要約>", "items": [{"category": "<test|code|style|security|performance>", "severity": "<blocker|warning|suggestion>", "message": "<指摘内容>"}]}}'
    ```
@@ -129,7 +129,7 @@ GATE_PROMPT="${VIBE_ADMIRAL_GATE_PROMPT:-}"
 
 **`GATE_PROMPT` が未設定の場合**: Fleet に受け入れテストの手順が設定されていない。auto-approve として扱う:
 
-1. PR を特定してコメントを投稿（`REPO`, `SHIP_ID`, `ENGINE_PORT` は `/escort` Common Setup で設定済み）:
+1. PR を特定してコメントを投稿（`REPO`, `PARENT_SHIP_ID`, `ENGINE_PORT` は `/escort` Common Setup で設定済み）:
    ```bash
    BRANCH_NAME=$(git branch --show-current)
    PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --repo "$REPO" --json number --jq '.[0].number')
@@ -147,7 +147,7 @@ GATE_PROMPT="${VIBE_ADMIRAL_GATE_PROMPT:-}"
 
 2. gate-verdict approve を送信:
    ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}'
    ```
@@ -160,7 +160,7 @@ GATE_PROMPT="${VIBE_ADMIRAL_GATE_PROMPT:-}"
 
 ### Step 2: セットアップ
 
-`REPO`, `SHIP_ID`, `ENGINE_PORT` は `/escort` Common Setup で設定済み。
+`REPO`, `PARENT_SHIP_ID`, `ENGINE_PORT` は `/escort` Common Setup で設定済み。
 
 1. PR を特定:
    ```bash

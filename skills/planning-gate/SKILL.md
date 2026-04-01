@@ -44,7 +44,7 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
      Plan が issue comment に記載されていません。実装計画を \`## Implementation Plan\` セクションとして issue コメントに投稿してから再度 gate に進んでください。"
      ```
      ```bash
-     curl -sf http://localhost:${ENGINE_PORT}/api/ship/${SHIP_ID}/gate-verdict \
+     curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
        -H 'Content-Type: application/json' \
        -d '{"verdict": "reject", "feedback": {"summary": "Plan が issue comment に記載されていません", "items": [{"category": "plan", "severity": "blocker", "message": "Implementation Plan セクションが issue コメントに存在しない"}]}}'
      ```
