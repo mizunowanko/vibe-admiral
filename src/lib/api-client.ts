@@ -36,14 +36,13 @@ async function request<T>(
   return res.json() as Promise<ApiResponse<T>>;
 }
 
-export async function fetchShips(fleetId?: string): Promise<Ship[]> {
-  const params = fleetId ? `?fleetId=${encodeURIComponent(fleetId)}` : "";
-  const data = await request<Ship[]>(`/ships${params}`);
+export async function fetchShips(fleetId: string): Promise<Ship[]> {
+  const data = await request<Ship[]>(`/ships?fleetId=${encodeURIComponent(fleetId)}`);
   return data.ships ?? [];
 }
 
-export async function fetchShip(shipId: string): Promise<Ship | null> {
-  const data = await request<Ship[]>(`/ships/${encodeURIComponent(shipId)}`);
+export async function fetchShip(shipId: string, fleetId: string): Promise<Ship | null> {
+  const data = await request<Ship[]>(`/ships/${encodeURIComponent(shipId)}?fleetId=${encodeURIComponent(fleetId)}`);
   const ships = data.ships ?? [];
   return ships[0] ?? null;
 }
@@ -63,7 +62,7 @@ export async function sortie(
 
 export async function pauseShip(
   shipId: string,
-  fleetId?: string,
+  fleetId: string,
 ): Promise<string> {
   const data = await request(`/ship-pause`, {
     method: "POST",
@@ -75,7 +74,7 @@ export async function pauseShip(
 
 export async function resumeShip(
   shipId: string,
-  fleetId?: string,
+  fleetId: string,
 ): Promise<string> {
   const data = await request(`/ship-resume`, {
     method: "POST",
@@ -87,7 +86,7 @@ export async function resumeShip(
 
 export async function abandonShip(
   shipId: string,
-  fleetId?: string,
+  fleetId: string,
 ): Promise<string> {
   const data = await request(`/ship-abandon`, {
     method: "POST",
@@ -99,7 +98,7 @@ export async function abandonShip(
 
 export async function reactivateShip(
   shipId: string,
-  fleetId?: string,
+  fleetId: string,
 ): Promise<string> {
   const data = await request(`/ship-reactivate`, {
     method: "POST",
