@@ -94,6 +94,9 @@ export class ShipManager {
   private onShipCreated:
     | ((id: string) => void)
     | null = null;
+  private onShipRemoved:
+    | ((id: string) => void)
+    | null = null;
 
   constructor(
     processManager: ProcessManagerLike,
@@ -124,6 +127,10 @@ export class ShipManager {
 
   setShipCreatedHandler(handler: (id: string) => void): void {
     this.onShipCreated = handler;
+  }
+
+  setShipRemovedHandler(handler: (id: string) => void): void {
+    this.onShipRemoved = handler;
   }
 
   async sortie(
@@ -654,6 +661,9 @@ export class ShipManager {
     this.runtime.delete(shipId);
     this.actorManager?.stopActor(shipId);
     this.fleetDb?.deleteShip(shipId);
+
+    // Notify listeners (e.g., WS broadcast)
+    this.onShipRemoved?.(shipId);
     return true;
   }
 

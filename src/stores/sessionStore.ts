@@ -20,8 +20,7 @@ interface SessionState {
   unregisterSession: (id: string) => void;
   setFocus: (sessionId: string | null, source?: FocusSource) => void;
   setInputDraft: (sessionId: string, value: string) => void;
-  addDispatch: (dispatch: Dispatch) => void;
-  updateDispatch: (dispatch: Dispatch) => void;
+  upsertDispatch: (dispatch: Dispatch) => void;
   addDispatchLog: (dispatchId: string, message: StreamMessage) => void;
   addCommanderMessage: (sessionId: string, msg: StreamMessage) => void;
   setCommanderLoading: (sessionId: string, loading: boolean) => void;
@@ -142,15 +141,7 @@ export const useSessionStore = create<SessionState>()(
       setInputDraft: (sessionId, value) =>
         set((s) => ({ inputDrafts: { ...s.inputDrafts, [sessionId]: value } })),
 
-      addDispatch: (dispatch) => {
-        set((state) => {
-          const dispatches = new Map(state.dispatches);
-          dispatches.set(dispatch.id, dispatch);
-          return { dispatches };
-        });
-      },
-
-      updateDispatch: (dispatch) => {
+      upsertDispatch: (dispatch) => {
         set((state) => {
           const dispatches = new Map(state.dispatches);
           dispatches.set(dispatch.id, dispatch);

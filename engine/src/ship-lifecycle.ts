@@ -590,6 +590,10 @@ export function setupShipStatusHandler(deps: ShipStatusDeps): void {
       }
     }
   });
+
+  shipManager.setShipRemovedHandler((id) => {
+    broadcast({ type: "ship:removed", data: { shipId: id } });
+  });
 }
 
 // ── Ship Created Handler ──

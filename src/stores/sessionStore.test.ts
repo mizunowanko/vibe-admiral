@@ -121,7 +121,7 @@ describe("sessionStore input drafts", () => {
 describe("sessionStore dispatch management", () => {
   it("returns dispatches filtered by fleet", () => {
     const store = useSessionStore.getState();
-    store.addDispatch({
+    store.upsertDispatch({
       id: "d-1",
       parentRole: "dock",
       fleetId: "fleet-1",
@@ -129,7 +129,7 @@ describe("sessionStore dispatch management", () => {
       status: "running",
       startedAt: 1000,
     });
-    store.addDispatch({
+    store.upsertDispatch({
       id: "d-2",
       parentRole: "flagship",
       fleetId: "fleet-2",
@@ -145,7 +145,7 @@ describe("sessionStore dispatch management", () => {
 
   it("returns dispatches filtered by parent session", () => {
     const store = useSessionStore.getState();
-    store.addDispatch({
+    store.upsertDispatch({
       id: "d-1",
       parentRole: "dock",
       fleetId: "fleet-1",
@@ -153,7 +153,7 @@ describe("sessionStore dispatch management", () => {
       status: "running",
       startedAt: 1000,
     });
-    store.addDispatch({
+    store.upsertDispatch({
       id: "d-2",
       parentRole: "flagship",
       fleetId: "fleet-1",
