@@ -319,7 +319,20 @@ export function useEngine() {
       fetchFleets();
       fetchAdmiralSettings();
       wsClient.send({ type: "caffeinate:get" });
-      void fetchShips().then(() => {
+      // Determine fleetId: use the currently selected fleet, or fall back to
+      // the first fleet after fetchFleets completes.
+      const resolveFleetId = async (): Promise<string | null> => {
+        const existing = useFleetStore.getState().selectedFleetId;
+        if (existing) return existing;
+        // fetchFleets is already in-flight — wait a tick for it to land
+        await new Promise((r) => setTimeout(r, 200));
+        const state = useFleetStore.getState();
+        return state.selectedFleetId ?? state.fleets[0]?.id ?? null;
+      };
+      void resolveFleetId().then((fleetId) => {
+        if (!fleetId) return;
+        return fetchShips(fleetId);
+      }).then(() => {
         const ships = useShipStore.getState().ships;
         const currentLogs = useShipStore.getState().shipLogs;
         for (const ship of ships.values()) {

@@ -51,7 +51,7 @@ interface ShipState {
   updateShipFromApi: (shipId: string) => Promise<void>;
   upsertShip: (ship: Ship) => void;
   removeShip: (id: string) => void;
-  fetchShips: (fleetId?: string) => Promise<void>;
+  fetchShips: (fleetId: string) => Promise<void>;
   sortie: (fleetId: string, repo: string, issueNumber: number) => Promise<void>;
   chatWithShip: (id: string, message: string) => void;
   retryShip: (id: string) => Promise<void>;
@@ -206,7 +206,12 @@ export const useShipStore = create<ShipState>((set) => ({
 
   updateShipFromApi: async (shipId) => {
     try {
-      const ship = await api.fetchShip(shipId);
+      const existing = useShipStore.getState().ships.get(shipId);
+      if (!existing?.fleetId) {
+        console.warn(`[shipStore] updateShipFromApi: Ship ${shipId} not found or missing fleetId, skipping`);
+        return;
+      }
+      const ship = await api.fetchShip(shipId, existing.fleetId);
       if (ship) {
         useShipStore.getState().upsertShip(ship);
       }
@@ -270,7 +275,9 @@ export const useShipStore = create<ShipState>((set) => ({
 
   retryShip: async (id) => {
     try {
-      await api.resumeShip(id);
+      const ship = useShipStore.getState().ships.get(id);
+      if (!ship?.fleetId) throw new Error(`Ship ${id} not found or missing fleetId`);
+      await api.resumeShip(id, ship.fleetId);
     } catch (err) {
       console.error("[shipStore] retryShip failed:", err);
     }
@@ -278,7 +285,9 @@ export const useShipStore = create<ShipState>((set) => ({
 
   pauseShip: async (id) => {
     try {
-      await api.pauseShip(id);
+      const ship = useShipStore.getState().ships.get(id);
+      if (!ship?.fleetId) throw new Error(`Ship ${id} not found or missing fleetId`);
+      await api.pauseShip(id, ship.fleetId);
     } catch (err) {
       console.error("[shipStore] pauseShip failed:", err);
     }
@@ -286,7 +295,9 @@ export const useShipStore = create<ShipState>((set) => ({
 
   abandonShip: async (id) => {
     try {
-      await api.abandonShip(id);
+      const ship = useShipStore.getState().ships.get(id);
+      if (!ship?.fleetId) throw new Error(`Ship ${id} not found or missing fleetId`);
+      await api.abandonShip(id, ship.fleetId);
     } catch (err) {
       console.error("[shipStore] abandonShip failed:", err);
     }
@@ -294,7 +305,9 @@ export const useShipStore = create<ShipState>((set) => ({
 
   reactivateShip: async (id) => {
     try {
-      await api.reactivateShip(id);
+      const ship = useShipStore.getState().ships.get(id);
+      if (!ship?.fleetId) throw new Error(`Ship ${id} not found or missing fleetId`);
+      await api.reactivateShip(id, ship.fleetId);
     } catch (err) {
       console.error("[shipStore] reactivateShip failed:", err);
     }
