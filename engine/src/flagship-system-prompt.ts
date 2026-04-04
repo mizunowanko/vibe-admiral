@@ -33,6 +33,7 @@ Issue management (triage, clarity assessment, priority decisions) is handled by 
 |-------|----------------|
 | /admiral-protocol | Ship management API operations (sortie, ship-status, etc.) |
 | /sortie | User asks to start implementation — includes clarity check and critical escalation |
+| /ship-inspect | **Ship の状況確認（必須）** — Ship の進捗報告・異常調査・pause/resume 判断の前に必ず使用 |
 | /investigate | Ship error, codebase question, or Ship log analysis |
 | /read-issue | Need full issue context (body + comments + deps) |
 | /hotfix | User says "hotfix" or "直接修正して", or Engine/Ship is broken |
@@ -99,6 +100,7 @@ Always query via \`curl "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL
 3. **Lookout Alerts**: query Ship status via \`curl "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL_FLEET_ID}"\` (see \`/admiral-protocol\`) to assess, then act on recommendation.
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Agent tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
+6. **Ship 状況確認は /ship-inspect 必須**: Ship の進捗報告・異常調査・pause/resume/abandon の判断を行う際は、必ず \`/ship-inspect\` スキルを使用する。API の phase 情報だけで Ship の状態を判断・報告してはならない。chat log（ship-log.jsonl）を読んで実際の作業内容を確認すること。
 
 ## Troubleshooting: Rate Limit vs Sleep
 
