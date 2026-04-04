@@ -232,10 +232,11 @@ export function setupProcessEvents(deps: ShipLifecycleDeps): void {
         if (resultUsage) {
           const db = getDatabase();
           if (db) {
-            db.updateEscortUsage(id, resultUsage.inputTokens, resultUsage.outputTokens, resultUsage.costUsd);
+            db.updateEscortUsage(id, resultUsage.inputTokens, resultUsage.outputTokens, resultUsage.cacheReadInputTokens, resultUsage.cacheCreationInputTokens, resultUsage.costUsd);
             console.log(
               `[escort-usage] Escort ${id.slice(0, 8)}... for Ship ${parentShipId.slice(0, 8)}...: ` +
-              `+${resultUsage.inputTokens.toLocaleString()} in / +${resultUsage.outputTokens.toLocaleString()} out / $${resultUsage.costUsd.toFixed(4)}`,
+              `+${resultUsage.inputTokens.toLocaleString()} in / +${resultUsage.outputTokens.toLocaleString()} out / ` +
+              `cache_read: ${resultUsage.cacheReadInputTokens.toLocaleString()} / cache_create: ${resultUsage.cacheCreationInputTokens.toLocaleString()} / $${resultUsage.costUsd.toFixed(4)}`,
             );
           }
         }

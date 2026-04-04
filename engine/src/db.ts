@@ -34,6 +34,8 @@ export interface EscortRow {
   completed_at: string | null;
   total_input_tokens: number | null;
   total_output_tokens: number | null;
+  cache_read_input_tokens: number | null;
+  cache_creation_input_tokens: number | null;
   cost_usd: number | null;
 }
 
@@ -102,6 +104,9 @@ export class FleetDatabase {
     }
     if (version < 12) {
       this.applyV12();
+    }
+    if (version < 13) {
+      this.applyV13();
     }
   }
 
@@ -505,6 +510,17 @@ export class FleetDatabase {
       ALTER TABLE escorts ADD COLUMN cost_usd REAL;
 
       INSERT INTO schema_version (version) VALUES (12);
+    `);
+  }
+
+  private applyV13(): void {
+    // V13: Add cache token tracking columns to escorts table (#825).
+    // Tracks cache_read_input_tokens and cache_creation_input_tokens per Escort.
+    this.db.exec(`
+      ALTER TABLE escorts ADD COLUMN cache_read_input_tokens INTEGER;
+      ALTER TABLE escorts ADD COLUMN cache_creation_input_tokens INTEGER;
+
+      INSERT INTO schema_version (version) VALUES (13);
     `);
   }
 
@@ -982,29 +998,42 @@ export class FleetDatabase {
   }
 
   /** Accumulate token usage for an Escort (adds to existing totals). */
-  updateEscortUsage(id: string, inputTokens: number, outputTokens: number, costUsd: number): void {
+  updateEscortUsage(
+    id: string,
+    inputTokens: number,
+    outputTokens: number,
+    cacheReadInputTokens: number,
+    cacheCreationInputTokens: number,
+    costUsd: number,
+  ): void {
     this.db.prepare(`
       UPDATE escorts SET
         total_input_tokens = COALESCE(total_input_tokens, 0) + ?,
         total_output_tokens = COALESCE(total_output_tokens, 0) + ?,
+        cache_read_input_tokens = COALESCE(cache_read_input_tokens, 0) + ?,
+        cache_creation_input_tokens = COALESCE(cache_creation_input_tokens, 0) + ?,
         cost_usd = COALESCE(cost_usd, 0) + ?
       WHERE id = ?
-    `).run(inputTokens, outputTokens, costUsd, id);
+    `).run(inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, costUsd, id);
   }
 
   /** Get Escort usage for a parent Ship (returns the active or most recent Escort). */
   getEscortUsageByShipId(shipId: string): {
     totalInputTokens: number;
     totalOutputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
     costUsd: number;
   } | null {
     const row = this.db.prepare(
-      "SELECT total_input_tokens, total_output_tokens, cost_usd FROM escorts WHERE ship_id = ? ORDER BY created_at DESC LIMIT 1",
-    ).get(shipId) as { total_input_tokens: number | null; total_output_tokens: number | null; cost_usd: number | null } | undefined;
+      "SELECT total_input_tokens, total_output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cost_usd FROM escorts WHERE ship_id = ? ORDER BY created_at DESC LIMIT 1",
+    ).get(shipId) as { total_input_tokens: number | null; total_output_tokens: number | null; cache_read_input_tokens: number | null; cache_creation_input_tokens: number | null; cost_usd: number | null } | undefined;
     if (!row) return null;
     return {
       totalInputTokens: row.total_input_tokens ?? 0,
       totalOutputTokens: row.total_output_tokens ?? 0,
+      cacheReadInputTokens: row.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: row.cache_creation_input_tokens ?? 0,
       costUsd: row.cost_usd ?? 0,
     };
   }
@@ -1020,6 +1049,8 @@ export class FleetDatabase {
       completedAt: row.completed_at,
       totalInputTokens: row.total_input_tokens,
       totalOutputTokens: row.total_output_tokens,
+      cacheReadInputTokens: row.cache_read_input_tokens,
+      cacheCreationInputTokens: row.cache_creation_input_tokens,
       costUsd: row.cost_usd,
     };
   }
