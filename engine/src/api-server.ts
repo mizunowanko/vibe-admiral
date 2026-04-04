@@ -69,6 +69,7 @@ interface ApiDeps {
     gates?: import("./types.js").FleetGateSettings;
     gatePrompts?: Partial<Record<import("./types.js").GateType, string>>;
     qaRequiredPaths?: string[];
+    acceptanceTestRequired?: boolean;
     maxConcurrentSorties?: number;
   }>>;
   loadRules: (paths: string[]) => Promise<string>;
@@ -514,6 +515,7 @@ async function handleShipRoute(
         gates: fleet?.gates,
         gatePrompts: fleet?.gatePrompts,
         qaRequiredPaths: fleet?.qaRequiredPaths,
+        acceptanceTestRequired: fleet?.acceptanceTestRequired,
       });
       const gateType = resolveGateType(gatePhase, mergedGateSettings.gates);
 
@@ -589,6 +591,10 @@ async function handleShipRoute(
       const refreshedShip = db.getShipById(shipId);
       if (refreshedShip) {
         escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
+      }
+      // Pass Fleet's acceptanceTestRequired to qa-gate Escort
+      if (gatePhase === "qa-gate" && mergedGateSettings.acceptanceTestRequired === false) {
+        escortExtraEnv.VIBE_ADMIRAL_ACCEPTANCE_TEST_REQUIRED = "false";
       }
 
       const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);

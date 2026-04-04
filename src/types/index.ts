@@ -93,6 +93,8 @@ export interface Fleet {
   gatePrompts?: Partial<Record<GateType, string>>;
   /** Glob patterns for paths that force qaRequired=true when changed. Passed to Escorts via env var. */
   qaRequiredPaths?: string[];
+  /** Whether user acceptance testing (qa-gate) is required. Default: true. When false, qa-gate Escort auto-approves. */
+  acceptanceTestRequired?: boolean;
   /** Maximum number of concurrent Ship sorties per fleet (default: 6). */
   maxConcurrentSorties?: number;
   /** Gate settings: which gate phases are enabled and their types. */
