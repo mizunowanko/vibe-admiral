@@ -142,6 +142,7 @@ export type ServerMessage =
   | { type: "ship:compacting"; data: { id: string; isCompacting: boolean } }
   | { type: "ship:created"; data: { shipId: string } }
   | { type: "ship:done"; data: { shipId: string } }
+  | { type: "ship:removed"; data: { shipId: string } }
   | { type: "ship:gate-pending"; data: { id: string; gatePhase: GatePhase; gateType: GateType; fleetId: string; issueNumber: number; issueTitle: string } }
   | { type: "ship:gate-resolved"; data: { id: string; gatePhase: GatePhase; gateType: GateType; approved: boolean; feedback?: string } }
   | { type: "ship:data"; data: ShipData[] }

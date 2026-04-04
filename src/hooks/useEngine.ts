@@ -30,6 +30,7 @@ type _HandledTypes =
   | "escort:completed"
   | "ship:history"
   | "ship:done"
+  | "ship:removed"
   | "ship:gate-pending"
   | "ship:gate-resolved"
   | "dispatch:stream"
@@ -62,10 +63,11 @@ export function useEngine() {
   const setMainView = useUIStore((s) => s.setMainView);
   const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
-  const setShipLogs = useShipStore((s) => s.setShipLogs);
+  const mergeShipHistory = useShipStore((s) => s.mergeShipHistory);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
-  const syncShips = useShipStore((s) => s.syncShips);
+  const upsertShip = useShipStore((s) => s.upsertShip);
+  const removeShip = useShipStore((s) => s.removeShip);
   const fetchShips = useShipStore((s) => s.fetchShips);
   const updateShipFromApi = useShipStore((s) => s.updateShipFromApi);
   const setEngineConnected = useUIStore((s) => s.setEngineConnected);
@@ -100,9 +102,9 @@ export function useEngine() {
 
     r.on("ship:data", (msg) => {
       const shipList = msg.data as Ship[];
-      syncShips(shipList);
       const currentLogs = useShipStore.getState().shipLogs;
       for (const ship of shipList) {
+        upsertShip(ship as Ship);
         registerSession(
           createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
         );
@@ -162,12 +164,16 @@ export function useEngine() {
 
     r.on("ship:history", (msg) => {
       if (msg.data.messages.length > 0) {
-        setShipLogs(msg.data.id, msg.data.messages);
+        mergeShipHistory(msg.data.id, msg.data.messages);
       }
     });
 
     r.on("ship:done", (msg) => {
       void updateShipFromApi(msg.data.shipId);
+    });
+
+    r.on("ship:removed", (msg) => {
+      removeShip(msg.data.shipId);
     });
 
     r.on("ship:gate-pending", (msg) => {
@@ -274,10 +280,11 @@ export function useEngine() {
     setMainView,
     setShipCompacting,
     addShipLog,
-    setShipLogs,
+    mergeShipHistory,
     setGateCheck,
     clearGateCheck,
-    syncShips,
+    upsertShip,
+    removeShip,
     updateShipFromApi,
     setEngineConnected,
     setEngineRestarting,

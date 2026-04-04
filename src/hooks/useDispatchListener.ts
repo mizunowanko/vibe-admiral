@@ -11,8 +11,7 @@ import type { ServerMessage, Dispatch, StreamMessage, CommanderRole } from "@/ty
  * active (e.g. SessionCardList) so dispatch cards and logs stay up-to-date.
  */
 export function useDispatchListener(fleetId: string | null) {
-  const addDispatch = useSessionStore((s) => s.addDispatch);
-  const updateDispatch = useSessionStore((s) => s.updateDispatch);
+  const upsertDispatch = useSessionStore((s) => s.upsertDispatch);
   const addDispatchLog = useSessionStore((s) => s.addDispatchLog);
   const registerSession = useSessionStore((s) => s.registerSession);
 
@@ -24,7 +23,7 @@ export function useDispatchListener(fleetId: string | null) {
       if (msg.type === "dispatch:created") {
         const data = msg.data as { fleetId: string; dispatch: Dispatch };
         if (data.fleetId === fleetId) {
-          addDispatch(data.dispatch);
+          upsertDispatch(data.dispatch);
         }
       }
 
@@ -45,11 +44,11 @@ export function useDispatchListener(fleetId: string | null) {
       if (msg.type === "dispatch:completed") {
         const data = msg.data as { fleetId: string; dispatch: Dispatch };
         if (data.fleetId === fleetId) {
-          updateDispatch(data.dispatch);
+          upsertDispatch(data.dispatch);
         }
       }
     });
 
     return unsub;
-  }, [fleetId, addDispatch, updateDispatch, addDispatchLog, registerSession]);
+  }, [fleetId, upsertDispatch, addDispatchLog, registerSession]);
 }

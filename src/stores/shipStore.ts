@@ -43,14 +43,14 @@ interface ShipState {
   setShipPhase: (id: string, phase: Phase, extra?: ShipPhaseData) => void;
   setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
-  setShipLogs: (id: string, messages: StreamMessage[]) => void;
+  mergeShipHistory: (id: string, messages: StreamMessage[]) => void;
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
 
   updateShipFromApi: (shipId: string) => Promise<void>;
   upsertShip: (ship: Ship) => void;
-  syncShips: (ships: Ship[]) => void;
+  removeShip: (id: string) => void;
   fetchShips: (fleetId?: string) => Promise<void>;
   sortie: (fleetId: string, repo: string, issueNumber: number) => Promise<void>;
   chatWithShip: (id: string, message: string) => void;
@@ -141,7 +141,7 @@ export const useShipStore = create<ShipState>((set) => ({
     scheduleBatchFlush();
   },
 
-  setShipLogs: (id, messages) => {
+  mergeShipHistory: (id, messages) => {
     // Drain any pending buffered messages for this ship so they aren't lost
     const buffered = pendingLogs.get(id) ?? [];
     pendingLogs.delete(id);
@@ -232,39 +232,25 @@ export const useShipStore = create<ShipState>((set) => ({
     });
   },
 
-  syncShips: (shipList) => {
+  removeShip: (id) => {
     set((state) => {
       const ships = new Map(state.ships);
-      const serverIds = new Set(shipList.map((s) => s.id));
-
-      // Remove ships that no longer exist on the server
-      for (const id of ships.keys()) {
-        if (!serverIds.has(id)) ships.delete(id);
-      }
-
-      // Merge server state while preserving local-only fields
-      for (const serverShip of shipList) {
-        const existing = ships.get(serverShip.id);
-        if (existing) {
-          ships.set(serverShip.id, {
-            ...serverShip,
-            // Preserve local-only transient state that the server doesn't track
-            isCompacting: existing.isCompacting,
-            gateCheck: existing.gateCheck,
-          });
-        } else {
-          ships.set(serverShip.id, serverShip);
-        }
-      }
-
-      return { ships };
+      ships.delete(id);
+      const shipLogs = new Map(state.shipLogs);
+      shipLogs.delete(id);
+      return { ships, shipLogs };
     });
+    // Also drain pending log buffer for this ship
+    pendingLogs.delete(id);
   },
 
   fetchShips: async (fleetId) => {
     try {
-      const ships = await api.fetchShips(fleetId);
-      useShipStore.getState().syncShips(ships);
+      const shipList = await api.fetchShips(fleetId);
+      const { upsertShip } = useShipStore.getState();
+      for (const ship of shipList) {
+        upsertShip(ship);
+      }
     } catch (err) {
       console.error("[shipStore] fetchShips failed:", err);
     }
