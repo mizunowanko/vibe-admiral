@@ -49,7 +49,9 @@ function createMockDepsWithDb() {
   deps.getDatabase.mockReturnValue(mockDb as unknown as FleetDatabase);
   const setGateCheck = vi.fn();
   const clearGateCheck = vi.fn();
-  deps.getShipManager.mockReturnValue({ syncPhaseFromDb, setGateCheck, clearGateCheck } as unknown as ShipManager);
+  const setQaRequired = vi.fn();
+  const redeploySkills = vi.fn().mockResolvedValue(undefined);
+  deps.getShipManager.mockReturnValue({ syncPhaseFromDb, setGateCheck, clearGateCheck, setQaRequired, redeploySkills } as unknown as ShipManager);
 
   // Default: actorManager.requestTransition succeeds (XState approves)
   const requestTransition = vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
@@ -399,6 +401,69 @@ describe("API Server", () => {
             phase: "plan-gate",
           });
           expect(res.status).toBe(404);
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("does not skip plan-gate when qaRequired=false (#835)", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        // Ship has qaRequired: false — but plan-gate should still launch Escort
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "plan", fleetId: "fleet-1", qaRequired: false });
+        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
+            phase: "plan-gate",
+            metadata: { planCommentUrl: "https://example.com", qaRequired: false },
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          // plan-gate should NOT be auto-approved — Escort should be launched
+          expect(res.data.phase).toBe("plan-gate");
+          expect(depsWithDb.notifyGateSkip).not.toHaveBeenCalled();
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("does not skip coding-gate when qaRequired=false (#835)", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "coding", fleetId: "fleet-1", qaRequired: false });
+        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "coding", toPhase: "coding-gate" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
+            phase: "coding-gate",
+            metadata: {},
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          // coding-gate should NOT be auto-approved
+          expect(res.data.phase).toBe("coding-gate");
+          expect(depsWithDb.notifyGateSkip).not.toHaveBeenCalled();
+        } finally {
+          s2.server.close();
+        }
+      });
+
+      it("skips qa-gate when qaRequired=false", async () => {
+        const depsWithDb = createMockDepsWithDb();
+        depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "qa", fleetId: "fleet-1", qaRequired: false });
+        depsWithDb._requestTransition
+          .mockReturnValueOnce({ success: true, fromPhase: "qa", toPhase: "qa-gate" })
+          .mockReturnValueOnce({ success: true, fromPhase: "qa-gate", toPhase: "merging" });
+        const s2 = await startServer(depsWithDb);
+        try {
+          const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
+            phase: "qa-gate",
+            metadata: {},
+          });
+          expect(res.status).toBe(200);
+          expect(res.data.ok).toBe(true);
+          // qa-gate should be auto-approved when qaRequired=false
+          expect(res.data.phase).toBe("merging");
+          expect(depsWithDb.notifyGateSkip).toHaveBeenCalledWith("ship-1", "qa-gate", "qaRequired: false");
         } finally {
           s2.server.close();
         }
