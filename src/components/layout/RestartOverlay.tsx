@@ -13,7 +13,8 @@ export function RestartOverlay() {
         <div className="text-center">
           <p className="text-lg font-semibold">Engine Restarting...</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            All sessions will resume automatically after restart.
+            Pulling latest code and restarting. All sessions will resume
+            automatically.
           </p>
         </div>
       </div>
