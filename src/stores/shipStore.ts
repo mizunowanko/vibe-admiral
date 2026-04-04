@@ -142,9 +142,26 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
   setShipLogs: (id, messages) => {
+    // Drain any pending buffered messages for this ship so they aren't lost
+    const buffered = pendingLogs.get(id) ?? [];
+    pendingLogs.delete(id);
+
     set((state) => {
       const shipLogs = new Map(state.shipLogs);
-      shipLogs.set(id, messages);
+      const existing = shipLogs.get(id) ?? [];
+
+      // History from server is the authoritative base.
+      // Append any existing/buffered messages that are newer than the latest
+      // history timestamp to preserve streaming messages that arrived after
+      // the Engine read the log files.
+      const lastMsg = messages[messages.length - 1];
+      const historyLatestTs = lastMsg ? (lastMsg.timestamp ?? 0) : 0;
+
+      const newer = [...existing, ...buffered].filter(
+        (m) => (m.timestamp ?? 0) > historyLatestTs,
+      );
+
+      shipLogs.set(id, [...messages, ...newer]);
       return { shipLogs };
     });
   },
