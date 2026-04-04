@@ -197,6 +197,12 @@ export class ShipActorManager {
     if (afterPhase && afterPhase !== beforePhase) {
       return { success: true, fromPhase: beforePhase!, toPhase: afterPhase };
     }
+    // Log rejected transitions for debugging (#839).
+    // XState silently ignores events that are not handled in the current state.
+    console.warn(
+      `[ship-actor] Transition rejected: event=${event.type} phase=${afterPhase ?? "unknown"} ` +
+      `shipId=${shipId.slice(0, 8)}...`,
+    );
     return { success: false, currentPhase: afterPhase };
   }
 

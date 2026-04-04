@@ -425,6 +425,25 @@ export const shipMachine = setup({
   },
 });
 
+// === Phase consistency (#839) ===
+// Runtime assertion: XState machine state keys must match PHASES tuple.
+// This runs at module load time and throws immediately if they diverge.
+// Complement to the test in phases.test.ts.
+import { PHASES } from "./phases.js";
+{
+  const machineStateKeys = new Set(Object.keys(shipMachine.config.states ?? {}));
+  const phaseSet = new Set<string>(PHASES);
+  const missing = [...phaseSet].filter((p) => !machineStateKeys.has(p));
+  const extra = [...machineStateKeys].filter((k) => !phaseSet.has(k));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(
+      `[ship-machine] Phase/state mismatch (#839): ` +
+      (missing.length > 0 ? `missing states: ${missing.join(", ")}` : "") +
+      (extra.length > 0 ? ` extra states: ${extra.join(", ")}` : ""),
+    );
+  }
+}
+
 // === Type exports for external consumers ===
 
 export type ShipMachine = typeof shipMachine;

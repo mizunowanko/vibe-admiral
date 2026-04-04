@@ -362,7 +362,7 @@ export class StateSync {
       // even if the issue happens to be closed externally (#830).
       if (ship.phase === "merging") {
         // Check if the issue was already closed (PR merged) on GitHub.
-        const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
+        const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber, ship.phase);
         if (rescued) {
           console.log(
             `[state-sync] Ship #${ship.issueNumber} died in merging but issue is already closed — treating as done`,
@@ -513,10 +513,23 @@ export class StateSync {
     }
   }
 
+  /**
+   * Check if the issue was closed on GitHub (rescue to done).
+   * Defense-in-depth (#839): accepts currentPhase and aborts if not "merging".
+   * The caller already checks `ship.phase === "merging"`, but this guard
+   * prevents future call-site additions from skipping the check.
+   */
   private async rescueIfAlreadyDone(
     repo: string,
     issueNumber: number,
+    currentPhase?: string,
   ): Promise<boolean> {
+    if (currentPhase !== undefined && currentPhase !== "merging") {
+      console.warn(
+        `[state-sync] rescueIfAlreadyDone blocked: phase is "${currentPhase}" (expected "merging") for #${issueNumber}`,
+      );
+      return false;
+    }
     try {
       const issue = await github.getIssue(repo, issueNumber);
       if (issue.state === "closed") {

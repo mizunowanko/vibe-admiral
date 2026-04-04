@@ -268,6 +268,17 @@ describe("ShipActorManager", () => {
       manager.stopAll();
     });
 
+    it("logs rejected transitions (#839)", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      manager.createActor(DEFAULT_INPUT);
+      manager.requestTransition("ship-1", { type: "GATE_APPROVED" });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[ship-actor] Transition rejected: event=GATE_APPROVED phase=plan"),
+      );
+      warnSpy.mockRestore();
+      manager.stopAll();
+    });
+
     it("returns failure with undefined currentPhase when no actor exists", () => {
       const result = manager.requestTransition("nonexistent", { type: "GATE_ENTER" });
       expect(result.success).toBe(false);
@@ -310,12 +321,25 @@ describe("ShipActorManager", () => {
       manager.stopAll();
     });
 
-    it("supports NOTHING_TO_DO event (any work phase → done)", () => {
+    it("supports NOTHING_TO_DO event (merging → done only, #830)", () => {
       manager.createActor(DEFAULT_INPUT);
+      // NOTHING_TO_DO from plan should be rejected (#830)
+      const rejected = manager.requestTransition("ship-1", { type: "NOTHING_TO_DO", reason: "issue resolved" });
+      expect(rejected.success).toBe(false);
+
+      // Advance to merging: plan → plan-gate → coding → coding-gate → qa → qa-gate → merging
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      manager.send("ship-1", { type: "GATE_APPROVED" });
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      manager.send("ship-1", { type: "GATE_APPROVED" });
+      manager.send("ship-1", { type: "GATE_ENTER" });
+      manager.send("ship-1", { type: "GATE_APPROVED" });
+      expect(manager.getPhase("ship-1")).toBe("merging");
+
       const result = manager.requestTransition("ship-1", { type: "NOTHING_TO_DO", reason: "issue resolved" });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.fromPhase).toBe("plan");
+        expect(result.fromPhase).toBe("merging");
         expect(result.toPhase).toBe("done");
       }
       manager.stopAll();
