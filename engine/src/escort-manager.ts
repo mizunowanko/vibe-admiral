@@ -182,6 +182,8 @@ export class EscortManager {
       completedAt: null,
       totalInputTokens: null,
       totalOutputTokens: null,
+      cacheReadInputTokens: null,
+      cacheCreationInputTokens: null,
       costUsd: null,
     };
 

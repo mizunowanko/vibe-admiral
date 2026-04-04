@@ -33,9 +33,14 @@ export function extractResultUsage(
 ): ResultUsage | null {
   if (raw.type !== "result") return null;
 
-  const costUsd = raw.cost_usd as number | undefined;
+  const costUsd = raw.total_cost_usd as number | undefined;
   const usage = raw.usage as
-    | { input_tokens?: number; output_tokens?: number }
+    | {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      }
     | undefined;
 
   // Require at least cost or usage to be present
@@ -44,6 +49,8 @@ export function extractResultUsage(
   return {
     inputTokens: usage?.input_tokens ?? 0,
     outputTokens: usage?.output_tokens ?? 0,
+    cacheReadInputTokens: usage?.cache_read_input_tokens ?? 0,
+    cacheCreationInputTokens: usage?.cache_creation_input_tokens ?? 0,
     costUsd: costUsd ?? 0,
   };
 }

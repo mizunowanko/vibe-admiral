@@ -311,6 +311,10 @@ export interface EscortProcess {
   totalInputTokens: number | null;
   /** Cumulative output tokens across all gate sessions. */
   totalOutputTokens: number | null;
+  /** Cumulative cache read input tokens across all gate sessions. */
+  cacheReadInputTokens: number | null;
+  /** Cumulative cache creation input tokens across all gate sessions. */
+  cacheCreationInputTokens: number | null;
   /** Cumulative cost in USD across all gate sessions. */
   costUsd: number | null;
 }
@@ -320,6 +324,8 @@ export interface EscortProcess {
 export interface ResultUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
   costUsd: number;
 }
 
