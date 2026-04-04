@@ -252,8 +252,8 @@ describe("StateSync", () => {
       expect(mockStatusManager.markDone).toHaveBeenCalledWith(REPO, 42);
     });
 
-    it("handles failed exit with rescue (issue already closed)", async () => {
-      const ship = makeShip();
+    it("handles failed exit with rescue (merging phase, issue already closed)", async () => {
+      const ship = makeShip({ phase: "merging" });
       mockShipManager.getShip.mockReturnValue(ship);
       mockGetIssue.mockResolvedValue(
         makeIssue({ state: "closed", labels: ["status/sortied"] }),
@@ -270,6 +270,22 @@ describe("StateSync", () => {
         "ship-1",
         "done",
       );
+    });
+
+    it("does NOT rescue coding phase ship to done even if issue is closed (#830)", async () => {
+      const ship = makeShip({ phase: "coding" });
+      mockShipManager.getShip.mockReturnValue(ship);
+      mockStatusManager.rollback.mockResolvedValue(undefined);
+
+      await stateSync.onProcessExit("ship-1", false);
+
+      // Should NOT transition to done — coding phase is not eligible for rescue
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalledWith(
+        "ship-1",
+        "done",
+      );
+      // Should rollback label instead
+      expect(mockStatusManager.rollback).toHaveBeenCalledWith(REPO, 42, 3);
     });
 
     it("handles failed exit without rescue (issue still open)", async () => {
@@ -314,8 +330,8 @@ describe("StateSync", () => {
       expect(mockEscortManager.cleanupForDoneShip).toHaveBeenCalledWith("ship-1");
     });
 
-    it("cleans up Escort when parent Ship is rescued (issue already closed)", async () => {
-      const ship = makeShip();
+    it("cleans up Escort when parent Ship is rescued (merging phase, issue already closed)", async () => {
+      const ship = makeShip({ phase: "merging" });
       mockShipManager.getShip.mockReturnValue(ship);
       mockGetIssue.mockResolvedValue(
         makeIssue({ state: "closed", labels: ["status/sortied"] }),

@@ -355,29 +355,33 @@ export class StateSync {
         }
       }
 
-      // Check if the issue was already closed (PR merged) on GitHub.
-      const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
-      if (rescued) {
-        console.log(
-          `[state-sync] Ship #${ship.issueNumber} exited but issue is already closed — treating as done`,
-        );
-        await this.completeDoneCleanup(shipId, ship);
-        return;
-      }
-
-      // --- Merging-phase PR merge rescue (#761) ---
-      // If Ship died in "merging" phase, check if the PR was actually merged.
-      // The Ship may have completed `gh pr merge --squash` but died before
-      // calling the phase-transition API to declare done. In this case the
-      // issue may still be open (e.g., PR body lacked "Closes #NNN").
-      if (ship.phase === "merging" && ship.branchName) {
-        const mergedPR = await this.rescueIfPRMerged(ship.repo, ship.branchName, ship.issueNumber);
-        if (mergedPR) {
+      // --- Merging-phase rescue (#761, #830) ---
+      // Only rescue Ships in "merging" phase — they are close to completion
+      // and may have finished the merge but died before declaring done.
+      // Ships in earlier phases (plan, coding, qa) must NOT be rescued to done,
+      // even if the issue happens to be closed externally (#830).
+      if (ship.phase === "merging") {
+        // Check if the issue was already closed (PR merged) on GitHub.
+        const rescued = await this.rescueIfAlreadyDone(ship.repo, ship.issueNumber);
+        if (rescued) {
           console.log(
-            `[state-sync] Ship #${ship.issueNumber} died in merging but PR #${mergedPR.number} is merged — treating as done`,
+            `[state-sync] Ship #${ship.issueNumber} died in merging but issue is already closed — treating as done`,
           );
           await this.completeDoneCleanup(shipId, ship);
           return;
+        }
+
+        // Check if the PR was actually merged (issue may still be open if
+        // PR body lacked "Closes #NNN").
+        if (ship.branchName) {
+          const mergedPR = await this.rescueIfPRMerged(ship.repo, ship.branchName, ship.issueNumber);
+          if (mergedPR) {
+            console.log(
+              `[state-sync] Ship #${ship.issueNumber} died in merging but PR #${mergedPR.number} is merged — treating as done`,
+            );
+            await this.completeDoneCleanup(shipId, ship);
+            return;
+          }
         }
       }
 
@@ -439,10 +443,21 @@ export class StateSync {
     shipId: string,
     ship: { repo: string; issueNumber: number; worktreePath: string },
   ): Promise<void> {
-    await this.removeWorktreeWithRetry(ship.worktreePath);
-    // Transition to done via XState (sole authority for phase transitions)
-    this.actorManager?.send(shipId, { type: "NOTHING_TO_DO", reason: "Rescued: PR merged or issue closed" });
+    // Transition to done via XState (sole authority for phase transitions).
+    // Verify XState actually transitioned before proceeding with cleanup (#830).
+    const result = this.actorManager?.requestTransition(shipId, {
+      type: "NOTHING_TO_DO",
+      reason: "Rescued: PR merged or issue closed",
+    });
+    if (result && !result.success) {
+      console.warn(
+        `[state-sync] completeDoneCleanup rejected by XState for Ship #${ship.issueNumber} ` +
+        `(${shipId.slice(0, 8)}...): current phase is ${result.currentPhase ?? "unknown"} — aborting rescue`,
+      );
+      return;
+    }
     this.shipManager.updatePhase(shipId, "done");
+    await this.removeWorktreeWithRetry(ship.worktreePath);
 
     // Clean up Escort: kill process + mark DB record as done
     this.escortManager?.cleanupForDoneShip(shipId);
