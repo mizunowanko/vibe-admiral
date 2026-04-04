@@ -164,6 +164,9 @@ export function FleetSettings() {
   const [qaRequiredPaths, setQaRequiredPaths] = useState<string[]>(
     selectedFleet?.qaRequiredPaths ?? [],
   );
+  const [acceptanceTestRequired, setAcceptanceTestRequired] = useState<boolean>(
+    selectedFleet?.acceptanceTestRequired ?? true,
+  );
 
   const isNew = !selectedFleet;
 
@@ -180,6 +183,7 @@ export function FleetSettings() {
     setCustomInstructions(selectedFleet?.customInstructions ?? {});
     setGates(selectedFleet?.gates ?? {});
     setQaRequiredPaths(selectedFleet?.qaRequiredPaths ?? []);
+    setAcceptanceTestRequired(selectedFleet?.acceptanceTestRequired ?? true);
   }, [selectedFleet]);
 
   const saveRepos = (nextRepos: FleetRepo[]) => {
@@ -207,6 +211,7 @@ export function FleetSettings() {
       customInstructions,
       gates,
       qaRequiredPaths,
+      acceptanceTestRequired,
     });
   };
 
@@ -419,6 +424,37 @@ export function FleetSettings() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Acceptance Test Required — only shown when editing */}
+          {!isNew && (
+            <div className="rounded-md border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-medium">User Acceptance Test Required</label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {acceptanceTestRequired
+                      ? "Escort runs acceptance tests and requires user confirmation before merge."
+                      : "Acceptance test gate is auto-approved. Code review gate still applies."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={acceptanceTestRequired}
+                  onClick={() => setAcceptanceTestRequired(!acceptanceTestRequired)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    acceptanceTestRequired ? "bg-primary" : "bg-muted"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-sm transition-transform ${
+                      acceptanceTestRequired ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           )}
 

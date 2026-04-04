@@ -24,6 +24,7 @@ interface FleetState {
     customInstructions?: CustomInstructions;
     gatePrompts?: Partial<Record<GateType, string>>;
     qaRequiredPaths?: string[];
+    acceptanceTestRequired?: boolean;
     maxConcurrentSorties?: number;
     gates?: FleetGateSettings;
   }) => void;

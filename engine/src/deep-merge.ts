@@ -57,6 +57,7 @@ function mergeStringArrays(
  * - gatePrompts: Object.assign (per-fleet wins per key)
  * - gates: Object.assign (per-fleet wins per key)
  * - qaRequiredPaths: array concat + dedupe
+ * - acceptanceTestRequired: per-fleet wins if defined, otherwise global
  * - maxConcurrentSorties: per-fleet wins if defined, otherwise global
  */
 export function mergeSettings(
@@ -75,6 +76,7 @@ export function mergeSettings(
       ? { ...global.gatePrompts, ...perFleet.gatePrompts }
       : undefined,
     qaRequiredPaths: mergeStringArrays(global.qaRequiredPaths, perFleet.qaRequiredPaths),
+    acceptanceTestRequired: perFleet.acceptanceTestRequired ?? global.acceptanceTestRequired,
     maxConcurrentSorties: perFleet.maxConcurrentSorties ?? global.maxConcurrentSorties,
   };
 }

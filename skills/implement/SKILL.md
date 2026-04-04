@@ -128,7 +128,7 @@ fi
 |------|-----------|------|
 | `plan → plan-gate` | plan-review | Ship の Escort が計画の妥当性を検証 |
 | `coding → coding-gate` | code-review | Ship の Escort が PR の品質を検証 |
-| `qa → qa-gate` | Fleet 設定による | Ship の Escort が受け入れテストを実行（Fleet `gatePrompts` で手順をカスタマイズ。未設定時は auto-approve。`qaRequired: false` の場合スキップ） |
+| `qa → qa-gate` | Fleet 設定による | Ship の Escort が受け入れテストを実行（Fleet `gatePrompts` で手順をカスタマイズ。未設定時は auto-approve。`qaRequired: false` の場合スキップ。Fleet `acceptanceTestRequired: false` の場合も Escort が即 auto-approve） |
 
 ## Sub-Skill ルーティング
 
