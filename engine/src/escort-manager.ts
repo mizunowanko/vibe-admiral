@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile, unlink } from "node:fs/promises";
+import { mkdir, writeFile, unlink, rename, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
@@ -23,6 +23,20 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
  *   4. Escort reviews, submits verdict, and exits
  *   5. onEscortExit() handles cleanup or phase revert (if no verdict)
  */
+/** Directory name for temporarily stashing files during Escort runs. */
+const ESCORT_STASH_DIR = ".escort-stash";
+
+/** Rules files that are irrelevant to Escort (Commander-only, Engine-implementer docs). */
+const STASH_RULES = ["commander-rules.md", "cli-subprocess.md"];
+
+/** Skills that Escort actually uses — everything else gets stashed. */
+const ESCORT_SKILLS = new Set([
+  "escort",
+  "planning-gate",
+  "implementing-gate",
+  "acceptance-test-gate",
+]);
+
 export class EscortManager {
   private processManager: ProcessManagerLike;
   private shipManager: ShipManager;
@@ -196,6 +210,9 @@ export class EscortManager {
     // (replaces Ship's instructions that were previously written to this file)
     await this.deployCustomInstructions(parentShip.worktreePath, extraPrompt);
 
+    // Stash Ship-only rules and skills to reduce Escort's initial context
+    await this.stashForEscort(parentShip.worktreePath);
+
     // Launch via processManager.sortie() with /escort skill + gate phase context
     const escortEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
@@ -242,6 +259,9 @@ export class EscortManager {
 
     // Overwrite .claude/rules/custom-instructions.md with Escort's customInstructions
     await this.deployCustomInstructions(parentShip.worktreePath, extraPrompt);
+
+    // Stash Ship-only rules and skills to reduce Escort's initial context
+    await this.stashForEscort(parentShip.worktreePath);
 
     // Build Escort env vars
     const escortEnv: Record<string, string> = {
@@ -310,6 +330,84 @@ export class EscortManager {
     }
 
     this.shipCustomInstructions.delete(parentShipId);
+  }
+
+  /**
+   * Stash rules and skills that are irrelevant to Escort.
+   * Moves them to `.claude/.escort-stash/` so they don't bloat Escort's context.
+   * Called before Escort launch; restored by restoreFromEscortStash() after exit.
+   */
+  private async stashForEscort(worktreePath: string): Promise<void> {
+    const claudeDir = join(worktreePath, ".claude");
+    const stashBase = join(claudeDir, ESCORT_STASH_DIR);
+    const stashRulesDir = join(stashBase, "rules");
+    const stashSkillsDir = join(stashBase, "skills");
+
+    await mkdir(stashRulesDir, { recursive: true });
+    await mkdir(stashSkillsDir, { recursive: true });
+
+    // Stash irrelevant rules
+    const rulesDir = join(claudeDir, "rules");
+    for (const ruleName of STASH_RULES) {
+      const src = join(rulesDir, ruleName);
+      const dest = join(stashRulesDir, ruleName);
+      await rename(src, dest).catch(() => {});
+    }
+
+    // Stash Ship-only skills (everything not in ESCORT_SKILLS)
+    const skillsDir = join(claudeDir, "skills");
+    let entries: string[];
+    try {
+      entries = await readdir(skillsDir);
+    } catch {
+      return; // No skills directory
+    }
+    for (const entry of entries) {
+      if (ESCORT_SKILLS.has(entry)) continue;
+      const src = join(skillsDir, entry);
+      const dest = join(stashSkillsDir, entry);
+      await rename(src, dest).catch(() => {});
+    }
+
+    console.log(`[escort-manager] Stashed Ship rules/skills to ${ESCORT_STASH_DIR}`);
+  }
+
+  /**
+   * Restore stashed rules and skills after Escort exits.
+   * Moves files from `.claude/.escort-stash/` back to their original locations.
+   */
+  private async restoreFromEscortStash(worktreePath: string): Promise<void> {
+    const claudeDir = join(worktreePath, ".claude");
+    const stashBase = join(claudeDir, ESCORT_STASH_DIR);
+
+    // Restore rules
+    const stashRulesDir = join(stashBase, "rules");
+    const rulesDir = join(claudeDir, "rules");
+    try {
+      const entries = await readdir(stashRulesDir);
+      for (const entry of entries) {
+        await rename(join(stashRulesDir, entry), join(rulesDir, entry)).catch(() => {});
+      }
+    } catch {
+      // No stashed rules
+    }
+
+    // Restore skills
+    const stashSkillsDir = join(stashBase, "skills");
+    const skillsDir = join(claudeDir, "skills");
+    try {
+      const entries = await readdir(stashSkillsDir);
+      for (const entry of entries) {
+        await rename(join(stashSkillsDir, entry), join(skillsDir, entry)).catch(() => {});
+      }
+    } catch {
+      // No stashed skills
+    }
+
+    // Remove stash directory
+    await rm(stashBase, { recursive: true, force: true }).catch(() => {});
+
+    console.log(`[escort-manager] Restored Ship rules/skills from ${ESCORT_STASH_DIR}`);
   }
 
   /** Check if an Escort process is currently running for a parent Ship. */
@@ -411,6 +509,16 @@ export class EscortManager {
   onEscortExit(escortShipId: string, code: number | null): void {
     const parentShipId = this.findShipIdByEscortId(escortShipId);
     if (!parentShipId) return;
+
+    // Restore stashed rules and skills before restoring Ship's customInstructions
+    {
+      const ship = this.shipManager.getShip(parentShipId);
+      if (ship) {
+        this.restoreFromEscortStash(ship.worktreePath).catch((err) => {
+          console.warn(`[escort-manager] Failed to restore stashed files for ${parentShipId.slice(0, 8)}...:`, err);
+        });
+      }
+    }
 
     // Restore Ship's customInstructions (Escort overwrote .claude/rules/custom-instructions.md)
     this.restoreShipCustomInstructions(parentShipId).catch((err) => {
