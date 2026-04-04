@@ -1,6 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { EscortManager } from "../escort-manager.js";
 
+// Mock filesystem operations used by stashForEscort / restoreFromEscortStash / deployCustomInstructions
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+  unlink: vi.fn().mockResolvedValue(undefined),
+  rename: vi.fn().mockResolvedValue(undefined),
+  readdir: vi.fn().mockResolvedValue([]),
+  rm: vi.fn().mockResolvedValue(undefined),
+}));
+
 type MockProcessManager = {
   isRunning: ReturnType<typeof vi.fn>;
   kill: ReturnType<typeof vi.fn>;
@@ -12,6 +22,7 @@ type MockShipManager = {
   getShip: ReturnType<typeof vi.fn>;
   clearGateCheck: ReturnType<typeof vi.fn>;
   syncPhaseFromDb: ReturnType<typeof vi.fn>;
+  updatePhase: ReturnType<typeof vi.fn>;
 };
 
 type MockFleetDatabase = {
@@ -51,6 +62,7 @@ describe("EscortManager", () => {
       getShip: vi.fn().mockReturnValue(makeShip()),
       clearGateCheck: vi.fn(),
       syncPhaseFromDb: vi.fn(),
+      updatePhase: vi.fn(),
     };
     mockDb = {
       getEscortByShipId: vi.fn().mockReturnValue(undefined),
