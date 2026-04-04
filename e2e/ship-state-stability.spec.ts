@@ -435,8 +435,8 @@ test.describe("Ship State Stability — Issue #572", () => {
       "planning-gate",
       "implementing",
       "implementing-gate",
-      "acceptance-test",
-      "acceptance-test-gate",
+      "qa",
+      "qa-gate",
       "merging",
     ] as const;
 
