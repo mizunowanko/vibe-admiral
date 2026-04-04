@@ -188,7 +188,6 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "plan",
           }),
         },
-        NOTHING_TO_DO: { target: "done" },
       },
     },
 
@@ -230,7 +229,6 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "coding",
           }),
         },
-        NOTHING_TO_DO: { target: "done" },
       },
     },
 
@@ -278,7 +276,6 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "qa",
           }),
         },
-        NOTHING_TO_DO: { target: "done" },
       },
     },
 

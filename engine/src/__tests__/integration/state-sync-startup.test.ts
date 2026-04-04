@@ -194,8 +194,8 @@ describe("StateSync startup reconciliation (integration)", () => {
       expect(mockStatusManager.rollback).toHaveBeenCalledWith("owner/repo", 42, 3);
     });
 
-    it("rescues Ship as done if issue is already closed on GitHub", async () => {
-      const ship = makeShip({ phase: "coding" });
+    it("rescues merging-phase Ship as done if issue is already closed on GitHub", async () => {
+      const ship = makeShip({ phase: "merging" });
       mockShipManager.getShip.mockReturnValue(ship);
       vi.mocked(github.getIssue).mockResolvedValue(
         makeIssue({ number: 42, state: "closed", labels: ["status/sortied"] }),
@@ -208,6 +208,16 @@ describe("StateSync startup reconciliation (integration)", () => {
       // Process dead notified, then rescued to done
       expect(mockShipManager.notifyProcessDead).toHaveBeenCalledWith("ship-1");
       expect(mockShipManager.updatePhase).toHaveBeenCalledWith("ship-1", "done");
+    });
+
+    it("does NOT rescue coding-phase Ship to done even if issue is closed (#830)", async () => {
+      const ship = makeShip({ phase: "coding" });
+      mockShipManager.getShip.mockReturnValue(ship);
+
+      await stateSync.onProcessExit("ship-1", false);
+      // Should NOT transition to done — only merging phase is eligible
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalledWith("ship-1", "done");
+      expect(mockStatusManager.rollback).toHaveBeenCalledWith("owner/repo", 42, 3);
     });
 
     it("skips cleanup for unknown ships", async () => {
