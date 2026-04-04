@@ -9,7 +9,7 @@ import type { ApiDeps, ApiResponse } from "./api-server.js";
 import { sendJson, readBody } from "./api-server.js";
 import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER, normalizeGateFeedback } from "./types.js";
 import type { Phase, GatePhase } from "./types.js";
-import { resolveGateType } from "./gate-config.js";
+import { shouldSkipGate, resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
 
 // ── Long-poll infrastructure for gate phase waiting ──
@@ -285,12 +285,13 @@ export async function handleShipRoute(
         qaRequiredPaths: fleet?.qaRequiredPaths,
         acceptanceTestRequired: fleet?.acceptanceTestRequired,
       });
-      const gateType = resolveGateType(gatePhase, mergedGateSettings.gates);
-
       const refreshedShipForGate = db.getShipById(shipId);
-      const qaRequiredFalse = refreshedShipForGate?.qaRequired === false && gatePhase === "qa-gate";
-      if (gateType === null || gateType === "auto-approve" || qaRequiredFalse) {
-        const reason = gateType === null ? "gate disabled" : gateType === "auto-approve" ? "auto-approve" : "qaRequired: false";
+      const skipResult = shouldSkipGate(gatePhase, mergedGateSettings.gates, {
+        qaRequired: refreshedShipForGate?.qaRequired ?? true,
+      });
+
+      if (skipResult.skip) {
+        const { reason } = skipResult;
         console.log(`[ship-internal-api] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
         const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
         if (autoResult.success) {
@@ -305,13 +306,12 @@ export async function handleShipRoute(
           }
           shipManager.syncPhaseFromDb(shipId);
         }
-        if (qaRequiredFalse) {
-          deps.notifyGateSkip(shipId, gatePhase, reason);
-        }
+        deps.notifyGateSkip(shipId, gatePhase, reason);
         sendJson(res, 200, { ok: true, phase: autoResult.success ? autoResult.toPhase : result.toPhase });
         return;
       }
 
+      const gateType = resolveGateType(gatePhase, mergedGateSettings.gates)!;
       shipManager.setGateCheck(shipId, gatePhase, gateType);
 
       try {
