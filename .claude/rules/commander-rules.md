@@ -56,3 +56,22 @@ Commanders may only use Read/Glob/Grep for **non-source-code** files:
 - Git/GitHub output (via `gh` CLI or `git` commands)
 
 Reading `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.md` source files directly is **prohibited** — use Dispatch.
+
+## Ship 状況確認の /ship-inspect 必須ルール
+
+Ship の状況を確認・報告する際は、**必ず \`/ship-inspect\` スキルを使用する**。
+
+### 必須使用の場面
+
+- Ship の進捗・状況をユーザーに報告するとき
+- Ship の異常（processDead, phase 停滞, 無限ループ等）を調査するとき
+- Ship を pause/resume/abandon する判断を行うとき
+- Lookout Alert を受けて Ship の状態を確認するとき
+
+### 禁止事項
+
+- **API の phase 情報だけで Ship の状態を判断・報告してはならない。** phase は「どのフェーズにいるか」であり、「何をしているか」ではない。
+- **chat log（ship-log.jsonl）を読まずに Ship の状況を報告してはならない。**
+- **/ship-inspect を省略して「phase が coding だから実装中です」等と報告してはならない。**
+
+> **背景**: commander-rules.md の「Ship 異常調査のログ最優先ルール」だけでは Flagship がルールに従わないケースが繰り返し発生した。スキル化することでログ読み取りを強制する。
