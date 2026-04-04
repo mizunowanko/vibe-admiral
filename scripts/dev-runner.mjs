@@ -6,7 +6,7 @@
  * When Engine writes a `.restart` marker file and exits,
  * this runner restarts both processes automatically.
  */
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,7 +32,19 @@ function start(env = {}) {
   proc.on("close", () => {
     if (existsSync(RESTART_MARKER)) {
       unlinkSync(RESTART_MARKER);
-      console.log("\n[dev-runner] Restart requested — restarting all services...\n");
+      console.log("\n[dev-runner] Restart requested — pulling latest main...\n");
+      try {
+        const output = execSync("git pull origin main", {
+          cwd: ROOT,
+          timeout: 30_000,
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        console.log("[dev-runner] git pull succeeded:", output.trim());
+      } catch (err) {
+        console.error("[dev-runner] git pull failed — restarting with current code:", err.message);
+      }
+      console.log("[dev-runner] Restarting all services...\n");
       // Small delay to allow ports to be released
       setTimeout(() => start({ RESTARTED: "1" }), 1000);
     }

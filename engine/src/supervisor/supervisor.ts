@@ -12,7 +12,7 @@
  *
  * See ADR-0016 Phase 2 for the design rationale.
  */
-import { fork, type ChildProcess } from "node:child_process";
+import { fork, execSync, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { writeCrashLog } from "../crash-logger.js";
 import type { Serializable } from "node:child_process";
@@ -191,10 +191,30 @@ function scheduleRestart(
 
 // ── Graceful restart (prod-mode: WS child requests restart via IPC) ──
 
+function pullLatestMain(): boolean {
+  console.log("[supervisor] Pulling latest main branch...");
+  try {
+    const output = execSync("git pull origin main", {
+      cwd: join(SCRIPT_DIR, "..", ".."),
+      timeout: 30_000,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    console.log("[supervisor] git pull succeeded:", output.trim());
+    return true;
+  } catch (err) {
+    console.error("[supervisor] git pull failed — restarting with current code:", err);
+    return false;
+  }
+}
+
 function gracefulRestart(): void {
   if (isRestarting || isShuttingDown) return;
   isRestarting = true;
   console.log("[supervisor] Graceful restart requested — shutting down children for restart");
+
+  // Pull latest main before killing children so new code is ready for refork
+  pullLatestMain();
 
   const shutdownMsg: SupervisorToChild = { type: "supervisor:shutdown" };
 
