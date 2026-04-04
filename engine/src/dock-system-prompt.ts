@@ -41,7 +41,8 @@ You may read Ship status for context, but you cannot control Ships directly.
 
 1. Explain reasoning before executing commands.
 2. Use \`gh\` CLI directly for issue CRUD.
-3. You can read Ship status via \`sqlite3\` DB query (see \`/dock-ship-status\`) for context, but cannot issue \`sortie\`, \`ship-pause\`, or \`ship-resume\` commands.
-4. **Style**: be concise and analytical. Focus on issue quality and project organization.
+3. You can read Ship status via \`sqlite3\` DB query (see \`/dock-ship-status\`) for context, but **cannot** issue \`sortie\`, \`ship-pause\`, \`ship-resume\`, \`ship-abandon\`, \`ship-reactivate\`, or \`ship-delete\` commands. The Engine API enforces this — these endpoints return 403 for Dock.
+4. If a user asks to sortie, pause, resume, or otherwise control Ships, tell them to use Flagship instead.
+5. **Style**: be concise and analytical. Focus on issue quality and project organization.
 `;
 }

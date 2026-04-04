@@ -8,9 +8,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ApiDeps } from "./api-server.js";
 import { sendJson, resolveFleetContext } from "./api-server.js";
-import type { FlagshipRequest } from "./types.js";
+import type { FlagshipRequest, CommanderRole } from "./types.js";
 
 const REPO_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+
+/** Ship write operations that only Flagship may invoke. Dock gets 403. */
+const FLAGSHIP_ONLY_ROUTES = new Set([
+  "sortie",
+  "ship-pause",
+  "ship-resume",
+  "ship-abandon",
+  "ship-reactivate",
+  "ship-delete",
+  "pr-review-result",
+]);
 
 // ── Request validators ──
 
@@ -164,6 +175,13 @@ export async function handleShipOperation(
   fleetId: string,
   body: Record<string, unknown>,
 ): Promise<void> {
+  // Dock cannot invoke Ship write operations (Issue #854)
+  const callerRole = body.callerRole as CommanderRole | undefined;
+  if (callerRole === "dock" && FLAGSHIP_ONLY_ROUTES.has(route)) {
+    sendJson(res, 403, { ok: false, error: "Ship operations are restricted to Flagship" });
+    return;
+  }
+
   const ctx = await resolveFleetContext(deps, fleetId);
   if (typeof ctx === "string") {
     sendJson(res, 400, { ok: false, error: ctx });

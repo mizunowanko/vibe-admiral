@@ -17,7 +17,6 @@ export class DockManager extends CommanderManager {
       "issue-manage",
       "investigate",
       "read-issue",
-      "sortie",
     ];
   }
 }

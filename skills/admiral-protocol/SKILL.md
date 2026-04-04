@@ -24,9 +24,10 @@ Engine は HTTP REST API を提供する。Flagship は `curl` を Bash ツー�
 ```bash
 curl -s http://localhost:9721/api/sortie \
   -H 'Content-Type: application/json' \
-  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "items": [{"repo": "owner/repo", "issueNumber": 42}]}'
+  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "callerRole": "flagship", "items": [{"repo": "owner/repo", "issueNumber": 42}]}'
 ```
 
+- `callerRole` (required): Must be `"flagship"` — Dock gets 403
 - `items` (required): Array of `{ repo, issueNumber, skill? }`
 - `skill` (optional): Defaults to "/implement"
 - Multiple issues can be launched in a single call
@@ -47,7 +48,7 @@ curl -s "http://localhost:9721/api/ships?fleetId=${VIBE_ADMIRAL_FLEET_ID}" | jq 
 ```bash
 curl -s http://localhost:9721/api/ship-pause \
   -H 'Content-Type: application/json' \
-  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "shipId": "uuid-of-ship"}'
+  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "callerRole": "flagship", "shipId": "uuid-of-ship"}'
 ```
 
 ### 4. ship-resume — Resume a Dead Ship
@@ -55,7 +56,7 @@ curl -s http://localhost:9721/api/ship-pause \
 ```bash
 curl -s http://localhost:9721/api/ship-resume \
   -H 'Content-Type: application/json' \
-  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "shipId": "uuid-of-ship"}'
+  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "callerRole": "flagship", "shipId": "uuid-of-ship"}'
 ```
 
 - Only works on Ships whose process has died (processDead).
@@ -66,7 +67,7 @@ curl -s http://localhost:9721/api/ship-resume \
 ```bash
 curl -s http://localhost:9721/api/pr-review-result \
   -H 'Content-Type: application/json' \
-  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "shipId": "uuid-of-ship", "prNumber": 42, "verdict": "approve"}'
+  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "callerRole": "flagship", "shipId": "uuid-of-ship", "prNumber": 42, "verdict": "approve"}'
 ```
 
 - `verdict`: `"approve"` or `"request-changes"`
@@ -113,11 +114,21 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/commander-notify
 
 **Use case**: Flagship discovers a Ship problem → sends heads-up to Dock → Dock creates/triages an Issue. This keeps Flagship focused on Ship management while Dock handles Issue management.
 
+## callerRole — Role-Based Access Control
+
+All Ship write operations (sortie, ship-pause, ship-resume, ship-abandon, ship-reactivate, ship-delete, pr-review-result) require `callerRole` in the request body.
+
+- `callerRole: "flagship"` → allowed
+- `callerRole: "dock"` → **403 Forbidden** (Ship operations are restricted to Flagship)
+
+Flagship MUST always include `"callerRole": "flagship"` in Ship operation requests.
+
 ## Error Handling
 
 All endpoints return structured JSON:
 - **200**: `{ "ok": true, "result": "..." }` — operation succeeded
 - **400**: `{ "ok": false, "error": "..." }` — validation error (bad input)
+- **403**: `{ "ok": false, "error": "..." }` — Dock attempted Ship operation
 - **404**: `{ "ok": false, "error": "..." }` — unknown endpoint
 - **500**: `{ "ok": false, "error": "..." }` — internal error
 
