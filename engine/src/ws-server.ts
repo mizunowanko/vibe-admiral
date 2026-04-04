@@ -112,6 +112,17 @@ export class EngineServer {
       },
     });
 
+    // Dispatch creation handler: broadcast dispatch:created so frontend shows card immediately
+    this.dispatchManager.setOnCreateHandler((dispatch) => {
+      this.broadcast({
+        type: "dispatch:created",
+        data: {
+          fleetId: dispatch.fleetId,
+          dispatch: this.dispatchManager.toDispatch(dispatch),
+        },
+      });
+    });
+
     // Dispatch completion handler: notify parent Commander via stdin + broadcast
     this.dispatchManager.setOnCompleteHandler((dispatch) => {
       const commanderId = `${dispatch.parentRole}-${dispatch.fleetId}`;

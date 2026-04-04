@@ -132,6 +132,7 @@ export type ServerMessage =
   | { type: "dock:question"; data: { fleetId: string; message: StreamMessage } }
   | { type: "dock:question-timeout"; data: { fleetId: string } }
   | { type: "dispatch:stream"; data: { id: string; fleetId: string; parentRole: CommanderRole; message: StreamMessage } }
+  | { type: "dispatch:created"; data: { fleetId: string; dispatch: DispatchData } }
   | { type: "dispatch:completed"; data: { fleetId: string; dispatch: DispatchData } }
   | { type: "ship:stream"; data: { id: string; message: StreamMessage } }
   | { type: "escort:stream"; data: { id: string; escortId: string; fleetId?: string; issueNumber?: number; message: StreamMessage } }

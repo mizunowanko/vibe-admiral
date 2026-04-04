@@ -24,6 +24,8 @@ export class DispatchManager {
 
   /** Callback invoked when a Dispatch completes, to notify the parent Commander. */
   private onCompleteHandler: ((dispatch: DispatchProcess) => void) | null = null;
+  /** Callback invoked when a Dispatch is created, to notify the frontend. */
+  private onCreateHandler: ((dispatch: DispatchProcess) => void) | null = null;
 
   constructor(processManager: ProcessManagerLike) {
     this.processManager = processManager;
@@ -31,6 +33,10 @@ export class DispatchManager {
 
   setOnCompleteHandler(handler: (dispatch: DispatchProcess) => void): void {
     this.onCompleteHandler = handler;
+  }
+
+  setOnCreateHandler(handler: (dispatch: DispatchProcess) => void): void {
+    this.onCreateHandler = handler;
   }
 
   /**
@@ -59,6 +65,8 @@ export class DispatchManager {
       req.prompt,
       req.type,
     );
+
+    this.onCreateHandler?.(dispatch);
 
     return dispatch;
   }

@@ -33,6 +33,7 @@ type _HandledTypes =
   | "ship:gate-pending"
   | "ship:gate-resolved"
   | "dispatch:stream"
+  | "dispatch:created"
   | "dispatch:completed"
   | "flagship:stream"
   | "flagship:question"
@@ -205,6 +206,10 @@ export function useEngine() {
         );
       }
       // Log routing handled by useDispatchListener
+    });
+
+    r.on("dispatch:created", () => {
+      // Handled by useDispatchListener
     });
 
     r.on("dispatch:completed", () => {

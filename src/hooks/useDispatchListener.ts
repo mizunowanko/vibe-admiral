@@ -5,7 +5,7 @@ import type { ServerMessage, Dispatch, StreamMessage, CommanderRole } from "@/ty
 
 /**
  * Listens for Dispatch events from Engine-managed independent processes.
- * Handles dispatch:stream (log messages) and dispatch:completed events.
+ * Handles dispatch:created, dispatch:stream (log messages), and dispatch:completed events.
  *
  * Mount this in a component that is always rendered when a fleet is
  * active (e.g. SessionCardList) so dispatch cards and logs stay up-to-date.
@@ -20,6 +20,14 @@ export function useDispatchListener(fleetId: string | null) {
     if (!fleetId) return;
 
     const unsub = wsClient.onMessage((msg: ServerMessage) => {
+      // Dispatch created: register new dispatch card immediately
+      if (msg.type === "dispatch:created") {
+        const data = msg.data as { fleetId: string; dispatch: Dispatch };
+        if (data.fleetId === fleetId) {
+          addDispatch(data.dispatch);
+        }
+      }
+
       // Dispatch stream: log messages from independent CLI process
       if (msg.type === "dispatch:stream") {
         const data = msg.data as {
