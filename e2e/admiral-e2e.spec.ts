@@ -86,8 +86,7 @@ test.describe("Admiral E2E — Full Workflow", () => {
 
     // ── Step 6: Fleet settings ──
     const settingsButton = page.getByRole("button", {
-      name: "Settings",
-      exact: true,
+      name: "Fleet Settings",
     });
     await expect(settingsButton).toBeVisible({ timeout: 5000 });
     await settingsButton.click();

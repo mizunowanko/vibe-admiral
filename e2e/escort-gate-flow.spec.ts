@@ -6,7 +6,7 @@
  * - Escort approves → Ship advances to next phase
  * - Escort rejects → Ship returns to pre-gate phase
  *
- * Uses WS message injection to simulate Engine/Escort interactions.
+ * Uses seeded ships + notification-only WS protocol (ADR-0019).
  */
 
 import {
@@ -17,7 +17,13 @@ import {
 } from "./fixtures";
 import {
   installWsCapture,
-  injectWsMessage,
+  installShipSeedRoute,
+  seedShip,
+  updateSeededShip,
+  completeSeededShip,
+  injectGatePending,
+  injectGateResolved,
+  getSelectedFleetId,
 } from "./helpers/ws-helpers";
 
 const SHIP = {
@@ -31,6 +37,7 @@ const SHIP = {
 test.describe.serial("Escort Gate Flow", () => {
   test.beforeEach(async ({ page }) => {
     await installWsCapture(page);
+    await installShipSeedRoute(page);
   });
 
   test("plan-gate shows pending state, then advances on approval", async ({
@@ -41,67 +48,40 @@ test.describe.serial("Escort Gate Flow", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Gate Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create ship in plan phase
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP.id,
-        repo: SHIP.repo,
-        issueNumber: SHIP.issueNumber,
-        issueTitle: SHIP.issueTitle,
-        branchName: SHIP.branchName,
-        phase: "plan",
-      },
+    await seedShip(page, {
+      ...SHIP,
+      fleetId,
+      phase: "plan",
     });
 
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
     // Transition to plan-gate
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "plan-gate" },
-    });
-
-    await page.waitForTimeout(300);
+    await updateSeededShip(page, SHIP.id, { phase: "plan-gate" });
 
     // Set gate check pending
-    await injectWsMessage(page, {
-      type: "ship:gate-check",
-      data: {
-        shipId: SHIP.id,
-        gateCheck: {
-          phase: "plan-gate",
-          type: "plan-review",
-          status: "pending",
-        },
-      },
-    });
-
-    await page.waitForTimeout(300);
+    await injectGatePending(
+      page, SHIP.id, "plan-gate", "plan-review",
+      fleetId, SHIP.issueNumber, SHIP.issueTitle,
+    );
 
     // Ship should still be visible in gate state
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible();
 
     // Escort approves — clear gate and advance to coding
-    await injectWsMessage(page, {
-      type: "ship:gate-check",
-      data: { shipId: SHIP.id, gateCheck: null },
-    });
-
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "coding" },
-    });
-
-    await page.waitForTimeout(300);
+    await injectGateResolved(page, SHIP.id, "plan-gate", "plan-review", true);
+    await updateSeededShip(page, SHIP.id, { phase: "coding" });
 
     // Ship should show coding phase
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible();
   });
 
@@ -113,47 +93,29 @@ test.describe.serial("Escort Gate Flow", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Reject Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create ship in plan phase
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP.id,
-        repo: SHIP.repo,
-        issueNumber: SHIP.issueNumber,
-        issueTitle: SHIP.issueTitle,
-        branchName: SHIP.branchName,
-        phase: "plan",
-      },
+    await seedShip(page, {
+      ...SHIP,
+      fleetId,
+      phase: "plan",
     });
 
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
     // Enter plan-gate
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "plan-gate" },
-    });
-
-    await page.waitForTimeout(200);
+    await updateSeededShip(page, SHIP.id, { phase: "plan-gate" });
 
     // Escort rejects — Ship goes back to plan
-    await injectWsMessage(page, {
-      type: "ship:gate-check",
-      data: { shipId: SHIP.id, gateCheck: null },
-    });
-
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "plan" },
-    });
-
-    await page.waitForTimeout(300);
+    await injectGateResolved(page, SHIP.id, "plan-gate", "plan-review", false, "Plan needs more detail");
+    await updateSeededShip(page, SHIP.id, { phase: "plan" });
 
     // Ship should be back in plan phase
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible();
   });
 
@@ -165,75 +127,47 @@ test.describe.serial("Escort Gate Flow", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Code Gate Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create ship directly in coding phase
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP.id,
-        repo: SHIP.repo,
-        issueNumber: SHIP.issueNumber,
-        issueTitle: SHIP.issueTitle,
-        branchName: SHIP.branchName,
-        phase: "coding",
-      },
+    await seedShip(page, {
+      ...SHIP,
+      fleetId,
+      phase: "coding",
     });
 
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
     // coding → coding-gate
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "coding-gate" },
-    });
+    await updateSeededShip(page, SHIP.id, { phase: "coding-gate" });
 
-    await injectWsMessage(page, {
-      type: "ship:gate-check",
-      data: {
-        shipId: SHIP.id,
-        gateCheck: {
-          phase: "coding-gate",
-          type: "code-review",
-          status: "pending",
-        },
-      },
-    });
-
-    await page.waitForTimeout(300);
+    await injectGatePending(
+      page, SHIP.id, "coding-gate", "code-review",
+      fleetId, SHIP.issueNumber, SHIP.issueTitle,
+    );
 
     // Approve coding gate → skip qa → merging (qaRequired=false)
-    await injectWsMessage(page, {
-      type: "ship:gate-check",
-      data: { shipId: SHIP.id, gateCheck: null },
-    });
-
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "merging" },
-    });
-
-    await page.waitForTimeout(300);
+    await injectGateResolved(page, SHIP.id, "coding-gate", "code-review", true);
+    await updateSeededShip(page, SHIP.id, { phase: "merging" });
 
     // Ship should be in merging phase
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible();
 
     // Complete
-    await injectWsMessage(page, {
-      type: "ship:done",
-      data: {
-        shipId: SHIP.id,
-        prUrl: "https://github.com/test-org/test-repo/pull/50",
-        merged: true,
-      },
-    });
+    await completeSeededShip(page, SHIP.id);
 
-    await page.waitForTimeout(300);
+    // Done ships are hidden by default — enable "Show inactive"
+    const showInactive = page.getByText("Show inactive");
+    if (await showInactive.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await showInactive.click();
+    }
 
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
-    ).toBeVisible();
+      page.getByText(`#${SHIP.issueNumber}`).first(),
+    ).toBeVisible({ timeout: 5_000 });
   });
 });

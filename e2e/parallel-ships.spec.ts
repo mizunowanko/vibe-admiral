@@ -14,7 +14,11 @@ import {
 } from "./fixtures";
 import {
   installWsCapture,
-  injectWsMessage,
+  installShipSeedRoute,
+  seedShip,
+  updateSeededShip,
+  completeSeededShip,
+  getSelectedFleetId,
 } from "./helpers/ws-helpers";
 
 const SHIPS = [
@@ -44,6 +48,7 @@ const SHIPS = [
 test.describe.serial("Parallel Ships — No Interference", () => {
   test.beforeEach(async ({ page }) => {
     await installWsCapture(page);
+    await installShipSeedRoute(page);
   });
 
   test("multiple Ships appear independently in UI", async ({
@@ -54,26 +59,21 @@ test.describe.serial("Parallel Ships — No Interference", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Parallel Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create all three ships
     for (const ship of SHIPS) {
-      await injectWsMessage(page, {
-        type: "ship:created",
-        data: {
-          shipId: ship.id,
-          repo: ship.repo,
-          issueNumber: ship.issueNumber,
-          issueTitle: ship.issueTitle,
-          branchName: ship.branchName,
-          phase: "plan",
-        },
+      await seedShip(page, {
+        ...ship,
+        fleetId,
+        phase: "plan",
       });
-      await page.waitForTimeout(100);
     }
 
     // All three ships should be visible
     for (const ship of SHIPS) {
       await expect(
-        page.getByText(`#${ship.issueNumber}`),
+        page.getByText(`#${ship.issueNumber}`).first(),
       ).toBeVisible({ timeout: 10_000 });
     }
   });
@@ -86,43 +86,34 @@ test.describe.serial("Parallel Ships — No Interference", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "No Interference Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create two ships in plan phase
     for (const ship of SHIPS.slice(0, 2)) {
-      await injectWsMessage(page, {
-        type: "ship:created",
-        data: {
-          shipId: ship.id,
-          repo: ship.repo,
-          issueNumber: ship.issueNumber,
-          issueTitle: ship.issueTitle,
-          branchName: ship.branchName,
-          phase: "plan",
-        },
+      await seedShip(page, {
+        ...ship,
+        fleetId,
+        phase: "plan",
       });
-      await page.waitForTimeout(100);
     }
 
     // Wait for both to appear
     await expect(
-      page.getByText(`#${SHIPS[0].issueNumber}`),
+      page.getByText(`#${SHIPS[0].issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
     await expect(
-      page.getByText(`#${SHIPS[1].issueNumber}`),
+      page.getByText(`#${SHIPS[1].issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
     // Advance Ship A to coding, Ship B stays in plan
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIPS[0].id, phase: "coding" },
-    });
-    await page.waitForTimeout(300);
+    await updateSeededShip(page, SHIPS[0].id, { phase: "coding" });
 
     // Both ships should still be visible
     await expect(
-      page.getByText(`#${SHIPS[0].issueNumber}`),
+      page.getByText(`#${SHIPS[0].issueNumber}`).first(),
     ).toBeVisible();
     await expect(
-      page.getByText(`#${SHIPS[1].issueNumber}`),
+      page.getByText(`#${SHIPS[1].issueNumber}`).first(),
     ).toBeVisible();
   });
 
@@ -134,40 +125,27 @@ test.describe.serial("Parallel Ships — No Interference", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Complete Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create two ships
     for (const ship of SHIPS.slice(0, 2)) {
-      await injectWsMessage(page, {
-        type: "ship:created",
-        data: {
-          shipId: ship.id,
-          repo: ship.repo,
-          issueNumber: ship.issueNumber,
-          issueTitle: ship.issueTitle,
-          branchName: ship.branchName,
-          phase: "coding",
-        },
+      await seedShip(page, {
+        ...ship,
+        fleetId,
+        phase: "coding",
       });
-      await page.waitForTimeout(100);
     }
 
     await expect(
-      page.getByText(`#${SHIPS[0].issueNumber}`),
+      page.getByText(`#${SHIPS[0].issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
     // Complete Ship A
-    await injectWsMessage(page, {
-      type: "ship:done",
-      data: {
-        shipId: SHIPS[0].id,
-        prUrl: "https://github.com/test-org/repo-alpha/pull/1",
-        merged: true,
-      },
-    });
-    await page.waitForTimeout(300);
+    await completeSeededShip(page, SHIPS[0].id);
 
     // Ship B should still be visible and unaffected
     await expect(
-      page.getByText(`#${SHIPS[1].issueNumber}`),
+      page.getByText(`#${SHIPS[1].issueNumber}`).first(),
     ).toBeVisible();
   });
 
@@ -179,45 +157,36 @@ test.describe.serial("Parallel Ships — No Interference", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Rapid Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create all three ships
     for (const ship of SHIPS) {
-      await injectWsMessage(page, {
-        type: "ship:created",
-        data: {
-          shipId: ship.id,
-          repo: ship.repo,
-          issueNumber: ship.issueNumber,
-          issueTitle: ship.issueTitle,
-          branchName: ship.branchName,
-          phase: "plan",
-        },
+      await seedShip(page, {
+        ...ship,
+        fleetId,
+        phase: "plan",
       });
     }
 
     // Wait for all to appear
     for (const ship of SHIPS) {
       await expect(
-        page.getByText(`#${ship.issueNumber}`),
+        page.getByText(`#${ship.issueNumber}`).first(),
       ).toBeVisible({ timeout: 10_000 });
     }
 
     // Rapid fire phase updates for all ships simultaneously
-    const phases = ["plan-gate", "coding", "coding-gate", "merging"];
+    const phases = ["plan-gate", "coding", "coding-gate", "merging"] as const;
     for (const phase of phases) {
-      // Update all ships in rapid succession
       for (const ship of SHIPS) {
-        await injectWsMessage(page, {
-          type: "ship:status",
-          data: { shipId: ship.id, phase },
-        });
+        await updateSeededShip(page, ship.id, { phase });
       }
-      await page.waitForTimeout(100);
     }
 
     // After rapid updates, all ships should still be visible
     for (const ship of SHIPS) {
       await expect(
-        page.getByText(`#${ship.issueNumber}`),
+        page.getByText(`#${ship.issueNumber}`).first(),
       ).toBeVisible();
     }
   });

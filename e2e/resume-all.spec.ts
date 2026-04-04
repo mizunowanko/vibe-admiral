@@ -17,7 +17,10 @@ import {
 } from "./fixtures";
 import {
   installWsCapture,
-  injectWsMessage,
+  installShipSeedRoute,
+  seedShip,
+  updateSeededShip,
+  getSelectedFleetId,
 } from "./helpers/ws-helpers";
 
 const SHIP_PAUSED = {
@@ -55,6 +58,7 @@ const SHIP_ACTIVE = {
 test.describe.serial("Resume All — Selective Resume", () => {
   test.beforeEach(async ({ page }) => {
     await installWsCapture(page);
+    await installShipSeedRoute(page);
   });
 
   test("UI shows mixed ship states correctly", async ({
@@ -65,6 +69,8 @@ test.describe.serial("Resume All — Selective Resume", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Resume All Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create ships in different states
     const ships = [
       { ...SHIP_PAUSED, phase: "paused" },
@@ -74,24 +80,19 @@ test.describe.serial("Resume All — Selective Resume", () => {
     ];
 
     for (const ship of ships) {
-      await injectWsMessage(page, {
-        type: "ship:created",
-        data: {
-          shipId: ship.id,
-          repo: ship.repo,
-          issueNumber: ship.issueNumber,
-          issueTitle: ship.issueTitle,
-          branchName: ship.branchName,
-          phase: ship.phase,
-        },
-      });
-      await page.waitForTimeout(100);
+      await seedShip(page, { ...ship, fleetId });
+    }
+
+    // Enable "Show inactive" to see paused and abandoned ships
+    const showInactive = page.getByText("Show inactive");
+    if (await showInactive.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await showInactive.click();
     }
 
     // All ships should be visible
     for (const ship of ships) {
       await expect(
-        page.getByText(`#${ship.issueNumber}`),
+        page.getByText(`#${ship.issueNumber}`).first(),
       ).toBeVisible({ timeout: 10_000 });
     }
   });
@@ -104,75 +105,42 @@ test.describe.serial("Resume All — Selective Resume", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Selective Resume Fleet");
 
+    const fleetId = await getSelectedFleetId(page);
+
     // Create ships in different states
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP_PAUSED.id,
-        repo: SHIP_PAUSED.repo,
-        issueNumber: SHIP_PAUSED.issueNumber,
-        issueTitle: SHIP_PAUSED.issueTitle,
-        branchName: SHIP_PAUSED.branchName,
-        phase: "paused",
-      },
-    });
+    await seedShip(page, { ...SHIP_PAUSED, fleetId, phase: "paused" });
+    await seedShip(page, { ...SHIP_ABANDONED, fleetId, phase: "abandoned" });
+    await seedShip(page, { ...SHIP_ACTIVE, fleetId, phase: "coding" });
 
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP_ABANDONED.id,
-        repo: SHIP_ABANDONED.repo,
-        issueNumber: SHIP_ABANDONED.issueNumber,
-        issueTitle: SHIP_ABANDONED.issueTitle,
-        branchName: SHIP_ABANDONED.branchName,
-        phase: "abandoned",
-      },
-    });
-
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP_ACTIVE.id,
-        repo: SHIP_ACTIVE.repo,
-        issueNumber: SHIP_ACTIVE.issueNumber,
-        issueTitle: SHIP_ACTIVE.issueTitle,
-        branchName: SHIP_ACTIVE.branchName,
-        phase: "coding",
-      },
-    });
+    // Enable "Show inactive" to see paused and abandoned ships
+    const showInactive2 = page.getByText("Show inactive");
+    if (await showInactive2.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await showInactive2.click();
+    }
 
     // Wait for all to appear
     await expect(
-      page.getByText(`#${SHIP_PAUSED.issueNumber}`),
+      page.getByText(`#${SHIP_PAUSED.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
     await expect(
-      page.getByText(`#${SHIP_ABANDONED.issueNumber}`),
+      page.getByText(`#${SHIP_ABANDONED.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
     await expect(
-      page.getByText(`#${SHIP_ACTIVE.issueNumber}`),
+      page.getByText(`#${SHIP_ACTIVE.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
     // Simulate resume all: only paused ship gets resumed
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP_PAUSED.id, phase: "coding" },
-    });
-
-    await page.waitForTimeout(300);
-
-    // Paused ship should now show coding phase
-    // Abandoned ship should remain abandoned
-    // Active ship should remain in coding
+    await updateSeededShip(page, SHIP_PAUSED.id, { phase: "coding" });
 
     // All ships should still be visible
     await expect(
-      page.getByText(`#${SHIP_PAUSED.issueNumber}`),
+      page.getByText(`#${SHIP_PAUSED.issueNumber}`).first(),
     ).toBeVisible();
     await expect(
-      page.getByText(`#${SHIP_ABANDONED.issueNumber}`),
+      page.getByText(`#${SHIP_ABANDONED.issueNumber}`).first(),
     ).toBeVisible();
     await expect(
-      page.getByText(`#${SHIP_ACTIVE.issueNumber}`),
+      page.getByText(`#${SHIP_ACTIVE.issueNumber}`).first(),
     ).toBeVisible();
   });
 });

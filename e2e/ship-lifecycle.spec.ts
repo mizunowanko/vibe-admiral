@@ -5,7 +5,8 @@
  * coding-gate → merging → done) are correctly reflected in the UI.
  *
  * Uses a real Engine for WS transport and fleet management.
- * Ship events are injected via WebSocket to simulate Engine notifications.
+ * Ship data is seeded via Playwright route interception + WS notification
+ * (notification-only protocol per ADR-0019).
  */
 
 import {
@@ -16,7 +17,11 @@ import {
 } from "./fixtures";
 import {
   installWsCapture,
-  injectWsMessage,
+  installShipSeedRoute,
+  seedShip,
+  updateSeededShip,
+  completeSeededShip,
+  getSelectedFleetId,
 } from "./helpers/ws-helpers";
 
 const SHIP = {
@@ -25,7 +30,6 @@ const SHIP = {
   issueNumber: 100,
   issueTitle: "Test feature implementation",
   branchName: "feature/100-test-feature",
-  fleetId: "", // filled dynamically
 };
 
 const PHASES = [
@@ -42,6 +46,7 @@ const PHASES = [
 test.describe.serial("Ship Lifecycle — Phase Transitions", () => {
   test.beforeEach(async ({ page }) => {
     await installWsCapture(page);
+    await installShipSeedRoute(page);
   });
 
   test("Ship phases are reflected in UI as they transition", async ({
@@ -52,49 +57,30 @@ test.describe.serial("Ship Lifecycle — Phase Transitions", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Lifecycle Fleet");
 
-    // Create a ship via WS injection
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP.id,
-        repo: SHIP.repo,
-        issueNumber: SHIP.issueNumber,
-        issueTitle: SHIP.issueTitle,
-        branchName: SHIP.branchName,
-        phase: "plan",
-      },
+    const fleetId = await getSelectedFleetId(page);
+
+    await seedShip(page, {
+      ...SHIP,
+      fleetId,
+      phase: "plan",
     });
 
-    // Wait for ship to appear in Ships panel
+    // Wait for ship to appear
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Walk through each phase and verify UI updates
+    // Walk through active phases (not done — done ships are hidden by default)
     for (const phase of PHASES) {
-      if (phase === "plan") continue; // Already in plan from creation
+      if (phase === "plan") continue;
+      if (phase === "done") continue; // Tested separately below
 
-      await injectWsMessage(page, {
-        type: "ship:status",
-        data: {
-          shipId: SHIP.id,
-          phase,
-        },
-      });
+      await updateSeededShip(page, SHIP.id, { phase });
 
-      // Give UI time to process the WS message
-      await page.waitForTimeout(300);
-
-      // Verify the phase is reflected in the UI
-      // Ship cards show phase as a badge or text
-      if (phase === "done") {
-        // Done ships may show differently (e.g., checkmark or "done" text)
-        await expect(
-          page.locator(`[data-testid="ship-${SHIP.id}"]`).or(
-            page.getByText(`#${SHIP.issueNumber}`),
-          ),
-        ).toBeVisible({ timeout: 5_000 });
-      }
+      // Ship should remain visible through active phases
+      await expect(
+        page.getByText(`#${SHIP.issueNumber}`).first(),
+      ).toBeVisible({ timeout: 5_000 });
     }
   });
 
@@ -106,47 +92,33 @@ test.describe.serial("Ship Lifecycle — Phase Transitions", () => {
     await waitForConnection(page);
     await createAndSelectFleet(page, "Done Fleet");
 
-    // Create ship
-    await injectWsMessage(page, {
-      type: "ship:created",
-      data: {
-        shipId: SHIP.id,
-        repo: SHIP.repo,
-        issueNumber: SHIP.issueNumber,
-        issueTitle: SHIP.issueTitle,
-        branchName: SHIP.branchName,
-        phase: "plan",
-      },
+    const fleetId = await getSelectedFleetId(page);
+
+    await seedShip(page, {
+      ...SHIP,
+      fleetId,
+      phase: "plan",
     });
 
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
+      page.getByText(`#${SHIP.issueNumber}`).first(),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Move through phases to done
-    await injectWsMessage(page, {
-      type: "ship:status",
-      data: { shipId: SHIP.id, phase: "merging" },
-    });
+    // Move to merging
+    await updateSeededShip(page, SHIP.id, { phase: "merging" });
 
-    await page.waitForTimeout(200);
+    // Ship done
+    await completeSeededShip(page, SHIP.id);
 
-    // Ship done event with PR URL
-    await injectWsMessage(page, {
-      type: "ship:done",
-      data: {
-        shipId: SHIP.id,
-        prUrl: "https://github.com/test-org/test-repo/pull/42",
-        merged: true,
-      },
-    });
-
-    await page.waitForTimeout(300);
+    // Enable "Show inactive" to see done ships
+    const showInactive = page.getByText("Show inactive");
+    if (await showInactive.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await showInactive.click();
+    }
 
     // Verify ship shows as completed
-    // The ship card should still be visible with done state
     await expect(
-      page.getByText(`#${SHIP.issueNumber}`),
-    ).toBeVisible();
+      page.getByText(`#${SHIP.issueNumber}`).first(),
+    ).toBeVisible({ timeout: 5_000 });
   });
 });
