@@ -32,7 +32,7 @@ import type { CrashLog } from "./crash-logger.js";
 
 // Module imports (ADR-0016 Phase 1)
 import { loadFleets, loadAdmiralSettings, loadRules, handleMessage, type MessageHandlerDeps } from "./api-handlers.js";
-import { setupProcessEvents, setupShipStatusHandler, setupShipCreatedHandler, setupLookout, deliverHeadsUp } from "./ship-lifecycle.js";
+import { setupProcessEvents, setupShipStatusHandler, setupShipCreatedHandler, setupResumeToGateHandler, setupLookout, deliverHeadsUp } from "./ship-lifecycle.js";
 import { runStartupReconciliation } from "./startup.js";
 import { startQuestionTimeoutScanner, startProcessLivenessCheck, startHeartbeat, resumeAllUnits } from "./health-monitor.js";
 
@@ -175,7 +175,7 @@ export class EngineServer {
     };
 
     // HTTP server handles REST API requests; WebSocket upgrades are routed to wss
-    const apiHandler = createApiHandler({
+    const apiDeps: import("./api-server.js").ApiDeps = {
       requestHandler: this.requestHandler,
       getDatabase: () => this.fleetDb,
       getShipManager: () => this.shipManager,
@@ -265,7 +265,8 @@ export class EngineServer {
         );
       },
       resumeAllUnits: () => this.resumeAllUnits(),
-    });
+    };
+    const apiHandler = createApiHandler(apiDeps);
 
     // In production, serve Vite build output as static files.
     // The dist/ directory is at the repo root (../../dist relative to engine/src/).
@@ -324,6 +325,9 @@ export class EngineServer {
       this.shipManager,
       (msg: ServerMessage) => this.broadcast(msg),
     );
+
+    // #853: Auto-launch Escort when Ship resumes to a gate phase
+    setupResumeToGateHandler(this.shipManager, apiDeps);
 
     runStartupReconciliation({
       shipManager: this.shipManager,

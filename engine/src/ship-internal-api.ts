@@ -12,6 +12,141 @@ import type { Phase, GatePhase } from "./types.js";
 import { shouldSkipGate, resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
 
+// ── Escort launch for gate phases ──
+
+/**
+ * Launch an Escort for a gate phase. Extracted from the phase-transition handler
+ * so it can be reused when a Ship resumes to a gate phase (#853).
+ *
+ * Handles: gate skip check, skill redeploy, custom instructions, Escort launch,
+ * and failure revert. Returns the outcome for the caller.
+ */
+export async function launchEscortForGate(
+  deps: ApiDeps,
+  shipId: string,
+  gatePhase: GatePhase,
+): Promise<{ launched: boolean; escortId?: string; skipped?: boolean; skipPhase?: string; error?: string }> {
+  const db = deps.getDatabase();
+  const shipManager = deps.getShipManager();
+  const actorManager = deps.getActorManager();
+
+  if (!db) {
+    return { launched: false, error: "No database" };
+  }
+
+  const ship = db.getShipById(shipId);
+  if (!ship) {
+    return { launched: false, error: `Ship ${shipId} not found` };
+  }
+
+  const fleets = await deps.loadFleets();
+  const fleet = fleets.find((f) => f.id === ship.fleetId);
+  const admiralSettings = await deps.loadAdmiralSettings();
+  const mergedGateSettings = mergeSettings(admiralSettings.global, {
+    customInstructions: fleet?.customInstructions,
+    gates: fleet?.gates,
+    gatePrompts: fleet?.gatePrompts,
+    qaRequiredPaths: fleet?.qaRequiredPaths,
+    acceptanceTestRequired: fleet?.acceptanceTestRequired,
+  });
+  const refreshedShipForGate = db.getShipById(shipId);
+  const skipResult = shouldSkipGate(gatePhase, mergedGateSettings.gates, {
+    qaRequired: refreshedShipForGate?.qaRequired ?? true,
+  });
+
+  if (skipResult.skip) {
+    const { reason } = skipResult;
+    console.log(`[ship-internal-api] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
+    const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
+    if (autoResult.success) {
+      const autoSnapshot = actorManager.getPersistedSnapshot(shipId);
+      try {
+        db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
+          gate_result: "approved",
+          feedback: `Escort skipped (${reason})`,
+        }, autoSnapshot);
+      } catch (err) {
+        console.error(`[ship-internal-api] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
+      }
+      shipManager.syncPhaseFromDb(shipId);
+    }
+    deps.notifyGateSkip(shipId, gatePhase, reason);
+    return { launched: false, skipped: true, skipPhase: autoResult.success ? autoResult.toPhase : gatePhase };
+  }
+
+  const gateType = resolveGateType(gatePhase, mergedGateSettings.gates)!;
+  shipManager.setGateCheck(shipId, gatePhase, gateType);
+
+  try {
+    const { resolveFleetContext } = await import("./api-server.js");
+    const fleetCtx = await resolveFleetContext(deps, ship.fleetId);
+    const skillSources = typeof fleetCtx === "string" ? undefined : fleetCtx.skillSources;
+    await shipManager.redeploySkills(shipId, skillSources);
+  } catch (err) {
+    console.warn(`[ship-internal-api] Skill redeploy failed for Ship ${shipId.slice(0, 8)}...:`, err);
+  }
+
+  const escortManager = deps.getEscortManager();
+
+  let escortExtraPrompt: string | undefined;
+  let shipCustomInstructionsText: string | undefined;
+  {
+    const ci = mergedGateSettings.customInstructions;
+    const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
+    if (escortCiParts.length > 0) {
+      escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
+    }
+    const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
+    if (shipCiParts.length > 0) {
+      shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
+    }
+  }
+
+  const gatePrompt = mergedGateSettings.gatePrompts?.[gateType];
+
+  const escortExtraEnv: Record<string, string> = {};
+  if (mergedGateSettings.qaRequiredPaths?.length) {
+    escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(mergedGateSettings.qaRequiredPaths);
+  }
+  const refreshedShip = db.getShipById(shipId);
+  if (refreshedShip) {
+    escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
+  }
+  if (gatePhase === "qa-gate" && mergedGateSettings.acceptanceTestRequired === false) {
+    escortExtraEnv.VIBE_ADMIRAL_ACCEPTANCE_TEST_REQUIRED = "false";
+  }
+
+  const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);
+  if (!escortId) {
+    const prevPhase = GATE_PREV_PHASE[gatePhase];
+    console.error(
+      `[ship-internal-api] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
+    );
+    const revertResult = actorManager.requestTransition(shipId, {
+      type: "ESCORT_DIED",
+      exitCode: null,
+      feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+    });
+    if (revertResult.success) {
+      const revertSnapshot = actorManager.getPersistedSnapshot(shipId);
+      try {
+        db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
+          gate_result: "rejected",
+          feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+        }, revertSnapshot);
+      } catch (revertErr) {
+        console.error(`[ship-internal-api] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
+      }
+      shipManager.syncPhaseFromDb(shipId);
+    }
+    shipManager.clearGateCheck(shipId);
+    escortManager.notifyLaunchFailure(shipId, gatePhase, "Escort launch returned null — reverting to pre-gate phase for retry");
+    return { launched: false, error: "Escort launch failed" };
+  }
+
+  return { launched: true, escortId };
+}
+
 // ── Long-poll infrastructure for gate phase waiting ──
 
 const LONG_POLL_TIMEOUT_MS = 120_000; // 120 seconds
@@ -273,112 +408,16 @@ export async function handleShipRoute(
     shipManager.syncPhaseFromDb(shipId);
 
     if (isGatePhase(result.toPhase)) {
-      const gatePhase = result.toPhase as GatePhase;
+      const gateResult = await launchEscortForGate(deps, shipId, result.toPhase as GatePhase);
 
-      const fleets = await deps.loadFleets();
-      const fleet = fleets.find((f) => f.id === ship.fleetId);
-      const admiralSettings = await deps.loadAdmiralSettings();
-      const mergedGateSettings = mergeSettings(admiralSettings.global, {
-        customInstructions: fleet?.customInstructions,
-        gates: fleet?.gates,
-        gatePrompts: fleet?.gatePrompts,
-        qaRequiredPaths: fleet?.qaRequiredPaths,
-        acceptanceTestRequired: fleet?.acceptanceTestRequired,
-      });
-      const refreshedShipForGate = db.getShipById(shipId);
-      const skipResult = shouldSkipGate(gatePhase, mergedGateSettings.gates, {
-        qaRequired: refreshedShipForGate?.qaRequired ?? true,
-      });
-
-      if (skipResult.skip) {
-        const { reason } = skipResult;
-        console.log(`[ship-internal-api] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
-        const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
-        if (autoResult.success) {
-          const autoSnapshot = actorManager.getPersistedSnapshot(shipId);
-          try {
-            db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
-              gate_result: "approved",
-              feedback: `Escort skipped (${reason})`,
-            }, autoSnapshot);
-          } catch (err) {
-            console.error(`[ship-internal-api] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
-          }
-          shipManager.syncPhaseFromDb(shipId);
-        }
-        deps.notifyGateSkip(shipId, gatePhase, reason);
-        sendJson(res, 200, { ok: true, phase: autoResult.success ? autoResult.toPhase : result.toPhase });
+      if (gateResult.skipped) {
+        // Gate was auto-approved (skip). Phase already advanced by launchEscortForGate.
+        sendJson(res, 200, { ok: true, phase: gateResult.skipPhase ?? result.toPhase });
         return;
       }
 
-      const gateType = resolveGateType(gatePhase, mergedGateSettings.gates)!;
-      shipManager.setGateCheck(shipId, gatePhase, gateType);
-
-      try {
-        const { resolveFleetContext } = await import("./api-server.js");
-        const fleetCtx = await resolveFleetContext(deps, ship.fleetId);
-        const skillSources = typeof fleetCtx === "string" ? undefined : fleetCtx.skillSources;
-        await shipManager.redeploySkills(shipId, skillSources);
-      } catch (err) {
-        console.warn(`[ship-internal-api] Skill redeploy failed for Ship ${shipId.slice(0, 8)}...:`, err);
-      }
-
-      const escortManager = deps.getEscortManager();
-
-      let escortExtraPrompt: string | undefined;
-      let shipCustomInstructionsText: string | undefined;
-      {
-        const ci = mergedGateSettings.customInstructions;
-        const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
-        if (escortCiParts.length > 0) {
-          escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
-        }
-        const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
-        if (shipCiParts.length > 0) {
-          shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
-        }
-      }
-
-      const gatePrompt = mergedGateSettings.gatePrompts?.[gateType];
-
-      const escortExtraEnv: Record<string, string> = {};
-      if (mergedGateSettings.qaRequiredPaths?.length) {
-        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED_PATHS = JSON.stringify(mergedGateSettings.qaRequiredPaths);
-      }
-      const refreshedShip = db.getShipById(shipId);
-      if (refreshedShip) {
-        escortExtraEnv.VIBE_ADMIRAL_QA_REQUIRED = String(refreshedShip.qaRequired);
-      }
-      if (gatePhase === "qa-gate" && mergedGateSettings.acceptanceTestRequired === false) {
-        escortExtraEnv.VIBE_ADMIRAL_ACCEPTANCE_TEST_REQUIRED = "false";
-      }
-
-      const escortId = await escortManager.launchEscort(shipId, gatePhase, gateType, escortExtraPrompt, gatePrompt, shipCustomInstructionsText, escortExtraEnv);
-      if (!escortId) {
-        const prevPhase = GATE_PREV_PHASE[gatePhase];
-        console.error(
-          `[ship-internal-api] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
-        );
-        const revertResult = actorManager.requestTransition(shipId, {
-          type: "ESCORT_DIED",
-          exitCode: null,
-          feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-        });
-        if (revertResult.success) {
-          const revertSnapshot = actorManager.getPersistedSnapshot(shipId);
-          try {
-            db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
-              gate_result: "rejected",
-              feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-            }, revertSnapshot);
-          } catch (revertErr) {
-            console.error(`[ship-internal-api] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
-          }
-          shipManager.syncPhaseFromDb(shipId);
-        }
-        shipManager.clearGateCheck(shipId);
-        escortManager.notifyLaunchFailure(shipId, gatePhase, "Escort launch returned null — reverting to pre-gate phase for retry");
-        sendJson(res, 500, { ok: false, error: "Escort launch failed — phase reverted to allow retry" });
+      if (!gateResult.launched) {
+        sendJson(res, 500, { ok: false, error: gateResult.error ?? "Escort launch failed — phase reverted to allow retry" });
         return;
       }
     }

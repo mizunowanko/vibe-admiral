@@ -18,8 +18,10 @@ import {
   extractResultUsage,
 } from "./stream-parser.js";
 import type { FleetDatabase } from "./db.js";
-import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification } from "./types.js";
+import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification, GatePhase } from "./types.js";
 import { notifyPhaseWaiters } from "./api-server.js";
+import type { ApiDeps } from "./api-server.js";
+import { launchEscortForGate } from "./ship-internal-api.js";
 
 export interface ShipLifecycleDeps {
   processManager: ProcessManagerLike;
@@ -604,6 +606,30 @@ export function setupShipCreatedHandler(
 ): void {
   shipManager.setShipCreatedHandler((id) => {
     broadcast({ type: "ship:created", data: { shipId: id } });
+  });
+}
+
+// ── Resume-to-Gate Escort Launch (#853) ──
+
+/**
+ * When a Ship resumes to a gate phase (e.g., coding-gate after pause/sleep),
+ * the Escort must be launched automatically. Without this, the Ship enters
+ * long-poll waiting for an Escort that never starts.
+ */
+export function setupResumeToGateHandler(
+  shipManager: ShipManager,
+  apiDeps: ApiDeps,
+): void {
+  shipManager.setResumeToGateHandler((shipId: string, gatePhase: GatePhase) => {
+    console.log(
+      `[ship-lifecycle] Ship ${shipId.slice(0, 8)}... resumed to gate phase ${gatePhase} — launching Escort`,
+    );
+    launchEscortForGate(apiDeps, shipId, gatePhase).catch((err) => {
+      console.error(
+        `[ship-lifecycle] Failed to launch Escort for resumed Ship ${shipId.slice(0, 8)}... at ${gatePhase}:`,
+        err,
+      );
+    });
   });
 }
 
