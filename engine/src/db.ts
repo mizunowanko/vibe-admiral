@@ -604,12 +604,24 @@ export class FleetDatabase {
     );
   }
 
-  /** Delete a ship and its associated escorts from the database. */
+  /**
+   * Delete a ship and all associated child records from the database.
+   * FK constraints are temporarily disabled to handle cases where
+   * transferTransitionsForReSortie() has moved records to a new ship ID
+   * that may not exist yet (#853).
+   */
   deleteShip(shipId: string): void {
-    this.db.prepare("DELETE FROM escorts WHERE ship_id = ?").run(shipId);
-    this.db.prepare("DELETE FROM phase_transitions WHERE ship_id = ?").run(shipId);
-    this.db.prepare("DELETE FROM phases WHERE ship_id = ?").run(shipId);
-    this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
+    this.db.pragma("foreign_keys = OFF");
+    try {
+      this.db.transaction(() => {
+        this.db.prepare("DELETE FROM escorts WHERE ship_id = ?").run(shipId);
+        this.db.prepare("DELETE FROM phase_transitions WHERE ship_id = ?").run(shipId);
+        this.db.prepare("DELETE FROM phases WHERE ship_id = ?").run(shipId);
+        this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
+      })();
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
   }
 
   /**

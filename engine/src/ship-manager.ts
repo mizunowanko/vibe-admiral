@@ -97,6 +97,9 @@ export class ShipManager {
   private onShipRemoved:
     | ((id: string) => void)
     | null = null;
+  private onResumeToGate:
+    | ((id: string, gatePhase: GatePhase) => void)
+    | null = null;
 
   constructor(
     processManager: ProcessManagerLike,
@@ -131,6 +134,11 @@ export class ShipManager {
 
   setShipRemovedHandler(handler: (id: string) => void): void {
     this.onShipRemoved = handler;
+  }
+
+  /** Register a handler called when a Ship resumes to a gate phase (#853). */
+  setResumeToGateHandler(handler: (id: string, gatePhase: GatePhase) => void): void {
+    this.onResumeToGate = handler;
   }
 
   async sortie(
@@ -1301,6 +1309,12 @@ Always use Bash with \`tee\` or \`cp\` instead.
           ? (this.fleetDb?.getPhaseBeforeStopped(shipId) ?? ship.phase)
           : ship.phase;
         this.updatePhase(shipId, previousPhase, `Resumed from session (restored to ${previousPhase})`);
+
+        // #853: If resuming to a gate phase, trigger Escort launch.
+        // Without this, the Ship enters long-poll waiting for an Escort that never starts.
+        if (isGatePhase(previousPhase)) {
+          this.onResumeToGate?.(shipId, previousPhase as GatePhase);
+        }
       } else {
         // No session to resume — re-sortie
         this.processManager.sortie(
