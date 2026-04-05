@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { Lookout } from "../lookout.js";
-import type { LookoutAlert } from "../lookout.js";
+import type { LookoutAlert, LookoutConfig } from "../lookout.js";
 import type { ShipProcess, GateCheckState } from "../types.js";
 
 type MockShipManager = {
@@ -49,16 +49,28 @@ function makeGateCheck(overrides: Partial<GateCheckState> = {}): GateCheckState 
   };
 }
 
+function createLookout(
+  mocks: { shipManager: MockShipManager; processManager: MockProcessManager; escortManager: MockEscortManager },
+  config?: LookoutConfig,
+): Lookout {
+  return new Lookout(
+    mocks.shipManager as unknown as ConstructorParameters<typeof Lookout>[0],
+    mocks.processManager as unknown as ConstructorParameters<typeof Lookout>[1],
+    mocks.escortManager as unknown as ConstructorParameters<typeof Lookout>[2],
+    config,
+  );
+}
+
 describe("Lookout", () => {
   let lookout: Lookout;
   let mockShipManager: MockShipManager;
   let mockProcessManager: MockProcessManager;
   let mockEscortManager: MockEscortManager;
-  let alerts: LookoutAlert[];
+  let alertBatches: LookoutAlert[][];
 
   beforeEach(() => {
     vi.useFakeTimers();
-    alerts = [];
+    alertBatches = [];
     mockShipManager = {
       getAllShips: vi.fn().mockReturnValue([]),
       getShip: vi.fn(),
@@ -69,18 +81,23 @@ describe("Lookout", () => {
     mockEscortManager = {
       isEscortRunning: vi.fn().mockReturnValue(true),
     };
-    lookout = new Lookout(
-      mockShipManager as unknown as ConstructorParameters<typeof Lookout>[0],
-      mockProcessManager as unknown as ConstructorParameters<typeof Lookout>[1],
-      mockEscortManager as unknown as ConstructorParameters<typeof Lookout>[2],
+    lookout = createLookout({ mockShipManager, mockProcessManager, mockEscortManager } as never);
+    // Reassign with correct reference
+    lookout = createLookout(
+      { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
     );
-    lookout.setAlertHandler((alert) => alerts.push(alert));
+    lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
   });
 
   afterEach(() => {
     lookout.stop();
     vi.useRealTimers();
   });
+
+  // Helper to flatten all alerts
+  function allAlerts(): LookoutAlert[] {
+    return alertBatches.flat();
+  }
 
   describe("start / stop", () => {
     it("starts periodic scanning and stop clears it", () => {
@@ -104,10 +121,11 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000); // trigger scan
 
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]!.alertType).toBe("gate-wait-stall");
-      expect(alerts[0]!.shipId).toBe("ship-001");
-      expect(alerts[0]!.message).toContain("waiting for gate response");
+      expect(allAlerts()).toHaveLength(1);
+      expect(allAlerts()[0]!.alertType).toBe("gate-wait-stall");
+      expect(allAlerts()[0]!.severity).toBe("warning");
+      expect(allAlerts()[0]!.shipId).toBe("ship-001");
+      expect(allAlerts()[0]!.message).toContain("waiting for gate response");
     });
 
     it("does not alert when gate wait is < 10 minutes", () => {
@@ -120,7 +138,7 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
 
     it("does not alert for approved gates", () => {
@@ -133,7 +151,7 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
   });
 
@@ -145,11 +163,18 @@ describe("Lookout", () => {
       mockShipManager.getAllShips.mockReturnValue([ship]);
       mockProcessManager.isRunning.mockReturnValue(true);
 
+      // Use minSeverity: "info" so info alerts are not filtered
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "info" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]!.alertType).toBe("no-output-stall");
+      expect(allAlerts()).toHaveLength(1);
+      expect(allAlerts()[0]!.alertType).toBe("no-output-stall");
+      expect(allAlerts()[0]!.severity).toBe("info");
     });
 
     it("does not alert when Ship is compacting", () => {
@@ -159,10 +184,15 @@ describe("Lookout", () => {
       });
       mockShipManager.getAllShips.mockReturnValue([ship]);
 
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "info" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
 
     it("does not alert when process is not running", () => {
@@ -172,20 +202,30 @@ describe("Lookout", () => {
       mockShipManager.getAllShips.mockReturnValue([ship]);
       mockProcessManager.isRunning.mockReturnValue(false);
 
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "info" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
 
     it("does not alert when lastOutputAt is null", () => {
       const ship = makeShip({ lastOutputAt: null });
       mockShipManager.getAllShips.mockReturnValue([ship]);
 
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "info" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
   });
 
@@ -197,9 +237,10 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]!.alertType).toBe("excessive-retries");
-      expect(alerts[0]!.message).toContain("retried 2 times");
+      expect(allAlerts()).toHaveLength(1);
+      expect(allAlerts()[0]!.alertType).toBe("excessive-retries");
+      expect(allAlerts()[0]!.severity).toBe("critical");
+      expect(allAlerts()[0]!.message).toContain("retried 2 times");
     });
 
     it("does not alert when retry count < 2", () => {
@@ -209,7 +250,7 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
   });
 
@@ -225,8 +266,9 @@ describe("Lookout", () => {
       vi.advanceTimersByTime(30_000);
 
       // Will also fire gate-wait-stall if requestedAt is old enough
-      const escortDeathAlert = alerts.find((a) => a.alertType === "escort-death");
+      const escortDeathAlert = allAlerts().find((a) => a.alertType === "escort-death");
       expect(escortDeathAlert).toBeDefined();
+      expect(escortDeathAlert!.severity).toBe("critical");
       expect(escortDeathAlert!.message).toContain("Escort process not found");
     });
 
@@ -241,13 +283,13 @@ describe("Lookout", () => {
       vi.advanceTimersByTime(30_000);
 
       // Should only fire gate-wait-stall if requestedAt is old, not escort-death
-      const escortDeathAlert = alerts.find((a) => a.alertType === "escort-death");
+      const escortDeathAlert = allAlerts().find((a) => a.alertType === "escort-death");
       expect(escortDeathAlert).toBeUndefined();
     });
   });
 
-  describe("de-duplication (re-alert suppression)", () => {
-    it("suppresses duplicate alerts within 10 minutes", () => {
+  describe("severity-aware debounce", () => {
+    it("suppresses critical alerts within 10 minutes", () => {
       const ship = makeShip({ retryCount: 3 });
       mockShipManager.getAllShips.mockReturnValue([ship]);
 
@@ -255,18 +297,18 @@ describe("Lookout", () => {
 
       // First scan — should alert
       vi.advanceTimersByTime(30_000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
 
       // Second scan (30s later) — should be suppressed
       vi.advanceTimersByTime(30_000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
 
-      // Third scan (9 minutes later) — still suppressed
+      // 9 minutes later — still suppressed
       vi.advanceTimersByTime(9 * 60 * 1000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
     });
 
-    it("re-alerts after 10 minute interval", () => {
+    it("re-alerts critical after 10 minutes", () => {
       const ship = makeShip({ retryCount: 3 });
       mockShipManager.getAllShips.mockReturnValue([ship]);
 
@@ -274,11 +316,145 @@ describe("Lookout", () => {
 
       // First alert
       vi.advanceTimersByTime(30_000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
 
       // Wait 10+ minutes then scan again
       vi.advanceTimersByTime(11 * 60 * 1000);
-      expect(alerts).toHaveLength(2);
+      expect(allAlerts()).toHaveLength(2);
+    });
+
+    it("suppresses warning alerts within 20 minutes", () => {
+      const staleRequestTime = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+      const ship = makeShip({
+        gateCheck: makeGateCheck({ requestedAt: staleRequestTime }),
+      });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      lookout.start();
+
+      // First alert at t=30s
+      vi.advanceTimersByTime(30_000);
+      expect(allAlerts()).toHaveLength(1);
+
+      // 15 minutes later — still suppressed (warning debounce = 20 min)
+      vi.advanceTimersByTime(15 * 60 * 1000);
+      expect(allAlerts()).toHaveLength(1);
+
+      // 21 minutes after first — re-alert
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      expect(allAlerts()).toHaveLength(2);
+    });
+
+    it("suppresses info alerts within 30 minutes", () => {
+      const ship = makeShip({
+        lastOutputAt: Date.now() - 11 * 60 * 1000,
+      });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+      mockProcessManager.isRunning.mockReturnValue(true);
+
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "info" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
+      lookout.start();
+
+      // First alert
+      vi.advanceTimersByTime(30_000);
+      expect(allAlerts()).toHaveLength(1);
+
+      // 25 minutes later — still suppressed (info debounce = 30 min)
+      vi.advanceTimersByTime(25 * 60 * 1000);
+      expect(allAlerts()).toHaveLength(1);
+
+      // 31 minutes after first — re-alert
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      expect(allAlerts()).toHaveLength(2);
+    });
+  });
+
+  describe("severity filtering (minSeverity)", () => {
+    it("filters out info alerts when minSeverity is warning (default)", () => {
+      const ship = makeShip({
+        lastOutputAt: Date.now() - 11 * 60 * 1000,
+      });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+      mockProcessManager.isRunning.mockReturnValue(true);
+
+      // Default minSeverity = "warning"
+      lookout.start();
+      vi.advanceTimersByTime(30_000);
+
+      // no-output-stall is "info" severity — should be filtered
+      expect(allAlerts()).toHaveLength(0);
+    });
+
+    it("passes info alerts when minSeverity is info", () => {
+      const ship = makeShip({
+        lastOutputAt: Date.now() - 11 * 60 * 1000,
+      });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+      mockProcessManager.isRunning.mockReturnValue(true);
+
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "info" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
+      lookout.start();
+      vi.advanceTimersByTime(30_000);
+
+      expect(allAlerts()).toHaveLength(1);
+    });
+
+    it("filters warning and info when minSeverity is critical", () => {
+      const staleRequestTime = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+      const ship = makeShip({
+        lastOutputAt: Date.now() - 11 * 60 * 1000,
+        gateCheck: makeGateCheck({ requestedAt: staleRequestTime }),
+        retryCount: 3,
+      });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+      mockProcessManager.isRunning.mockReturnValue(true);
+      mockEscortManager.isEscortRunning.mockReturnValue(true);
+
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { minSeverity: "critical" },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
+      lookout.start();
+      vi.advanceTimersByTime(30_000);
+
+      // Only critical alerts should pass: excessive-retries
+      // gate-wait-stall (warning) and no-output-stall (info) should be filtered
+      const alerts = allAlerts();
+      expect(alerts.every((a) => a.severity === "critical")).toBe(true);
+      expect(alerts.find((a) => a.alertType === "excessive-retries")).toBeDefined();
+    });
+  });
+
+  describe("batch emission", () => {
+    it("emits multiple alerts as a single batch per scan", () => {
+      const ship1 = makeShip({ id: "ship-001", retryCount: 3 });
+      const ship2 = makeShip({ id: "ship-002", retryCount: 5, issueNumber: 99, issueTitle: "Other issue" });
+      mockShipManager.getAllShips.mockReturnValue([ship1, ship2]);
+
+      lookout.start();
+      vi.advanceTimersByTime(30_000);
+
+      // Should be exactly 1 batch with 2 alerts
+      expect(alertBatches).toHaveLength(1);
+      expect(alertBatches[0]).toHaveLength(2);
+    });
+
+    it("does not emit batch when no alerts triggered", () => {
+      mockShipManager.getAllShips.mockReturnValue([makeShip()]);
+
+      lookout.start();
+      vi.advanceTimersByTime(30_000);
+
+      expect(alertBatches).toHaveLength(0);
     });
   });
 
@@ -290,7 +466,7 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
 
     it("does not scan Ships in paused phase", () => {
@@ -300,12 +476,12 @@ describe("Lookout", () => {
       lookout.start();
       vi.advanceTimersByTime(30_000);
 
-      expect(alerts).toHaveLength(0);
+      expect(allAlerts()).toHaveLength(0);
     });
   });
 
   describe("cleanup stale alert tracking", () => {
-    it("does not re-alert within suppression window even if Ship re-appears", () => {
+    it("re-alerts after Ship leaves and returns (cleanup clears tracking)", () => {
       const ship = makeShip({ retryCount: 3 });
 
       lookout.start();
@@ -313,23 +489,17 @@ describe("Lookout", () => {
       // First scan — Ship active, should alert
       mockShipManager.getAllShips.mockReturnValue([ship]);
       vi.advanceTimersByTime(30_000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
 
       // Second scan — Ship gone, should clean up alert key
       mockShipManager.getAllShips.mockReturnValue([]);
       vi.advanceTimersByTime(30_000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
 
       // Third scan — Ship comes back, alert key was cleaned up so alert fires again
       mockShipManager.getAllShips.mockReturnValue([ship]);
       vi.advanceTimersByTime(30_000);
-
-      // The re-alert depends on whether the cleanup cleared the key.
-      // Due to re-alert suppression (REALERT_INTERVAL_MS = 10min),
-      // alert fires again since the key was cleaned up during empty scan.
-      // Note: if this assertion doesn't hold, it means the cleanup timing
-      // needs adjustment in the Lookout code.
-      expect(alerts.length).toBeGreaterThanOrEqual(1);
+      expect(allAlerts()).toHaveLength(2);
     });
 
     it("re-alerts after suppression interval expires for a returning Ship", () => {
@@ -340,20 +510,60 @@ describe("Lookout", () => {
       // First scan at t=30s — alert
       mockShipManager.getAllShips.mockReturnValue([ship]);
       vi.advanceTimersByTime(30_000);
-      expect(alerts).toHaveLength(1);
+      expect(allAlerts()).toHaveLength(1);
 
-      // Wait 10+ minutes — suppression window expires
+      // Wait 10+ minutes — suppression window expires for critical
       vi.advanceTimersByTime(11 * 60 * 1000);
-      expect(alerts).toHaveLength(2);
+      expect(allAlerts()).toHaveLength(2);
+    });
+  });
+
+  describe("configurable thresholds", () => {
+    it("respects custom gateWaitStallMs", () => {
+      const staleRequestTime = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+      const ship = makeShip({
+        gateCheck: makeGateCheck({ requestedAt: staleRequestTime }),
+      });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      // 5-minute threshold instead of default 10
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { gateWaitStallMs: 5 * 60 * 1000 },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
+      lookout.start();
+      vi.advanceTimersByTime(30_000);
+
+      expect(allAlerts()).toHaveLength(1);
+      expect(allAlerts()[0]!.alertType).toBe("gate-wait-stall");
+    });
+
+    it("respects custom scanIntervalMs", () => {
+      const ship = makeShip({ retryCount: 3 });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      lookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { scanIntervalMs: 60_000 },
+      );
+      lookout.setAlertBatchHandler((batch) => alertBatches.push(batch));
+      lookout.start();
+
+      // No alert at 30s with 60s interval
+      vi.advanceTimersByTime(30_000);
+      expect(allAlerts()).toHaveLength(0);
+
+      // Alert at 60s
+      vi.advanceTimersByTime(30_000);
+      expect(allAlerts()).toHaveLength(1);
     });
   });
 
   describe("no alert handler set", () => {
     it("does not throw when no alert handler is configured", () => {
-      const noHandlerLookout = new Lookout(
-        mockShipManager as unknown as ConstructorParameters<typeof Lookout>[0],
-        mockProcessManager as unknown as ConstructorParameters<typeof Lookout>[1],
-        mockEscortManager as unknown as ConstructorParameters<typeof Lookout>[2],
+      const noHandlerLookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
       );
       // Don't set alert handler
 

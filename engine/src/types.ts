@@ -163,6 +163,7 @@ export type {
   StreamMessageSubtype,
   SystemMessageMeta,
   LookoutAlertType,
+  AlertSeverity,
   ImageAttachment,
 } from "../../shared/message-types.js";
 

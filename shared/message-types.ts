@@ -35,6 +35,8 @@ export type LookoutAlertType =
   | "excessive-retries"
   | "escort-death";
 
+export type AlertSeverity = "critical" | "warning" | "info";
+
 export interface SystemMessageMeta {
   category: StreamMessageSubtype;
   issueNumber?: number;
@@ -46,6 +48,7 @@ export interface SystemMessageMeta {
   url?: string;
   checks?: string[];
   alertType?: LookoutAlertType;
+  alertSeverity?: AlertSeverity;
   shipId?: string;
   branchName?: string;
 }
