@@ -32,8 +32,14 @@ export function MainPanel() {
     const { registerSession, setFocus: focus } = useSessionStore.getState();
     registerSession(createCommanderSession("dock", selectedFleetId));
     registerSession(createCommanderSession("flagship", selectedFleetId));
-    // Always focus this fleet's Flagship when fleet changes
-    focus(commanderSessionId("flagship", selectedFleetId), "fleet-change");
+    // Restore the previously focused session for this fleet, or fall back to Flagship
+    const { focusedSessionIdByFleet, sessions } = useSessionStore.getState();
+    const previousSessionId = focusedSessionIdByFleet[selectedFleetId];
+    if (previousSessionId && sessions.has(previousSessionId)) {
+      focus(previousSessionId, "fleet-change");
+    } else {
+      focus(commanderSessionId("flagship", selectedFleetId), "fleet-change");
+    }
 
     // Fetch ships for the newly selected fleet and register their sessions.
     // Without this, ships are only fetched on WS connect — switching fleets
