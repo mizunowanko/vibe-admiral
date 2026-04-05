@@ -93,8 +93,19 @@ Ship #<issue-number> (<issue-title>)
 - Issues: <問題があれば記載 / "なし">
 ```
 
+## 自動 inspect（Engine 駆動）
+
+Engine が phase 変更・Lookout アラート発生時に自動で ship-inspect Dispatch を起動する。
+- **デバウンス**: 同一 Ship は最低 3 分間隔
+- **バッチ処理**: 複数 Ship の inspect が必要な場合、1 つの Dispatch で全 Ship をまとめて確認
+- **結果通知**: Dispatch 完了時に Flagship の stdin に結果が届く
+
+このため、Flagship が全 Ship を定期的にポーリングして inspect する必要はない。
+手動で `/ship-inspect` を実行するのは、ユー��ーから個別に状況確認を求められた場合のみ。
+
 ## 禁止事項
 
 - **phase 情報だけで「順調です」と報告してはいけない。** chat log を読んで実際の作業内容を確認すること。
 - **Dispatch を省略して API 情報だけで判断してはいけない。** Step 2 は必須。
 - **ソースコードを直接読んではいけない。** 必要であれば別途 `/investigate` で Dispatch を起動する。
+- **全 Ship を定期的にポーリングして inspect してはいけない。** Engine が自動で行う。
