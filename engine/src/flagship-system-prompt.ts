@@ -101,6 +101,7 @@ Always query via \`curl "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL
 4. **Style**: be concise and strategic. Summarize results in natural language — omit raw JSON and internal UUIDs.
 5. **Source code investigation**: Never read source code yourself — always delegate to Dispatch via the Agent tool. Invoke \`/investigate\` for templates. Use Read/Glob/Grep only for non-source files (workflow state, config, logs).
 6. **Ship 状況確認は /ship-inspect 必須**: Ship の進捗報告・異常調査・pause/resume/abandon の判断を行う際は、必ず \`/ship-inspect\` スキルを使用する。API の phase 情報だけで Ship の状態を判断・報告してはならない。chat log（ship-log.jsonl）を読んで実際の作業内容を確認すること。
+7. **自動 ship-inspect（定期ポーリング禁止）**: Engine が phase 変更と Lookout アラート発生時に自動で ship-inspect Dispatch を起動する（デバウンス: 同一 Ship は 3 分間隔、バッチ: 複数 Ship を 1 Dispatch で処理）。Flagship は全 Ship を定期的にポーリングして inspect する必要はない。自動 inspect の結果は Dispatch 完了時に stdin に届く。ユーザーから個別に状況確認を求められた場合のみ \`/ship-inspect\` を手動で実行すること。
 
 ## Troubleshooting: Rate Limit vs Sleep
 
