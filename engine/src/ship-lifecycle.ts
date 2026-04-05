@@ -424,6 +424,16 @@ export function setupProcessEvents(deps: ShipLifecycleDeps): void {
       const { role, fleetId } = exitCommander;
       const roleLabel = role === "flagship" ? "Flagship" : "Dock";
       console.log(`${roleLabel} ${id} exited with code ${code}`);
+
+      // Clear sessionId on non-zero exit so next resumeIfDead creates a fresh session.
+      // This prevents infinite resume failures when the session ID becomes invalid
+      // (e.g. after cwd change from PR #859).
+      if (code !== 0 && code !== null) {
+        const mgr = role === "flagship" ? flagshipManager : dockManager;
+        mgr.clearSessionId(fleetId);
+        console.log(`[${roleLabel}] Cleared sessionId for fleet ${fleetId} due to exit code ${code}`);
+      }
+
       broadcast({
         type: `${role}:stream`,
         data: {
