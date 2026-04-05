@@ -7,14 +7,14 @@ export interface StatusConfig {
 }
 
 export const STATUS_CONFIG: Record<Phase, StatusConfig> = {
-  plan: { color: "bg-indigo-500/20 text-indigo-400", textColor: "text-indigo-400", animate: true },
-  "plan-gate": { color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  coding: { color: "bg-violet-500/20 text-violet-400", textColor: "text-violet-400", animate: true },
-  "coding-gate": { color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  qa: { color: "bg-amber-500/20 text-amber-400", textColor: "text-amber-400", animate: true },
-  "qa-gate": { color: "bg-sky-500/20 text-sky-400", textColor: "text-sky-400" },
-  merging: { color: "bg-emerald-500/20 text-emerald-400", textColor: "text-emerald-400", animate: true },
-  done: { color: "bg-green-500/20 text-green-400", textColor: "text-green-400" },
+  plan: { color: "bg-purple-600/20 text-purple-400", textColor: "text-purple-400", animate: true },
+  "plan-gate": { color: "bg-purple-800/20 text-purple-300", textColor: "text-purple-300" },
+  coding: { color: "bg-indigo-500/20 text-indigo-400", textColor: "text-indigo-400", animate: true },
+  "coding-gate": { color: "bg-indigo-700/20 text-indigo-300", textColor: "text-indigo-300" },
+  qa: { color: "bg-teal-500/20 text-teal-400", textColor: "text-teal-400", animate: true },
+  "qa-gate": { color: "bg-teal-700/20 text-teal-300", textColor: "text-teal-300" },
+  merging: { color: "bg-lime-500/20 text-lime-400", textColor: "text-lime-400", animate: true },
+  done: { color: "bg-lime-700/20 text-lime-300", textColor: "text-lime-300" },
   paused: { color: "bg-gray-500/20 text-gray-400", textColor: "text-gray-400" },
   abandoned: { color: "bg-rose-500/20 text-rose-400", textColor: "text-rose-400" },
 };
