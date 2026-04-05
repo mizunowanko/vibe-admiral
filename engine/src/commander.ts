@@ -1,4 +1,4 @@
-import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProcessManagerLike } from "./process-manager.js";
 import { getAdmiralHome } from "./admiral-home.js";
@@ -21,6 +21,8 @@ export interface CommanderSession {
   questionAskedAt: number | null;
   /** Active and completed Dispatch sub-agents, keyed by toolUseId. */
   dispatches: Map<string, Dispatch>;
+  /** Files deployed to Fleet repo that should be cleaned up on stop. */
+  deployedFiles: string[];
 }
 
 /**
@@ -42,12 +44,21 @@ export class CommanderManager {
   /**
    * Launch a new commander session. If a persisted session exists with a valid
    * sessionId, attempt to resume the Claude CLI session.
+   *
+   * @param admiralSkillsDir - Absolute path to vibe-admiral's skills/ directory.
+   *   When provided, skills are deployed FROM this directory TO fleetPath/.claude/skills/.
+   *   When omitted, falls back to fleetPath/skills/ (legacy behavior).
+   * @param customInstructionsText - Fleet's custom instructions text (shared + role-specific).
+   *   Deployed to fleetPath/.claude/rules/custom-instructions.md so it persists across
+   *   context compaction and correctly overrides any repo-level custom-instructions.md.
    */
   async launch(
     fleetId: string,
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
+    admiralSkillsDir?: string,
+    customInstructionsText?: string,
   ): Promise<string> {
     const sessionId = `${this.role}-${fleetId}`;
 
@@ -55,8 +66,11 @@ export class CommanderManager {
     const restoredHistory = await this.loadHistory(fleetId);
     const persisted = await this.loadSession(fleetId);
 
-    // Deploy skills
-    await this.deploySkills(fleetPath);
+    // Deploy skills, rules, and custom instructions to Fleet repo
+    const deployedFiles: string[] = [];
+    await this.deploySkills(fleetPath, deployedFiles, admiralSkillsDir);
+    await this.deployRules(fleetPath, deployedFiles, admiralSkillsDir);
+    await this.deployCustomInstructions(fleetPath, deployedFiles, customInstructionsText);
 
     const session: CommanderSession = {
       id: sessionId,
@@ -70,6 +84,7 @@ export class CommanderManager {
       pendingToolUseId: null,
       questionAskedAt: null,
       dispatches: new Map(),
+      deployedFiles,
     };
     this.sessions.set(fleetId, session);
 
@@ -308,15 +323,24 @@ export class CommanderManager {
     return Array.from(session.dispatches.values());
   }
 
-  stop(fleetId: string): void {
+  async stop(fleetId: string): Promise<void> {
+    const session = this.sessions.get(fleetId);
     const processId = `${this.role}-${fleetId}`;
     this.processManager.kill(processId);
+
+    // Clean up deployed files from Fleet repo
+    if (session?.deployedFiles) {
+      for (const filePath of session.deployedFiles) {
+        await unlink(filePath).catch(() => {});
+      }
+    }
+
     this.sessions.delete(fleetId);
   }
 
-  stopAll(): void {
+  async stopAll(): Promise<void> {
     for (const [fleetId] of this.sessions) {
-      this.stop(fleetId);
+      await this.stop(fleetId);
     }
   }
 
@@ -331,22 +355,78 @@ export class CommanderManager {
   }
 
   /**
-   * Deploy role-specific skills from the repo's skills/ directory to
-   * fleetPath/.claude/skills/ so that Claude Code can discover them.
-   * Override in subclasses to customize deployed skills.
+   * Deploy role-specific skills to fleetPath/.claude/skills/.
+   * When admiralSkillsDir is provided, skills are sourced from the Admiral repo's
+   * skills/ directory (for Commanders running in Fleet repos).
+   * When omitted, falls back to fleetPath/skills/ (legacy behavior).
    */
-  protected async deploySkills(fleetPath: string): Promise<void> {
+  protected async deploySkills(
+    fleetPath: string,
+    deployedFiles: string[],
+    admiralSkillsDir?: string,
+  ): Promise<void> {
+    const skillsRoot = admiralSkillsDir ?? join(fleetPath, "skills");
     const skills = this.getSkillNames();
     for (const skillName of skills) {
-      const src = join(fleetPath, "skills", skillName, "SKILL.md");
-      const destDir = join(fleetPath, ".claude", "skills", skillName);
+      const src = join(skillsRoot, skillName, "SKILL.md");
+      const dest = join(fleetPath, ".claude", "skills", skillName, "SKILL.md");
       try {
-        await mkdir(destDir, { recursive: true });
-        await copyFile(src, join(destDir, "SKILL.md"));
+        await mkdir(join(fleetPath, ".claude", "skills", skillName), { recursive: true });
+        await copyFile(src, dest);
+        deployedFiles.push(dest);
       } catch {
-        // Non-fatal: skill may not exist in this repo
+        // Non-fatal: skill may not exist
       }
     }
+  }
+
+  /**
+   * Deploy commander-rules.md to fleetPath/.claude/rules/.
+   * Sources from the Admiral repo's .claude/rules/ when admiralSkillsDir is provided
+   * (deriving the Admiral repo root from admiralSkillsDir).
+   */
+  protected async deployRules(
+    fleetPath: string,
+    deployedFiles: string[],
+    admiralSkillsDir?: string,
+  ): Promise<void> {
+    if (!admiralSkillsDir) return;
+
+    // admiralSkillsDir = <admiral-repo>/skills → Admiral repo root = parent of skills/
+    const admiralRoot = join(admiralSkillsDir, "..");
+    const src = join(admiralRoot, ".claude", "rules", "commander-rules.md");
+    const destDir = join(fleetPath, ".claude", "rules");
+    const dest = join(destDir, "commander-rules.md");
+    try {
+      await mkdir(destDir, { recursive: true });
+      await copyFile(src, dest);
+      deployedFiles.push(dest);
+    } catch {
+      console.warn(`[${this.role}] Failed to deploy commander-rules.md`);
+    }
+  }
+
+  /**
+   * Deploy Fleet custom instructions as .claude/rules/custom-instructions.md.
+   * This overwrites any existing custom-instructions.md in the Fleet repo,
+   * ensuring Fleet settings take precedence over repo-level instructions.
+   * The file is tracked for cleanup on stop().
+   */
+  protected async deployCustomInstructions(
+    fleetPath: string,
+    deployedFiles: string[],
+    customInstructionsText?: string,
+  ): Promise<void> {
+    const destDir = join(fleetPath, ".claude", "rules");
+    const dest = join(destDir, "custom-instructions.md");
+
+    if (!customInstructionsText) {
+      return;
+    }
+
+    await mkdir(destDir, { recursive: true });
+    await writeFile(dest, `## Custom Instructions\n\n${customInstructionsText}`, "utf-8");
+    deployedFiles.push(dest);
   }
 
   /** Get skill names to deploy. Override in subclasses. */

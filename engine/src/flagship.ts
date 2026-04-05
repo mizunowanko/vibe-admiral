@@ -19,6 +19,7 @@ export class FlagshipManager extends CommanderManager {
       "investigate",
       "read-issue",
       "hotfix",
+      "ship-inspect",
     ];
   }
 }
