@@ -30,6 +30,9 @@ import type {
 
 // ── Fleet/Settings Persistence Constants ──
 
+/** Admiral repo's skills/ directory, resolved from Engine's own source location. */
+const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
+
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
 const ADMIRAL_SETTINGS_FILE = join(FLEETS_DIR, "admiral-settings.json");
@@ -188,8 +191,8 @@ async function deleteFleet(
   let fleets = await loadFleets();
   fleets = fleets.filter((f) => f.id !== id);
   await saveFleets(fleets);
-  flagshipManager.stop(id);
-  dockManager.stop(id);
+  await flagshipManager.stop(id);
+  await dockManager.stop(id);
 }
 
 // ── Message Handler Deps ──
@@ -463,15 +466,23 @@ async function handleCommanderSend(
 
       const ci = fleet.customInstructions;
       const ciParts = [ci?.shared, role === "flagship" ? ci?.flagship : ci?.dock].filter(Boolean);
-      if (ciParts.length > 0) {
-        prompt = `${prompt}\n\n## Custom Instructions\n\n${ciParts.join("\n\n")}`;
+      const customInstructionsText = ciParts.length > 0 ? ciParts.join("\n\n") : undefined;
+      if (customInstructionsText) {
+        prompt = `${prompt}\n\n## Custom Instructions\n\n${customInstructionsText}`;
       }
+
+      // Use Fleet repo as Commander's cwd instead of vibe-admiral repo.
+      // This prevents vibe-admiral's .claude/rules/ (e.g. ヤンキー口調) from
+      // being auto-injected into Commander sessions (#859, #736, #678, #649).
+      const fleetPath = fleet.repos[0]?.localPath || process.cwd();
 
       await manager.launch(
         fleetId,
-        process.cwd(),
+        fleetPath,
         [],
         prompt,
+        ADMIRAL_SKILLS_DIR,
+        customInstructionsText,
       );
 
       const roleLabel = role === "flagship" ? "Flagship" : "Dock";

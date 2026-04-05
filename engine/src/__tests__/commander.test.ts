@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FlagshipManager } from "../flagship.js";
@@ -365,8 +365,8 @@ describe("CommanderManager", () => {
       await manager.launch("fleet-1", "/fleet/path", []);
     });
 
-    it("kills process and removes session", () => {
-      manager.stop("fleet-1");
+    it("kills process and removes session", async () => {
+      await manager.stop("fleet-1");
 
       expect(mockPm.kill).toHaveBeenCalledWith("flagship-fleet-1");
       expect(manager.hasSession("fleet-1")).toBe(false);
@@ -384,13 +384,117 @@ describe("CommanderManager", () => {
       await manager.launch("fleet-2", "/fleet2/path", []);
     });
 
-    it("stops all sessions", () => {
-      manager.stopAll();
+    it("stops all sessions", async () => {
+      await manager.stopAll();
 
       expect(mockPm.kill).toHaveBeenCalledWith("flagship-fleet-1");
       expect(mockPm.kill).toHaveBeenCalledWith("flagship-fleet-2");
       expect(manager.hasSession("fleet-1")).toBe(false);
       expect(manager.hasSession("fleet-2")).toBe(false);
+    });
+  });
+
+  describe("deploy and cleanup", () => {
+    let manager: FlagshipManager;
+    let fleetPath: string;
+    let admiralSkillsDir: string;
+
+    beforeEach(async () => {
+      manager = new FlagshipManager(
+        mockPm as unknown as ConstructorParameters<typeof FlagshipManager>[0],
+      );
+      // Create a Fleet repo directory and an Admiral skills directory
+      fleetPath = join(tmpDir, "fleet-repo");
+      admiralSkillsDir = join(tmpDir, "admiral-skills");
+      await mkdir(fleetPath, { recursive: true });
+
+      // Create Admiral skills that Flagship expects
+      for (const skill of ["admiral-protocol", "sortie", "issue-manage", "investigate", "read-issue", "hotfix", "ship-inspect"]) {
+        const skillDir = join(admiralSkillsDir, skill);
+        await mkdir(skillDir, { recursive: true });
+        await writeFile(join(skillDir, "SKILL.md"), `# ${skill} skill`);
+      }
+
+      // Create commander-rules.md in Admiral repo's .claude/rules/
+      const admiralRulesDir = join(admiralSkillsDir, "..", ".claude", "rules");
+      await mkdir(admiralRulesDir, { recursive: true });
+      await writeFile(join(admiralRulesDir, "commander-rules.md"), "# Commander Rules");
+    });
+
+    it("deploys skills from admiralSkillsDir to Fleet repo", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+
+      // Verify skills were deployed to fleet-repo/.claude/skills/
+      const sortieSkill = join(fleetPath, ".claude", "skills", "sortie", "SKILL.md");
+      const content = await readFile(sortieSkill, "utf-8");
+      expect(content).toBe("# sortie skill");
+
+      const inspectSkill = join(fleetPath, ".claude", "skills", "ship-inspect", "SKILL.md");
+      const inspectContent = await readFile(inspectSkill, "utf-8");
+      expect(inspectContent).toBe("# ship-inspect skill");
+    });
+
+    it("deploys commander-rules.md to Fleet repo", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+
+      const rulesPath = join(fleetPath, ".claude", "rules", "commander-rules.md");
+      const content = await readFile(rulesPath, "utf-8");
+      expect(content).toBe("# Commander Rules");
+    });
+
+    it("deploys custom instructions to Fleet repo", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir, "Be polite and helpful.");
+
+      const ciPath = join(fleetPath, ".claude", "rules", "custom-instructions.md");
+      const content = await readFile(ciPath, "utf-8");
+      expect(content).toContain("Be polite and helpful.");
+    });
+
+    it("does not deploy custom-instructions.md when text is not provided", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+
+      const ciPath = join(fleetPath, ".claude", "rules", "custom-instructions.md");
+      await expect(stat(ciPath)).rejects.toThrow();
+    });
+
+    it("cleans up deployed files on stop", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir, "Be polite.");
+
+      // Verify files exist
+      const sortieSkill = join(fleetPath, ".claude", "skills", "sortie", "SKILL.md");
+      const rulesPath = join(fleetPath, ".claude", "rules", "commander-rules.md");
+      const ciPath = join(fleetPath, ".claude", "rules", "custom-instructions.md");
+      await expect(stat(sortieSkill)).resolves.toBeTruthy();
+      await expect(stat(rulesPath)).resolves.toBeTruthy();
+      await expect(stat(ciPath)).resolves.toBeTruthy();
+
+      // Stop should clean up
+      await manager.stop("fleet-1");
+
+      await expect(stat(sortieSkill)).rejects.toThrow();
+      await expect(stat(rulesPath)).rejects.toThrow();
+      await expect(stat(ciPath)).rejects.toThrow();
+    });
+
+    it("Dock deploys its own skill set", async () => {
+      const dockManager = new DockManager(
+        mockPm as unknown as ConstructorParameters<typeof DockManager>[0],
+      );
+
+      // Create dock-ship-status skill
+      const dockSkillDir = join(admiralSkillsDir, "dock-ship-status");
+      await mkdir(dockSkillDir, { recursive: true });
+      await writeFile(join(dockSkillDir, "SKILL.md"), "# dock-ship-status skill");
+
+      await dockManager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+
+      const dockSkill = join(fleetPath, ".claude", "skills", "dock-ship-status", "SKILL.md");
+      const content = await readFile(dockSkill, "utf-8");
+      expect(content).toBe("# dock-ship-status skill");
+
+      // Dock should NOT have flagship-specific skills like sortie
+      const sortieSkill = join(fleetPath, ".claude", "skills", "sortie", "SKILL.md");
+      await expect(stat(sortieSkill)).rejects.toThrow();
     });
   });
 });
