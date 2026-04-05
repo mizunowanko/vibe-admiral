@@ -7,6 +7,8 @@ interface SessionState {
   focusedSessionId: string | null;
   /** Per-session input drafts preserved across component remounts. */
   inputDrafts: Record<string, string>;
+  /** Per-fleet focused session ID for restoring focus on fleet switch. */
+  focusedSessionIdByFleet: Record<string, string>;
   /** Dispatch processes keyed by dispatch ID. */
   dispatches: Map<string, Dispatch>;
   /** Dispatch logs keyed by dispatch process ID. */
@@ -102,6 +104,7 @@ export const useSessionStore = create<SessionState>()(
       sessions: new Map(),
       focusedSessionId: null,
       inputDrafts: {},
+      focusedSessionIdByFleet: {},
       dispatches: new Map(),
       dispatchLogs: new Map(),
       commanderMessages: new Map(),
@@ -136,7 +139,19 @@ export const useSessionStore = create<SessionState>()(
         });
       },
 
-      setFocus: (sessionId, _source) => set({ focusedSessionId: sessionId }),
+      setFocus: (sessionId, _source) => {
+        const update: Partial<SessionState> = { focusedSessionId: sessionId };
+        if (sessionId) {
+          const session = get().sessions.get(sessionId);
+          if (session?.fleetId) {
+            update.focusedSessionIdByFleet = {
+              ...get().focusedSessionIdByFleet,
+              [session.fleetId]: sessionId,
+            };
+          }
+        }
+        set(update);
+      },
 
       setInputDraft: (sessionId, value) =>
         set((s) => ({ inputDrafts: { ...s.inputDrafts, [sessionId]: value } })),
@@ -240,7 +255,10 @@ export const useSessionStore = create<SessionState>()(
     }),
     {
       name: "admiral-session",
-      partialize: (state) => ({ inputDrafts: state.inputDrafts }),
+      partialize: (state) => ({
+        inputDrafts: state.inputDrafts,
+        focusedSessionIdByFleet: state.focusedSessionIdByFleet,
+      }),
     },
   ),
 );
