@@ -322,6 +322,8 @@ export interface PersistedCommanderSession {
   role: CommanderRole;
   sessionId: string | null;
   createdAt: string;
+  /** cwd used when the session was created. Used to invalidate sessionId on cwd change. */
+  cwd?: string;
 }
 
 /** @deprecated Use PersistedCommanderSession instead. */

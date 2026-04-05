@@ -66,6 +66,11 @@ export class CommanderManager {
     const restoredHistory = await this.loadHistory(fleetId);
     const persisted = await this.loadSession(fleetId);
 
+    // Invalidate session ID if cwd changed (e.g. Commander moved to Fleet repo)
+    const persistedSessionId = (persisted?.sessionId && persisted.cwd && persisted.cwd !== fleetPath)
+      ? null  // cwd changed — old session ID is invalid
+      : (persisted?.sessionId ?? null);
+
     // Deploy skills, rules, and custom instructions to Fleet repo
     const deployedFiles: string[] = [];
     await this.deploySkills(fleetPath, deployedFiles, admiralSkillsDir);
@@ -79,7 +84,7 @@ export class CommanderManager {
       fleetPath,
       additionalDirs,
       systemPrompt,
-      sessionId: persisted?.sessionId ?? null,
+      sessionId: persistedSessionId,
       history: restoredHistory,
       pendingToolUseId: null,
       questionAskedAt: null,
@@ -158,8 +163,23 @@ export class CommanderManager {
     const session = this.sessions.get(fleetId);
     if (session && !session.sessionId) {
       session.sessionId = sessionId;
-      this.persistSession(fleetId, sessionId);
+      this.persistSession(fleetId, sessionId, session.fleetPath);
     }
+  }
+
+  /**
+   * Clear sessionId so next launch/resumeIfDead creates a fresh session.
+   * Called when --resume fails (e.g. exit code 1 due to cwd mismatch).
+   */
+  clearSessionId(fleetId: string): void {
+    const session = this.sessions.get(fleetId);
+    if (session) {
+      session.sessionId = null;
+    }
+    // Also clear persisted session file
+    const filePath = this.sessionPath(fleetId);
+    writeFile(filePath, JSON.stringify({ fleetId, role: this.role, sessionId: null, createdAt: new Date().toISOString() }, null, 2))
+      .catch(() => {});
   }
 
   send(
@@ -511,7 +531,7 @@ export class CommanderManager {
   }
 
   /** Persist session metadata (sessionId) to disk. Fire-and-forget. */
-  private persistSession(fleetId: string, sessionId: string): void {
+  private persistSession(fleetId: string, sessionId: string, cwd: string): void {
     const dir = this.fleetDir(fleetId);
     const filePath = this.sessionPath(fleetId);
     const data: PersistedCommanderSession = {
@@ -519,6 +539,7 @@ export class CommanderManager {
       role: this.role,
       sessionId,
       createdAt: new Date().toISOString(),
+      cwd,
     };
     mkdir(dir, { recursive: true })
       .then(() => writeFile(filePath, JSON.stringify(data, null, 2)))
