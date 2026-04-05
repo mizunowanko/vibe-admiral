@@ -33,9 +33,10 @@ export const isRateLimitError = isRetryableError;
  * Shared allowedTools for Commander sessions (Flagship / Dock).
  * Commanders are strictly read-only — no Write, Edit, or Agent.
  * Dispatch is launched via Engine API (POST /api/dispatch), not Agent tool.
+ * AskUserQuestion is NOT allowed — Commanders sometimes use it and hang.
  */
 export const COMMANDER_ALLOWED_TOOLS =
-  "Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion";
+  "Bash,Read,Glob,Grep,WebSearch,WebFetch";
 
 export interface ProcessEvents {
   data: (id: string, message: Record<string, unknown>) => void;
@@ -241,7 +242,7 @@ export class ProcessManager extends EventEmitter {
     //
     // allowedTools: Commanders are strictly read-only.
     // Dispatch is launched via Engine API (POST /api/dispatch), not via Agent tool.
-    // AskUserQuestion is allowed — Engine intercepts it and forwards to frontend.
+    // AskUserQuestion is NOT allowed — it causes Commanders to hang.
     const args = [
       "-p",
       "",
