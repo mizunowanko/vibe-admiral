@@ -256,6 +256,42 @@ describe("API Server", () => {
     });
   });
 
+  describe("Dock callerRole restriction (#854)", () => {
+    const shipOps = ["sortie", "ship-pause", "ship-resume", "ship-abandon", "ship-reactivate", "ship-delete", "pr-review-result"];
+
+    for (const route of shipOps) {
+      it(`rejects ${route} when callerRole is dock`, async () => {
+        const body: Record<string, unknown> = { callerRole: "dock" };
+        // Add required fields so the test reaches the callerRole check
+        if (route === "sortie") body.items = [{ repo: "owner/repo", issueNumber: 1 }];
+        else if (route === "pr-review-result") Object.assign(body, { shipId: "s1", prNumber: 1, verdict: "approve" });
+        else body.shipId = "s1";
+        const res = await apiRequest(port, "POST", `/api/${route}`, body);
+        expect(res.status).toBe(403);
+        expect(res.data.error).toContain("restricted to Flagship");
+      });
+    }
+
+    it("allows sortie when callerRole is flagship", async () => {
+      deps._handle.mockResolvedValue("[Sortie Results] ok");
+      const res = await apiRequest(port, "POST", "/api/sortie", {
+        callerRole: "flagship",
+        items: [{ repo: "owner/repo", issueNumber: 42 }],
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.ok).toBe(true);
+    });
+
+    it("allows sortie when callerRole is omitted (frontend compatibility)", async () => {
+      deps._handle.mockResolvedValue("[Sortie Results] ok");
+      const res = await apiRequest(port, "POST", "/api/sortie", {
+        items: [{ repo: "owner/repo", issueNumber: 42 }],
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.ok).toBe(true);
+    });
+  });
+
   describe("error handling", () => {
     it("returns 404 for unknown routes", async () => {
       const res = await apiRequest(port, "GET", "/api/unknown");

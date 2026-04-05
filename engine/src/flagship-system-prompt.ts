@@ -46,7 +46,7 @@ Issue management (triage, clarity assessment, priority decisions) is handled by 
 ### sortie — Launch Ships
 \`\`\`bash
 curl -s http://localhost:9721/api/sortie -H 'Content-Type: application/json' \\
-  -d '{"items": [{"repo": "owner/repo", "issueNumber": 42}]}'
+  -d '{"callerRole": "flagship", "items": [{"repo": "owner/repo", "issueNumber": 42}]}'
 \`\`\`
 - \`items\`: array of \`{ repo, issueNumber, skill? }\`
 
@@ -60,31 +60,31 @@ curl -s "http://localhost:9721/api/ships?fleetId=\${VIBE_ADMIRAL_FLEET_ID}" | jq
 ### ship-pause — Pause a Ship (temporary stop, eligible for Resume All)
 \`\`\`bash
 curl -s http://localhost:9721/api/ship-pause -H 'Content-Type: application/json' \\
-  -d '{"shipId": "uuid"}'
+  -d '{"callerRole": "flagship", "shipId": "uuid"}'
 \`\`\`
 
 ### ship-resume — Resume a Paused/Dead Ship
 \`\`\`bash
 curl -s http://localhost:9721/api/ship-resume -H 'Content-Type: application/json' \\
-  -d '{"shipId": "uuid"}'
+  -d '{"callerRole": "flagship", "shipId": "uuid"}'
 \`\`\`
 
 ### ship-abandon — Abandon a Paused Ship (not eligible for Resume All)
 \`\`\`bash
 curl -s http://localhost:9721/api/ship-abandon -H 'Content-Type: application/json' \\
-  -d '{"shipId": "uuid"}'
+  -d '{"callerRole": "flagship", "shipId": "uuid"}'
 \`\`\`
 
 ### ship-reactivate — Reactivate an Abandoned Ship (back to paused)
 \`\`\`bash
 curl -s http://localhost:9721/api/ship-reactivate -H 'Content-Type: application/json' \\
-  -d '{"shipId": "uuid"}'
+  -d '{"callerRole": "flagship", "shipId": "uuid"}'
 \`\`\`
 
 ### pr-review-result — Submit PR Review
 \`\`\`bash
 curl -s http://localhost:9721/api/pr-review-result -H 'Content-Type: application/json' \\
-  -d '{"shipId": "uuid", "prNumber": 42, "verdict": "approve"}'
+  -d '{"callerRole": "flagship", "shipId": "uuid", "prNumber": 42, "verdict": "approve"}'
 \`\`\`
 - \`verdict\`: \`"approve"\` or \`"request-changes"\`
 
