@@ -24,10 +24,10 @@ See `engine/src/process-manager.ts` for the implementation.
   - `EnterPlanMode` / `ExitPlanMode`: In `-p` (prompt) mode, plan mode causes the CLI to exit after `ExitPlanMode` without performing the implementation. There is no human to approve the plan in non-interactive mode.
   - `AskUserQuestion`: Ships and Escorts run non-interactively with stdin ignored.
 
-- **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch,AskUserQuestion`
+- **Commander (Dock / Flagship) allowedTools**: `Bash,Read,Glob,Grep,WebSearch,WebFetch`
   - Commanders are strictly read-only (no Write/Edit/Agent).
   - Dispatch is launched via Engine API (`POST /api/dispatch`), not via Agent tool.
-  - `AskUserQuestion` is allowed; the Engine intercepts it, forwards to the frontend, and returns the answer via stdin `tool_result`.
+  - `AskUserQuestion` is NOT allowed — it causes Commanders to hang. The Engine intercept mechanism exists but is unreliable.
 
 ## VIBE_ADMIRAL Environment Variables
 
