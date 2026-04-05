@@ -32,6 +32,19 @@ export function runStartupReconciliation(deps: StartupDeps): void {
     })
     .then(() => deps.loadFleets())
     .then((fleets) => {
+      // Backfill fleet_id on repos table so DB tracks fleet-repo associations (#867)
+      const db = deps.getFleetDb();
+      if (db) {
+        for (const fleet of fleets) {
+          for (const repo of fleet.repos) {
+            if (!repo.remote) continue;
+            const [owner, name] = repo.remote.split("/");
+            if (owner && name) {
+              db.ensureRepo(owner, name, fleet.id);
+            }
+          }
+        }
+      }
       const allRepos = fleets.flatMap((f) => f.repos);
       return deps.stateSync.reconcileOnStartup(allRepos);
     })

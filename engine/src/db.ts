@@ -108,6 +108,9 @@ export class FleetDatabase {
     if (version < 13) {
       this.applyV13();
     }
+    if (version < 14) {
+      this.applyV14();
+    }
   }
 
   private applyV1(): void {
@@ -524,16 +527,33 @@ export class FleetDatabase {
     `);
   }
 
-  /** Ensure a repo row exists and return its ID. */
-  ensureRepo(owner: string, name: string): number {
+  private applyV14(): void {
+    // V14: Add fleet_id to repos table for fleet-repo association (#867).
+    // Enables DB-level tracking of which repos belong to which fleet,
+    // preventing cross-fleet interference in ship queries.
+    this.db.exec(`
+      ALTER TABLE repos ADD COLUMN fleet_id TEXT;
+
+      INSERT INTO schema_version (version) VALUES (14);
+    `);
+  }
+
+  /** Ensure a repo row exists and return its ID. Updates fleet_id if provided. */
+  ensureRepo(owner: string, name: string, fleetId?: string): number {
     const existing = this.db.prepare(
-      "SELECT id FROM repos WHERE owner = ? AND name = ?",
-    ).get(owner, name) as { id: number } | undefined;
-    if (existing) return existing.id;
+      "SELECT id, fleet_id FROM repos WHERE owner = ? AND name = ?",
+    ).get(owner, name) as { id: number; fleet_id: string | null } | undefined;
+    if (existing) {
+      // Update fleet_id if it changed or was previously unset
+      if (fleetId && existing.fleet_id !== fleetId) {
+        this.db.prepare("UPDATE repos SET fleet_id = ? WHERE id = ?").run(fleetId, existing.id);
+      }
+      return existing.id;
+    }
 
     const result = this.db.prepare(
-      "INSERT INTO repos (owner, name) VALUES (?, ?)",
-    ).run(owner, name);
+      "INSERT INTO repos (owner, name, fleet_id) VALUES (?, ?, ?)",
+    ).run(owner, name, fleetId ?? null);
     return Number(result.lastInsertRowid);
   }
 
@@ -542,7 +562,7 @@ export class FleetDatabase {
     const [owner, name] = ship.repo.split("/");
     if (!owner || !name) return;
 
-    const repoId = this.ensureRepo(owner, name);
+    const repoId = this.ensureRepo(owner, name, ship.fleetId);
 
     // Delete any existing row with the same repo+issue to avoid UNIQUE constraint conflict.
     // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
@@ -696,31 +716,33 @@ export class FleetDatabase {
   }
 
   /** Get a ship by repo and issue number (active only, phase != done). */
-  getShipByIssue(repo: string, issueNumber: number): ShipProcess | undefined {
+  getShipByIssue(repo: string, issueNumber: number, fleetId?: string): ShipProcess | undefined {
     const [owner, name] = repo.split("/");
     if (!owner || !name) return undefined;
 
-    const row = this.db.prepare(`
-      SELECT s.*, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'paused', 'abandoned')
-    `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
+    const sql = fleetId
+      ? `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
+         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.fleet_id = ? AND s.phase NOT IN ('done', 'paused', 'abandoned')`
+      : `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
+         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'paused', 'abandoned')`;
+    const params = fleetId ? [owner, name, issueNumber, fleetId] : [owner, name, issueNumber];
+    const row = this.db.prepare(sql).get(...params) as ShipJoinRow | undefined;
 
     return row ? this.rowToShipProcess(row) : undefined;
   }
 
   /** Get a ship by repo and issue number (any phase, including done/paused/abandoned). */
-  getShipByIssueAnyPhase(repo: string, issueNumber: number): ShipProcess | undefined {
+  getShipByIssueAnyPhase(repo: string, issueNumber: number, fleetId?: string): ShipProcess | undefined {
     const [owner, name] = repo.split("/");
     if (!owner || !name) return undefined;
 
-    const row = this.db.prepare(`
-      SELECT s.*, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      WHERE r.owner = ? AND r.name = ? AND s.issue_number = ?
-    `).get(owner, name, issueNumber) as ShipJoinRow | undefined;
+    const sql = fleetId
+      ? `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
+         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.fleet_id = ?`
+      : `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
+         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ?`;
+    const params = fleetId ? [owner, name, issueNumber, fleetId] : [owner, name, issueNumber];
+    const row = this.db.prepare(sql).get(...params) as ShipJoinRow | undefined;
 
     return row ? this.rowToShipProcess(row) : undefined;
   }
