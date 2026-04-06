@@ -717,8 +717,10 @@ export function setupLookout(deps: LookoutDeps): void {
       }
     }
 
-    // Enqueue event-driven ship-inspect for the alerted Ship (debounced + batched)
-    inspectScheduler?.enqueue(alert.shipId, alert.fleetId, "lookout-alert");
+    // Enqueue event-driven ship-inspect for each alerted Ship (debounced + batched)
+    for (const alert of alerts) {
+      inspectScheduler?.enqueue(alert.shipId, alert.fleetId, "lookout-alert");
+    }
   });
 
   lookout.start();
