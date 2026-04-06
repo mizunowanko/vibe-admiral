@@ -20,6 +20,7 @@ export type {
   StreamMessageSubtype,
   SystemMessageMeta,
   LookoutAlertType,
+  AlertSeverity,
 } from "@shared/message-types";
 
 /** @deprecated Use Phase instead. Kept for migration compatibility. */

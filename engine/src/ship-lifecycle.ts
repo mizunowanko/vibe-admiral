@@ -663,45 +663,64 @@ export interface LookoutDeps {
 export function setupLookout(deps: LookoutDeps): void {
   const { shipManager, flagshipManager, processManager, escortManager, lookout, broadcast, inspectScheduler } = deps;
 
-  lookout.setAlertHandler((alert: LookoutAlert) => {
-    const ship = shipManager.getShip(alert.shipId);
-    if (!ship) return;
+  lookout.setAlertBatchHandler((alerts: LookoutAlert[]) => {
+    if (alerts.length === 0) return;
 
-    const flagshipId = `flagship-${alert.fleetId}`;
-
-    // Build system message for Flagship chat (Lookout alerts are Ship management)
-    const alertMessage: StreamMessage = {
-      type: "system",
-      subtype: "lookout-alert",
-      content: `[Lookout Alert] ${alert.message}`,
-      meta: {
-        category: "lookout-alert",
-        issueNumber: alert.issueNumber,
-        issueTitle: alert.issueTitle,
-        alertType: alert.alertType,
-        shipId: alert.shipId,
-        branchName: ship.branchName,
-      },
-      timestamp: Date.now(),
-    };
-
-    // Add to Flagship history and broadcast to frontend
-    flagshipManager.addToHistory(alert.fleetId, alertMessage);
-    broadcast({
-      type: "flagship:stream",
-      data: { fleetId: alert.fleetId, message: alertMessage },
-    });
-
-    // Send to Flagship stdin if Flagship is running
-    if (processManager.isRunning(flagshipId)) {
-      processManager.sendMessage(
-        flagshipId,
-        `[Lookout Alert] ${alert.message}`,
-      );
+    // Group alerts by fleetId for batched delivery
+    const byFleet = new Map<string, LookoutAlert[]>();
+    for (const alert of alerts) {
+      const existing = byFleet.get(alert.fleetId) ?? [];
+      existing.push(alert);
+      byFleet.set(alert.fleetId, existing);
     }
 
-    // Enqueue event-driven ship-inspect for the alerted Ship (debounced + batched)
-    inspectScheduler?.enqueue(alert.shipId, alert.fleetId, "lookout-alert");
+    const now = Date.now();
+
+    for (const [fleetId, fleetAlerts] of byFleet) {
+      const flagshipId = `flagship-${fleetId}`;
+
+      // Build individual system messages for frontend history
+      for (const alert of fleetAlerts) {
+        const ship = shipManager.getShip(alert.shipId);
+        if (!ship) continue;
+
+        const alertMessage: StreamMessage = {
+          type: "system",
+          subtype: "lookout-alert",
+          content: `[Lookout Alert] (${alert.severity}) ${alert.message}`,
+          meta: {
+            category: "lookout-alert",
+            issueNumber: alert.issueNumber,
+            issueTitle: alert.issueTitle,
+            alertType: alert.alertType,
+            alertSeverity: alert.severity,
+            shipId: alert.shipId,
+            branchName: ship.branchName,
+          },
+          timestamp: now,
+        };
+
+        flagshipManager.addToHistory(fleetId, alertMessage);
+        broadcast({
+          type: "flagship:stream",
+          data: { fleetId, message: alertMessage },
+        });
+      }
+
+      // Send single batched message to Flagship stdin
+      if (processManager.isRunning(flagshipId)) {
+        const lines = fleetAlerts.map((a) => `- [${a.severity}] ${a.message}`);
+        const batchedMessage = fleetAlerts.length === 1
+          ? `[Lookout Alert] (${fleetAlerts[0]!.severity}) ${fleetAlerts[0]!.message}`
+          : `[Lookout Alert] ${fleetAlerts.length} alerts:\n${lines.join("\n")}`;
+        processManager.sendMessage(flagshipId, batchedMessage);
+      }
+    }
+
+    // Enqueue event-driven ship-inspect for each alerted Ship (debounced + batched)
+    for (const alert of alerts) {
+      inspectScheduler?.enqueue(alert.shipId, alert.fleetId, "lookout-alert");
+    }
   });
 
   lookout.start();

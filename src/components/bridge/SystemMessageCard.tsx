@@ -2,6 +2,7 @@ import type {
   SystemMessageMeta,
   StreamMessageSubtype,
   LookoutAlertType,
+  AlertSeverity,
 } from "@/types";
 import { cn } from "@/lib/utils";
 import { gateTypeDisplayName } from "@/lib/ship-status";
@@ -11,6 +12,12 @@ const ALERT_TYPE_LABELS: Record<LookoutAlertType, string> = {
   "gate-wait-stall": "gate wait",
   "excessive-retries": "retried",
   "escort-death": "escort died",
+};
+
+const SEVERITY_BADGE: Record<AlertSeverity, { label: string; className: string }> = {
+  critical: { label: "CRIT", className: "bg-red-500/20 text-red-300" },
+  warning: { label: "WARN", className: "bg-orange-500/20 text-orange-300" },
+  info: { label: "INFO", className: "bg-blue-500/20 text-blue-300" },
 };
 
 function lookoutLabel(meta: SystemMessageMeta): string {
@@ -94,18 +101,34 @@ export function SystemMessageCard({ subtype, meta }: SystemMessageCardProps) {
   }
 
   const link = meta.prUrl ?? meta.url;
+  const severityBadge = subtype === "lookout-alert" && meta.alertSeverity
+    ? SEVERITY_BADGE[meta.alertSeverity]
+    : null;
+
+  // Override border color for critical lookout alerts
+  const borderClass = subtype === "lookout-alert" && meta.alertSeverity === "critical"
+    ? "border-red-500/30"
+    : style.border;
+  const bgClass = subtype === "lookout-alert" && meta.alertSeverity === "critical"
+    ? "bg-red-500/10"
+    : style.bg;
 
   return (
     <div className="flex w-full justify-start">
       <div
         className={cn(
           "flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-mono",
-          style.border,
-          style.bg,
+          borderClass,
+          bgClass,
           style.text,
         )}
       >
         <span>{style.icon}</span>
+        {severityBadge && (
+          <span className={cn("rounded px-1 py-0.5 text-[10px] font-bold leading-none", severityBadge.className)}>
+            {severityBadge.label}
+          </span>
+        )}
         {link ? (
           <a
             href={link}
