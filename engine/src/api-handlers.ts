@@ -21,7 +21,7 @@ import * as github from "./github.js";
 import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
 import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { getAdmiralHome } from "./admiral-home.js";
-import { applyTemplate } from "./deep-merge.js";
+import { applyTemplate, mergeSettings } from "./deep-merge.js";
 import type {
   Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType,
   CustomInstructions, ClientMessage, StreamMessage, CommanderRole,
@@ -464,7 +464,12 @@ async function handleCommanderSend(
         prompt = `${prompt}\n\n## Additional Rules\n\n${rulesSuffix}`;
       }
 
-      const ci = fleet.customInstructions;
+      // Merge Admiral Global settings with per-Fleet settings (#881)
+      const admiralSettings = await loadAdmiralSettings();
+      const mergedCommanderSettings = mergeSettings(admiralSettings.global, {
+        customInstructions: fleet.customInstructions,
+      });
+      const ci = mergedCommanderSettings.customInstructions;
       const ciParts = [ci?.shared, role === "flagship" ? ci?.flagship : ci?.dock].filter(Boolean);
       const customInstructionsText = ciParts.length > 0 ? ciParts.join("\n\n") : undefined;
       if (customInstructionsText) {
