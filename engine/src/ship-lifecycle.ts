@@ -22,6 +22,7 @@ import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification, 
 import { notifyPhaseWaiters } from "./api-server.js";
 import type { ApiDeps } from "./api-server.js";
 import { launchEscortForGate } from "./ship-internal-api.js";
+import type { InspectScheduler } from "./inspect-scheduler.js";
 
 export interface ShipLifecycleDeps {
   processManager: ProcessManagerLike;
@@ -551,10 +552,11 @@ export interface ShipStatusDeps {
   flagshipManager: FlagshipManager;
   processManager: ProcessManagerLike;
   broadcast: (msg: ServerMessage) => void;
+  inspectScheduler?: InspectScheduler;
 }
 
 export function setupShipStatusHandler(deps: ShipStatusDeps): void {
-  const { shipManager, flagshipManager, processManager, broadcast } = deps;
+  const { shipManager, flagshipManager, processManager, broadcast, inspectScheduler } = deps;
 
   shipManager.setPhaseChangeHandler((id, phase, detail) => {
     const ship = shipManager.getShip(id);
@@ -600,6 +602,9 @@ export function setupShipStatusHandler(deps: ShipStatusDeps): void {
           statusMessage.content,
         );
       }
+
+      // Enqueue event-driven ship-inspect (debounced + batched)
+      inspectScheduler?.enqueue(id, ship.fleetId, "phase-change");
     }
   });
 
@@ -652,10 +657,11 @@ export interface LookoutDeps {
   escortManager: EscortManager;
   lookout: Lookout;
   broadcast: (msg: ServerMessage) => void;
+  inspectScheduler?: InspectScheduler;
 }
 
 export function setupLookout(deps: LookoutDeps): void {
-  const { shipManager, flagshipManager, processManager, escortManager, lookout, broadcast } = deps;
+  const { shipManager, flagshipManager, processManager, escortManager, lookout, broadcast, inspectScheduler } = deps;
 
   lookout.setAlertBatchHandler((alerts: LookoutAlert[]) => {
     if (alerts.length === 0) return;
@@ -710,6 +716,9 @@ export function setupLookout(deps: LookoutDeps): void {
         processManager.sendMessage(flagshipId, batchedMessage);
       }
     }
+
+    // Enqueue event-driven ship-inspect for the alerted Ship (debounced + batched)
+    inspectScheduler?.enqueue(alert.shipId, alert.fleetId, "lookout-alert");
   });
 
   lookout.start();

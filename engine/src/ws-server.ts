@@ -33,6 +33,7 @@ import type { CrashLog } from "./crash-logger.js";
 // Module imports (ADR-0016 Phase 1)
 import { loadFleets, loadAdmiralSettings, loadRules, handleMessage, type MessageHandlerDeps } from "./api-handlers.js";
 import { setupProcessEvents, setupShipStatusHandler, setupShipCreatedHandler, setupResumeToGateHandler, setupLookout, deliverHeadsUp } from "./ship-lifecycle.js";
+import { InspectScheduler } from "./inspect-scheduler.js";
 import { runStartupReconciliation } from "./startup.js";
 import { startQuestionTimeoutScanner, startProcessLivenessCheck, startHeartbeat, resumeAllUnits } from "./health-monitor.js";
 
@@ -50,6 +51,7 @@ export class EngineServer {
   private actorManager: ShipActorManager;
   private dispatchManager: DispatchManager;
   private lookout: Lookout;
+  private inspectScheduler: InspectScheduler;
   private caffeinateManager: CaffeinateManager;
   private clients = new Set<WebSocket>();
   private launchingCommanders = new Set<string>();
@@ -86,6 +88,7 @@ export class EngineServer {
     this.dispatchManager = new DispatchManager(this.processManager);
 
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
+    this.inspectScheduler = new InspectScheduler(this.dispatchManager, this.shipManager);
 
     // CaffeinateManager: default enabled; overridden by persisted settings in runStartupReconciliation()
     this.caffeinateManager = new CaffeinateManager(true);
@@ -319,6 +322,7 @@ export class EngineServer {
       flagshipManager: this.flagshipManager,
       processManager: this.processManager,
       broadcast: (msg: ServerMessage) => this.broadcast(msg),
+      inspectScheduler: this.inspectScheduler,
     });
 
     setupShipCreatedHandler(
@@ -356,6 +360,7 @@ export class EngineServer {
       escortManager: this.escortManager,
       lookout: this.lookout,
       broadcast: (msg: ServerMessage) => this.broadcast(msg),
+      inspectScheduler: this.inspectScheduler,
     });
 
     this.processLivenessTimer = startProcessLivenessCheck({
@@ -508,6 +513,7 @@ export class EngineServer {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    this.inspectScheduler.stop();
     this.dispatchManager.killAll();
     this.escortManager.killAll();
     this.actorManager.stopAll();
