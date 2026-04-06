@@ -57,7 +57,28 @@ engine/               Node.js sidecar
     issue-tracker.ts  issue 状態トラッキング
     acceptance-watcher.ts  ファイル伝言板監視
     types.ts          Engine 共通型
-skills/                Skills（Claude Code が on-demand で注入）
+units/                Unit 別スキル・ルール配置（正規配置先）
+  ship/skills/         Ship 用スキル
+    implement/         /implement オーケストレータ + 5 sub-skills
+  escort/skills/       Escort 用スキル
+    planning-gate/     planning-gate Escort スキル
+    implementing-gate/ implementing-gate Escort スキル
+    acceptance-test-gate/ acceptance-test-gate Escort スキル
+  flagship/            Flagship 用スキル・ルール
+    skills/sortie/     Sortie 計画・優先順位
+    skills/ship-inspect/ Ship 状況確認
+    rules/             commander-rules.md
+  dock/                Dock 用スキル・ルール
+    skills/issue-manage/ Issue 作成・整理
+    skills/investigate/  調査 Dispatch テンプレート
+    skills/dock-ship-status/ Dock Ship ステータス
+    rules/             commander-rules.md
+  dispatch/            Dispatch 用（将来拡張）
+  shared/              共有スキル・ルール
+    skills/admiral-protocol/ admiral-request プロトコル仕様
+    skills/read-issue/ Issue 全コンテキスト取得
+    rules/             claude-dir-access.md
+skills/                Skills（レガシー配置 — Engine deploy 互換のため残存）
   implement/           /implement オーケストレータ + 5 sub-skills
   adr/                 /adr スキル（ADR 作成・更新・検索）
   admiral-protocol/    admiral-request プロトコル仕様
@@ -68,6 +89,8 @@ skills/                Skills（Claude Code が on-demand で注入）
   issue-manage/        Issue 作成・整理
   investigate/         調査 Dispatch テンプレート
   read-issue/          Issue 全コンテキスト取得
+docs/                 ドキュメント
+  cli-subprocess.md   Claude Code CLI サブプロセスルール
 adr/                  Architecture Decision Records
   TEMPLATE.md         ADR テンプレート
 ```
