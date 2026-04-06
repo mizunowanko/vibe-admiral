@@ -552,11 +552,10 @@ export interface ShipStatusDeps {
   flagshipManager: FlagshipManager;
   processManager: ProcessManagerLike;
   broadcast: (msg: ServerMessage) => void;
-  inspectScheduler?: InspectScheduler;
 }
 
 export function setupShipStatusHandler(deps: ShipStatusDeps): void {
-  const { shipManager, flagshipManager, processManager, broadcast, inspectScheduler } = deps;
+  const { shipManager, flagshipManager, processManager, broadcast } = deps;
 
   shipManager.setPhaseChangeHandler((id, phase, detail) => {
     const ship = shipManager.getShip(id);
@@ -603,8 +602,8 @@ export function setupShipStatusHandler(deps: ShipStatusDeps): void {
         );
       }
 
-      // Enqueue event-driven ship-inspect (debounced + batched)
-      inspectScheduler?.enqueue(id, ship.fleetId, "phase-change");
+      // Note: phase changes no longer trigger ship-inspect.
+      // Only Lookout alerts enqueue inspects (see #888).
     }
   });
 
