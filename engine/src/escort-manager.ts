@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, rename, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { loadUnitPrompt } from "./prompt-loader.js";
 import type { ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FleetDatabase } from "./db.js";
@@ -224,7 +225,7 @@ export class EscortManager {
     };
 
     const gateContext = gatePhase
-      ? `\n\n[Gate Context] The parent Ship is currently in ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`
+      ? `\n\n${loadUnitPrompt("escort", { gatePhase })}`
       : "";
 
     this.processManager.sortie(
