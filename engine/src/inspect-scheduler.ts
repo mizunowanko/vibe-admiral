@@ -12,7 +12,7 @@
 import type { DispatchManager } from "./dispatch-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 
-export type InspectTrigger = "phase-change" | "lookout-alert";
+export type InspectTrigger = "lookout-alert";
 
 interface PendingInspect {
   shipId: string;

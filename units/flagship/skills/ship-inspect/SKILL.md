@@ -93,9 +93,10 @@ Ship #<issue-number> (<issue-title>)
 - Issues: <問題があれば記載 / "なし">
 ```
 
-## 自動 inspect（Engine 駆動）
+## 自動 inspect（Engine 駆動 — Lookout アラート起因のみ）
 
-Engine が phase 変更・Lookout アラート発生時に自動で ship-inspect Dispatch を起動する。
+Engine が **Lookout アラート発生時のみ** 自動で ship-inspect Dispatch を起動する。
+- **トリガー**: Lookout アラート（異常検知）のみ。**phase 変更では自動 inspect を行わない**（phase 変更は正常動作の一部であり、毎回 chat log を読む必要はない）
 - **デバウンス**: 同一 Ship は最低 3 分間隔
 - **バッチ処理**: 複数 Ship の inspect が必要な場合、1 つの Dispatch で全 Ship をまとめて確認
 - **結果通知**: Dispatch 完了時に Flagship の stdin に結果が届く

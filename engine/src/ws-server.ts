@@ -322,7 +322,6 @@ export class EngineServer {
       flagshipManager: this.flagshipManager,
       processManager: this.processManager,
       broadcast: (msg: ServerMessage) => this.broadcast(msg),
-      inspectScheduler: this.inspectScheduler,
     });
 
     setupShipCreatedHandler(
