@@ -10,9 +10,8 @@ import { loadUnitPrompt } from "./prompt-loader.js";
  * Prompt content lives in units/dock/prompt.md.
  * Detailed rules live in:
  * - .claude/rules/commander-rules.md (shared Flagship/Dock rules)
- * - skills/issue-manage/   (creation, triage, priority, dependency tracking)
- * - skills/sortie/         (clarity check + sortie readiness)
- * - skills/investigate/    (Dispatch templates)
+ * - units/dock/skills/issue-manage/    (creation, triage, priority, dependency tracking)
+ * - units/dock/skills/investigate/    (Dispatch templates)
  */
 export function buildDockSystemPrompt(
   fleetName: string,

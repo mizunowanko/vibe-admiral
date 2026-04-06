@@ -10,9 +10,9 @@ import { loadUnitPrompt } from "./prompt-loader.js";
  * Prompt content lives in units/flagship/prompt.md.
  * Detailed rules live in:
  * - .claude/rules/commander-rules.md (shared Flagship/Dock rules)
- * - skills/admiral-protocol/    (API reference + ship-status rules)
- * - skills/sortie/              (clarity check + critical escalation)
- * - skills/investigate/         (Ship log reading + Dispatch templates)
+ * - units/shared/skills/admiral-protocol/  (API reference + ship-status rules)
+ * - units/flagship/skills/sortie/         (clarity check + critical escalation)
+ * - units/flagship/skills/ship-inspect/   (Ship log reading + Dispatch templates)
  */
 export function buildFlagshipSystemPrompt(
   fleetName: string,

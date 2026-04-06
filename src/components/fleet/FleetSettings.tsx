@@ -493,7 +493,7 @@ export function FleetSettings() {
                         implement: e.target.value || undefined,
                       })
                     }
-                    placeholder="Default: repo skills/implement/"
+                    placeholder="Default: repo units/ship/skills/implement/"
                     className="text-xs"
                   />
                 </div>

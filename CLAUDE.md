@@ -78,17 +78,6 @@ units/                Unit 別スキル・ルール配置（正規配置先）
     skills/admiral-protocol/ admiral-request プロトコル仕様
     skills/read-issue/ Issue 全コンテキスト取得
     rules/             claude-dir-access.md
-skills/                Skills（レガシー配置 — Engine deploy 互換のため残存）
-  implement/           /implement オーケストレータ + 5 sub-skills
-  adr/                 /adr スキル（ADR 作成・更新・検索）
-  admiral-protocol/    admiral-request プロトコル仕様
-  planning-gate/       planning-gate Escort スキル
-  implementing-gate/   implementing-gate Escort スキル
-  acceptance-test-gate/ acceptance-test-gate Escort スキル
-  sortie/              Sortie 計画・優先順位
-  issue-manage/        Issue 作成・整理
-  investigate/         調査 Dispatch テンプレート
-  read-issue/          Issue 全コンテキスト取得
 docs/                 ドキュメント
   cli-subprocess.md   Claude Code CLI サブプロセスルール
 adr/                  Architecture Decision Records
@@ -172,7 +161,7 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 | Engine 型定義 | `engine/src/types.ts` | ほぼ全ての Engine 変更が触る |
 | Ship ライフサイクル | `engine/src/ship-manager.ts` | 新機能追加時に頻繁に変更 |
 | WS メッセージ | `engine/src/ws-server.ts` | メッセージ種別追加のたびに変更 |
-| 共通スキル | `skills/implement/SKILL.md` | ワークフロー改善で頻繁に更新 |
+| 共通スキル | `units/ship/skills/implement/SKILL.md` | ワークフロー改善で頻繁に更新 |
 | フロントエンド Store | `src/stores/ship-store.ts` | Ship 機能追加のたびに変更 |
 
 ### 競合を減らすガイドライン
