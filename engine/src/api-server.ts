@@ -30,8 +30,8 @@ import { handleRestart, handleResumeAll } from "./system-api.js";
 // Re-export notifyPhaseWaiters from ship-internal-api for ship-lifecycle.ts
 export { notifyPhaseWaiters } from "./ship-internal-api.js";
 
-/** Admiral repo's skills/ directory, resolved from Engine's own source location. */
-const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
+/** Admiral repo's units/ directory, resolved from Engine's own source location. */
+const ADMIRAL_UNITS_DIR = join(import.meta.dirname, "..", "..", "units");
 
 export interface ApiDeps {
   requestHandler: FlagshipRequestHandler;
@@ -133,7 +133,7 @@ export async function resolveFleetContext(deps: ApiDeps, fleetId?: string): Prom
     fleetId: fleet.id,
     fleetRepos,
     repoRemotes,
-    skillSources: { ...fleet.skillSources, admiralSkillsDir: ADMIRAL_SKILLS_DIR },
+    skillSources: { ...fleet.skillSources, admiralUnitsDir: ADMIRAL_UNITS_DIR },
     shipExtraPrompt,
     customInstructionsText: ciText,
     maxConcurrentSorties: merged.maxConcurrentSorties,

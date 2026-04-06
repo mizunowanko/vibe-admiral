@@ -397,53 +397,76 @@ describe("CommanderManager", () => {
   describe("deploy and cleanup", () => {
     let manager: FlagshipManager;
     let fleetPath: string;
-    let admiralSkillsDir: string;
+    let admiralUnitsDir: string;
 
     beforeEach(async () => {
       manager = new FlagshipManager(
         mockPm as unknown as ConstructorParameters<typeof FlagshipManager>[0],
       );
-      // Create a Fleet repo directory and an Admiral skills directory
+      // Create a Fleet repo directory and an Admiral units directory
       fleetPath = join(tmpDir, "fleet-repo");
-      admiralSkillsDir = join(tmpDir, "admiral-skills");
+      admiralUnitsDir = join(tmpDir, "admiral-units");
       await mkdir(fleetPath, { recursive: true });
 
-      // Create Admiral skills that Flagship expects
-      for (const skill of ["admiral-protocol", "sortie", "issue-manage", "investigate", "read-issue", "hotfix", "ship-inspect"]) {
-        const skillDir = join(admiralSkillsDir, skill);
+      // Create Flagship unit-specific skills in units/flagship/skills/
+      for (const skill of ["sortie", "ship-inspect"]) {
+        const skillDir = join(admiralUnitsDir, "flagship", "skills", skill);
         await mkdir(skillDir, { recursive: true });
         await writeFile(join(skillDir, "SKILL.md"), `# ${skill} skill`);
       }
 
-      // Create commander-rules.md in Admiral repo's .claude/rules/
-      const admiralRulesDir = join(admiralSkillsDir, "..", ".claude", "rules");
-      await mkdir(admiralRulesDir, { recursive: true });
-      await writeFile(join(admiralRulesDir, "commander-rules.md"), "# Commander Rules");
+      // Create shared skills in units/shared/skills/
+      for (const skill of ["admiral-protocol", "read-issue"]) {
+        const skillDir = join(admiralUnitsDir, "shared", "skills", skill);
+        await mkdir(skillDir, { recursive: true });
+        await writeFile(join(skillDir, "SKILL.md"), `# ${skill} skill`);
+      }
+
+      // Create Flagship rules in units/flagship/rules/
+      const flagshipRulesDir = join(admiralUnitsDir, "flagship", "rules");
+      await mkdir(flagshipRulesDir, { recursive: true });
+      await writeFile(join(flagshipRulesDir, "commander-rules.md"), "# Commander Rules");
+
+      // Create shared rules in units/shared/rules/
+      const sharedRulesDir = join(admiralUnitsDir, "shared", "rules");
+      await mkdir(sharedRulesDir, { recursive: true });
+      await writeFile(join(sharedRulesDir, "claude-dir-access.md"), "# Claude Dir Access");
     });
 
-    it("deploys skills from admiralSkillsDir to Fleet repo", async () => {
-      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+    it("deploys skills from units/ to Fleet repo with unit prefix", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir);
 
-      // Verify skills were deployed to fleet-repo/.claude/skills/
-      const sortieSkill = join(fleetPath, ".claude", "skills", "sortie", "SKILL.md");
+      // Verify unit-specific skills use flagship- prefix
+      const sortieSkill = join(fleetPath, ".claude", "skills", "flagship-sortie", "SKILL.md");
       const content = await readFile(sortieSkill, "utf-8");
       expect(content).toBe("# sortie skill");
 
-      const inspectSkill = join(fleetPath, ".claude", "skills", "ship-inspect", "SKILL.md");
+      const inspectSkill = join(fleetPath, ".claude", "skills", "flagship-ship-inspect", "SKILL.md");
       const inspectContent = await readFile(inspectSkill, "utf-8");
       expect(inspectContent).toBe("# ship-inspect skill");
+
+      // Verify shared skills use shared- prefix
+      const readIssueSkill = join(fleetPath, ".claude", "skills", "shared-read-issue", "SKILL.md");
+      const riContent = await readFile(readIssueSkill, "utf-8");
+      expect(riContent).toBe("# read-issue skill");
     });
 
-    it("deploys commander-rules.md to Fleet repo", async () => {
-      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+    it("deploys rules from units/ to Fleet repo", async () => {
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir);
 
+      // Flagship-specific rules
       const rulesPath = join(fleetPath, ".claude", "rules", "commander-rules.md");
       const content = await readFile(rulesPath, "utf-8");
       expect(content).toBe("# Commander Rules");
+
+      // Shared rules
+      const sharedRulePath = join(fleetPath, ".claude", "rules", "claude-dir-access.md");
+      const sharedContent = await readFile(sharedRulePath, "utf-8");
+      expect(sharedContent).toBe("# Claude Dir Access");
     });
 
     it("deploys custom instructions to Fleet repo", async () => {
-      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir, "Be polite and helpful.");
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir, "Be polite and helpful.");
 
       const ciPath = join(fleetPath, ".claude", "rules", "custom-instructions.md");
       const content = await readFile(ciPath, "utf-8");
@@ -451,17 +474,17 @@ describe("CommanderManager", () => {
     });
 
     it("does not deploy custom-instructions.md when text is not provided", async () => {
-      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir);
 
       const ciPath = join(fleetPath, ".claude", "rules", "custom-instructions.md");
       await expect(stat(ciPath)).rejects.toThrow();
     });
 
     it("cleans up deployed files on stop", async () => {
-      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir, "Be polite.");
+      await manager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir, "Be polite.");
 
       // Verify files exist
-      const sortieSkill = join(fleetPath, ".claude", "skills", "sortie", "SKILL.md");
+      const sortieSkill = join(fleetPath, ".claude", "skills", "flagship-sortie", "SKILL.md");
       const rulesPath = join(fleetPath, ".claude", "rules", "commander-rules.md");
       const ciPath = join(fleetPath, ".claude", "rules", "custom-instructions.md");
       await expect(stat(sortieSkill)).resolves.toBeTruthy();
@@ -481,19 +504,21 @@ describe("CommanderManager", () => {
         mockPm as unknown as ConstructorParameters<typeof DockManager>[0],
       );
 
-      // Create dock-ship-status skill
-      const dockSkillDir = join(admiralSkillsDir, "dock-ship-status");
-      await mkdir(dockSkillDir, { recursive: true });
-      await writeFile(join(dockSkillDir, "SKILL.md"), "# dock-ship-status skill");
+      // Create Dock unit-specific skills in units/dock/skills/
+      for (const skill of ["issue-manage", "investigate", "dock-ship-status"]) {
+        const skillDir = join(admiralUnitsDir, "dock", "skills", skill);
+        await mkdir(skillDir, { recursive: true });
+        await writeFile(join(skillDir, "SKILL.md"), `# ${skill} skill`);
+      }
 
-      await dockManager.launch("fleet-1", fleetPath, [], "prompt", admiralSkillsDir);
+      await dockManager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir);
 
-      const dockSkill = join(fleetPath, ".claude", "skills", "dock-ship-status", "SKILL.md");
+      const dockSkill = join(fleetPath, ".claude", "skills", "dock-dock-ship-status", "SKILL.md");
       const content = await readFile(dockSkill, "utf-8");
       expect(content).toBe("# dock-ship-status skill");
 
       // Dock should NOT have flagship-specific skills like sortie
-      const sortieSkill = join(fleetPath, ".claude", "skills", "sortie", "SKILL.md");
+      const sortieSkill = join(fleetPath, ".claude", "skills", "flagship-sortie", "SKILL.md");
       await expect(stat(sortieSkill)).rejects.toThrow();
     });
   });

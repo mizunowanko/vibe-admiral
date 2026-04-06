@@ -10,16 +10,4 @@ export class FlagshipManager extends CommanderManager {
   constructor(processManager: ProcessManagerLike) {
     super(processManager, "flagship");
   }
-
-  protected getSkillNames(): string[] {
-    return [
-      "admiral-protocol",
-      "sortie",
-      "issue-manage",
-      "investigate",
-      "read-issue",
-      "hotfix",
-      "ship-inspect",
-    ];
-  }
 }

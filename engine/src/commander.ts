@@ -1,8 +1,9 @@
-import { appendFile, readFile, writeFile, mkdir, stat, rename, copyFile, unlink } from "node:fs/promises";
+import { appendFile, readFile, readdir, writeFile, mkdir, stat, rename, copyFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProcessManagerLike } from "./process-manager.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import type { StreamMessage, PersistedCommanderSession, CommanderRole, Dispatch, DispatchStatus } from "./types.js";
+import { UNIT_DEPLOY_MAP } from "./unit-deploy-map.js";
 
 const MAX_HISTORY = 500;
 
@@ -45,9 +46,8 @@ export class CommanderManager {
    * Launch a new commander session. If a persisted session exists with a valid
    * sessionId, attempt to resume the Claude CLI session.
    *
-   * @param admiralSkillsDir - Absolute path to vibe-admiral's skills/ directory.
-   *   When provided, skills are deployed FROM this directory TO fleetPath/.claude/skills/.
-   *   When omitted, falls back to fleetPath/skills/ (legacy behavior).
+   * @param admiralUnitsDir - Absolute path to vibe-admiral's units/ directory.
+   *   When provided, skills/rules are deployed FROM this directory TO fleetPath/.claude/.
    * @param customInstructionsText - Fleet's custom instructions text (shared + role-specific).
    *   Deployed to fleetPath/.claude/rules/custom-instructions.md so it persists across
    *   context compaction and correctly overrides any repo-level custom-instructions.md.
@@ -57,7 +57,7 @@ export class CommanderManager {
     fleetPath: string,
     additionalDirs: string[],
     systemPrompt?: string,
-    admiralSkillsDir?: string,
+    admiralUnitsDir?: string,
     customInstructionsText?: string,
   ): Promise<string> {
     const sessionId = `${this.role}-${fleetId}`;
@@ -73,9 +73,8 @@ export class CommanderManager {
 
     // Deploy skills, rules, and custom instructions to Fleet repo
     const deployedFiles: string[] = [];
-    await this.deploySkills(fleetPath, deployedFiles, admiralSkillsDir);
-    await this.deployRules(fleetPath, deployedFiles, admiralSkillsDir);
-    await this.deployCustomInstructions(fleetPath, deployedFiles, customInstructionsText);
+    await this.deploySkills(fleetPath, deployedFiles, admiralUnitsDir);
+    await this.deployRules(fleetPath, deployedFiles, admiralUnitsDir, customInstructionsText);
 
     const session: CommanderSession = {
       id: sessionId,
@@ -376,22 +375,40 @@ export class CommanderManager {
 
   /**
    * Deploy role-specific skills to fleetPath/.claude/skills/.
-   * When admiralSkillsDir is provided, skills are sourced from the Admiral repo's
-   * skills/ directory (for Commanders running in Fleet repos).
-   * When omitted, falls back to fleetPath/skills/ (legacy behavior).
+   * Sources skills from units/<role>/skills/ and units/shared/skills/
+   * based on UNIT_DEPLOY_MAP. Deploy destination uses <unit>-<name> prefix.
    */
   protected async deploySkills(
     fleetPath: string,
     deployedFiles: string[],
-    admiralSkillsDir?: string,
+    admiralUnitsDir?: string,
   ): Promise<void> {
-    const skillsRoot = admiralSkillsDir ?? join(fleetPath, "skills");
-    const skills = this.getSkillNames();
-    for (const skillName of skills) {
-      const src = join(skillsRoot, skillName, "SKILL.md");
-      const dest = join(fleetPath, ".claude", "skills", skillName, "SKILL.md");
+    if (!admiralUnitsDir) return;
+
+    const map = UNIT_DEPLOY_MAP[this.role as keyof typeof UNIT_DEPLOY_MAP];
+    if (!map) return;
+
+    // Deploy unit-specific skills: units/<role>/skills/<name>/
+    for (const skillName of map.skills) {
+      const src = join(admiralUnitsDir, this.role, "skills", skillName, "SKILL.md");
+      const deployName = `${this.role}-${skillName}`;
+      const dest = join(fleetPath, ".claude", "skills", deployName, "SKILL.md");
       try {
-        await mkdir(join(fleetPath, ".claude", "skills", skillName), { recursive: true });
+        await mkdir(join(fleetPath, ".claude", "skills", deployName), { recursive: true });
+        await copyFile(src, dest);
+        deployedFiles.push(dest);
+      } catch {
+        // Non-fatal: skill may not exist
+      }
+    }
+
+    // Deploy shared skills: units/shared/skills/<name>/
+    for (const skillName of map.sharedSkills) {
+      const src = join(admiralUnitsDir, "shared", "skills", skillName, "SKILL.md");
+      const deployName = `shared-${skillName}`;
+      const dest = join(fleetPath, ".claude", "skills", deployName, "SKILL.md");
+      try {
+        await mkdir(join(fleetPath, ".claude", "skills", deployName), { recursive: true });
         await copyFile(src, dest);
         deployedFiles.push(dest);
       } catch {
@@ -401,57 +418,61 @@ export class CommanderManager {
   }
 
   /**
-   * Deploy commander-rules.md to fleetPath/.claude/rules/.
-   * Sources from the Admiral repo's .claude/rules/ when admiralSkillsDir is provided
-   * (deriving the Admiral repo root from admiralSkillsDir).
+   * Deploy rules from units/<role>/rules/ and units/shared/rules/ to fleetPath/.claude/rules/.
+   * Also deploys Fleet custom instructions as custom-instructions.md.
    */
   protected async deployRules(
     fleetPath: string,
     deployedFiles: string[],
-    admiralSkillsDir?: string,
-  ): Promise<void> {
-    if (!admiralSkillsDir) return;
-
-    // admiralSkillsDir = <admiral-repo>/skills → Admiral repo root = parent of skills/
-    const admiralRoot = join(admiralSkillsDir, "..");
-    const src = join(admiralRoot, ".claude", "rules", "commander-rules.md");
-    const destDir = join(fleetPath, ".claude", "rules");
-    const dest = join(destDir, "commander-rules.md");
-    try {
-      await mkdir(destDir, { recursive: true });
-      await copyFile(src, dest);
-      deployedFiles.push(dest);
-    } catch {
-      console.warn(`[${this.role}] Failed to deploy commander-rules.md`);
-    }
-  }
-
-  /**
-   * Deploy Fleet custom instructions as .claude/rules/custom-instructions.md.
-   * This overwrites any existing custom-instructions.md in the Fleet repo,
-   * ensuring Fleet settings take precedence over repo-level instructions.
-   * The file is tracked for cleanup on stop().
-   */
-  protected async deployCustomInstructions(
-    fleetPath: string,
-    deployedFiles: string[],
+    admiralUnitsDir?: string,
     customInstructionsText?: string,
   ): Promise<void> {
-    const destDir = join(fleetPath, ".claude", "rules");
-    const dest = join(destDir, "custom-instructions.md");
+    if (!admiralUnitsDir && !customInstructionsText) return;
 
-    if (!customInstructionsText) {
-      return;
+    const destDir = join(fleetPath, ".claude", "rules");
+    await mkdir(destDir, { recursive: true });
+
+    if (admiralUnitsDir) {
+      // Deploy unit-specific rules: units/<role>/rules/*.md
+      const unitRulesDir = join(admiralUnitsDir, this.role, "rules");
+      await this.copyRulesFromDir(unitRulesDir, destDir, deployedFiles);
+
+      // Deploy shared rules: units/shared/rules/*.md
+      const sharedRulesDir = join(admiralUnitsDir, "shared", "rules");
+      await this.copyRulesFromDir(sharedRulesDir, destDir, deployedFiles);
     }
 
-    await mkdir(destDir, { recursive: true });
-    await writeFile(dest, `## Custom Instructions\n\n${customInstructionsText}`, "utf-8");
-    deployedFiles.push(dest);
+    // Deploy Fleet custom instructions as custom-instructions.md
+    if (customInstructionsText) {
+      const dest = join(destDir, "custom-instructions.md");
+      await writeFile(dest, `## Custom Instructions\n\n${customInstructionsText}`, "utf-8");
+      deployedFiles.push(dest);
+    }
   }
 
-  /** Get skill names to deploy. Override in subclasses. */
-  protected getSkillNames(): string[] {
-    return [];
+  /** Copy all .md files from a rules directory to the destination. */
+  private async copyRulesFromDir(
+    srcDir: string,
+    destDir: string,
+    deployedFiles: string[],
+  ): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(srcDir);
+    } catch {
+      return; // Directory doesn't exist — skip
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      const src = join(srcDir, entry);
+      const dest = join(destDir, entry);
+      try {
+        await copyFile(src, dest);
+        deployedFiles.push(dest);
+      } catch {
+        console.warn(`[${this.role}] Failed to deploy rule ${entry}`);
+      }
+    }
   }
 
   // --- Disk persistence ---

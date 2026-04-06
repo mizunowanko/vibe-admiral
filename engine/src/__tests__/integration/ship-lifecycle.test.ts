@@ -7,7 +7,7 @@
  * and DB persistence — all wired together.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,7 +25,10 @@ vi.mock("../../github.js", () => ({
 
 vi.mock("../../worktree.js", () => ({
   getRepoRoot: vi.fn().mockResolvedValue("/repo"),
-  create: vi.fn().mockResolvedValue(undefined),
+  create: vi.fn().mockImplementation(async (worktreePath: string) => {
+    const { mkdir: mkdirFs } = await import("node:fs/promises");
+    await mkdirFs(worktreePath, { recursive: true });
+  }),
   remove: vi.fn().mockResolvedValue(undefined),
   symlinkSettings: vi.fn().mockResolvedValue(undefined),
   toKebabCase: vi.fn().mockReturnValue("test-issue"),
@@ -104,10 +107,9 @@ describe("Ship lifecycle (integration)", () => {
     tmpDir = await mkdtemp(join(tmpdir(), "ship-lifecycle-test-"));
     db = new FleetDatabase(join(tmpDir, "test.db"));
 
-    // Create a skills directory structure for deploySkills
-    const skillsDir = join(tmpDir, "skills", "implement");
-    await mkdir(skillsDir, { recursive: true });
-    await writeFile(join(skillsDir, "SKILL.md"), "# implement skill");
+    // Create a units directory structure for deploySkills (no longer needed
+    // since deploySkills returns early when admiralUnitsDir is not provided,
+    // but kept as a minimal stub for future tests).
 
     processManager = new ProcessManager();
     mockStatusManager = {
