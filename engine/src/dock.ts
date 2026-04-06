@@ -10,13 +10,4 @@ export class DockManager extends CommanderManager {
   constructor(processManager: ProcessManagerLike) {
     super(processManager, "dock");
   }
-
-  protected getSkillNames(): string[] {
-    return [
-      "dock-ship-status",
-      "issue-manage",
-      "investigate",
-      "read-issue",
-    ];
-  }
 }

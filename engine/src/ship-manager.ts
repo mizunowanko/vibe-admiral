@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { access, copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { loadUnitPrompt } from "./prompt-loader.js";
@@ -14,6 +14,7 @@ import * as github from "./github.js";
 import * as worktree from "./worktree.js";
 import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, StreamMessage } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
+import { UNIT_DEPLOY_MAP } from "./unit-deploy-map.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -164,21 +165,14 @@ export class ShipManager {
     // 4. Symlink settings
     await worktree.symlinkSettings(repoRoot, worktreePath);
 
-    // 5. Copy /implement skill to worktree
-    await this.deploySkills(repoRoot, worktreePath, skillSources);
+    // 5. Deploy skills from units/ to worktree
+    await this.deploySkills(worktreePath, skillSources);
 
     // 5b. Write minimal CLAUDE.md for external repos (overrides vibe-admiral's CLAUDE.md)
     await this.deployCLAUDEmd(repoRoot, worktreePath);
 
-    // 5c. Persist customInstructions to .claude/rules/ so they survive context compaction.
-    // Claude Code always reloads .claude/rules/*.md on every turn, unlike --append-system-prompt
-    // which may be lost when the CLI compacts context mid-session.
-    await this.deployCustomInstructions(worktreePath, customInstructionsText);
-
-    // 5d. Deploy .claude/rules/ workaround for .claude/ directory write restriction (#752).
-    // Claude Code blocks Write/Edit tools for .claude/ (sensitive directory) even with
-    // --dangerously-skip-permissions. This rule file instructs Ships to use Bash alternatives.
-    await this.deployClaudeDirAccessRule(worktreePath);
+    // 5c. Deploy rules (units/<unit>/rules/ + shared/rules/) and custom instructions
+    await this.deployRules(worktreePath, skillSources, customInstructionsText);
 
     // 6. Remove stale .claude work files from previous sortie (or inherited from main)
     const staleFiles = [
@@ -885,75 +879,75 @@ export class ShipManager {
    * Deploy a single skill to the worktree, skipping if the repo already provides it.
    * Returns true if deployed, false if skipped (repo skill preserved).
    * When force=true, always overwrite (used by redeploySkills to refresh stale copies).
+   *
+   * @param deployName - Directory name under .claude/skills/ (e.g., "ship-implement")
    */
   private async deploySkill(
-    skillName: string,
+    deployName: string,
     srcPath: string,
     worktreePath: string,
     force = false,
   ): Promise<boolean> {
-    const dest = join(worktreePath, ".claude", "skills", skillName, "SKILL.md");
+    const dest = join(worktreePath, ".claude", "skills", deployName, "SKILL.md");
 
     // Preserve repo-specific skill: if the worktree already has this skill
     // (inherited from git tracked files), do not overwrite it.
     // When force=true, always overwrite — the Ship may have updated the skill source.
     if (!force && await this.fileExists(dest)) {
-      console.log(`[ship-manager] Skipping /${skillName} — repo-specific skill preserved`);
+      console.log(`[ship-manager] Skipping /${deployName} — repo-specific skill preserved`);
       return false;
     }
 
-    const destDir = join(worktreePath, ".claude", "skills", skillName);
+    const destDir = join(worktreePath, ".claude", "skills", deployName);
     await mkdir(destDir, { recursive: true });
     await copyFile(srcPath, dest);
     return true;
   }
 
+  /**
+   * Deploy Ship skills from units/ship/skills/ and units/shared/skills/.
+   * Uses UNIT_DEPLOY_MAP for the skill list. Deploy destination uses <unit>-<name> prefix.
+   */
   private async deploySkills(
-    repoRoot: string,
     worktreePath: string,
     skillSources?: FleetSkillSources,
     force = false,
   ): Promise<void> {
-    // Resolve the Admiral skills directory.
-    // admiralSkillsDir is auto-populated by resolveFleetContext(); fall back to
-    // repoRoot/skills for backward compatibility (e.g., Admiral-only fleets).
-    const admiralSkillsDir = skillSources?.admiralSkillsDir
-      ?? join(repoRoot, "skills");
+    const admiralUnitsDir = skillSources?.admiralUnitsDir;
+    if (!admiralUnitsDir) return;
+
+    const map = UNIT_DEPLOY_MAP.ship;
 
     // Deploy /implement orchestrator (essential for Ship operation).
-    // skillSources.implement override takes priority over admiralSkillsDir.
+    // skillSources.implement override takes priority over units/ path.
     const implementSrc = skillSources?.implement
       ? join(skillSources.implement, "SKILL.md")
-      : join(admiralSkillsDir, "implement", "SKILL.md");
+      : join(admiralUnitsDir, "ship", "skills", "implement", "SKILL.md");
     try {
-      await this.deploySkill("implement", implementSrc, worktreePath, force);
+      await this.deploySkill("ship-implement", implementSrc, worktreePath, force);
     } catch (err) {
       // Fatal: /implement is required for Ship operation
-      throw new Error(`Failed to deploy /implement skill: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Failed to deploy /ship-implement skill: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Deploy Admiral sub-skills and shared skills (non-fatal individually).
-    // Only Ship-essential skills are deployed at sortie time to minimize
-    // token consumption (~9,350 tokens saved per Ship).
-    // Escort-only skills are deployed on-demand before gate transitions
-    // via deployEscortSkills().
-    const admiralSkills = [
-      // Ship sub-skills
-      "implement-setup",
-      "implement-plan",
-      "implement-code",
-      "implement-review",
-      "implement-merge",
-      // Shared skills (Bridge/Ship common)
-      "admiral-protocol",
-      "read-issue",
-    ];
-    for (const skillName of admiralSkills) {
-      const src = join(admiralSkillsDir, skillName, "SKILL.md");
+    // Deploy remaining Ship sub-skills (non-fatal individually).
+    for (const skillName of map.skills) {
+      if (skillName === "implement") continue; // Already deployed above
+      const src = join(admiralUnitsDir, "ship", "skills", skillName, "SKILL.md");
       try {
-        await this.deploySkill(skillName, src, worktreePath, force);
+        await this.deploySkill(`ship-${skillName}`, src, worktreePath, force);
       } catch {
-        console.warn(`[ship-manager] Failed to deploy /${skillName} skill`);
+        console.warn(`[ship-manager] Failed to deploy /ship-${skillName} skill`);
+      }
+    }
+
+    // Deploy shared skills: units/shared/skills/<name>/
+    for (const skillName of map.sharedSkills) {
+      const src = join(admiralUnitsDir, "shared", "skills", skillName, "SKILL.md");
+      try {
+        await this.deploySkill(`shared-${skillName}`, src, worktreePath, force);
+      } catch {
+        console.warn(`[ship-manager] Failed to deploy /shared-${skillName} skill`);
       }
     }
 
@@ -978,27 +972,31 @@ export class ShipManager {
    * has access to gate-specific skills without bloating Ship's context.
    */
   private async deployEscortSkills(
-    repoRoot: string,
     worktreePath: string,
     skillSources?: FleetSkillSources,
   ): Promise<void> {
-    const admiralSkillsDir = skillSources?.admiralSkillsDir
-      ?? join(repoRoot, "skills");
+    const admiralUnitsDir = skillSources?.admiralUnitsDir;
+    if (!admiralUnitsDir) return;
 
-    const escortSkills = [
-      // Gate-specific skills (used by Escort for each review phase)
-      "planning-gate",
-      "implementing-gate",
-      "acceptance-test-gate",
-      // Unified gate reviewer skill
-      "escort",
-    ];
-    for (const skillName of escortSkills) {
-      const src = join(admiralSkillsDir, skillName, "SKILL.md");
+    const map = UNIT_DEPLOY_MAP.escort;
+
+    // Deploy Escort unit-specific skills
+    for (const skillName of map.skills) {
+      const src = join(admiralUnitsDir, "escort", "skills", skillName, "SKILL.md");
       try {
-        await this.deploySkill(skillName, src, worktreePath, true);
+        await this.deploySkill(`escort-${skillName}`, src, worktreePath, true);
       } catch {
-        console.warn(`[ship-manager] Failed to deploy Escort skill /${skillName}`);
+        console.warn(`[ship-manager] Failed to deploy Escort skill /escort-${skillName}`);
+      }
+    }
+
+    // Deploy Escort shared skills
+    for (const skillName of map.sharedSkills) {
+      const src = join(admiralUnitsDir, "shared", "skills", skillName, "SKILL.md");
+      try {
+        await this.deploySkill(`shared-${skillName}`, src, worktreePath, true);
+      } catch {
+        console.warn(`[ship-manager] Failed to deploy Escort shared skill /shared-${skillName}`);
       }
     }
   }
@@ -1017,70 +1015,60 @@ export class ShipManager {
       console.warn(`[ship-manager] redeploySkills: Ship ${shipId.slice(0, 8)}... not found`);
       return;
     }
-    const repoRoot = await worktree.getRepoRoot(ship.worktreePath);
-    await this.deploySkills(repoRoot, ship.worktreePath, skillSources, true);
-    await this.deployEscortSkills(repoRoot, ship.worktreePath, skillSources);
+    await this.deploySkills(ship.worktreePath, skillSources, true);
+    await this.deployEscortSkills(ship.worktreePath, skillSources);
     console.log(`[ship-manager] Re-deployed skills (Ship + Escort) to ${ship.worktreePath}`);
   }
 
   /**
-   * Persist customInstructions to `.claude/rules/custom-instructions.md` in the worktree.
-   * Claude Code always reloads `.claude/rules/*.md` on every turn, so this content
-   * survives context compaction — unlike `--append-system-prompt` which may be lost.
-   * If no customInstructions are provided, remove any stale file from a previous sortie.
+   * Deploy rules from units/ship/rules/ + units/shared/rules/ to worktree .claude/rules/.
+   * Also deploys Fleet custom instructions as custom-instructions.md.
+   * Replaces the old deployCustomInstructions() and deployClaudeDirAccessRule() methods —
+   * custom-instructions.md and claude-dir-access.md are now sourced from units/ rules.
    */
-  private async deployCustomInstructions(
+  private async deployRules(
     worktreePath: string,
+    skillSources?: FleetSkillSources,
     customInstructionsText?: string,
   ): Promise<void> {
     const rulesDir = join(worktreePath, ".claude", "rules");
-    const filePath = join(rulesDir, "custom-instructions.md");
+    await mkdir(rulesDir, { recursive: true });
 
-    if (!customInstructionsText) {
-      // Clean up stale file if it exists
-      await unlink(filePath).catch(() => {});
-      return;
+    const admiralUnitsDir = skillSources?.admiralUnitsDir;
+    if (admiralUnitsDir) {
+      // Deploy unit-specific rules: units/ship/rules/*.md
+      await this.copyRulesFromDir(join(admiralUnitsDir, "ship", "rules"), rulesDir);
+
+      // Deploy shared rules: units/shared/rules/*.md
+      await this.copyRulesFromDir(join(admiralUnitsDir, "shared", "rules"), rulesDir);
     }
 
-    await mkdir(rulesDir, { recursive: true });
-    await writeFile(filePath, customInstructionsText, "utf-8");
+    // Deploy Fleet custom instructions as custom-instructions.md
+    const ciPath = join(rulesDir, "custom-instructions.md");
+    if (customInstructionsText) {
+      await writeFile(ciPath, customInstructionsText, "utf-8");
+    } else {
+      // Clean up stale file if it exists
+      await unlink(ciPath).catch(() => {});
+    }
   }
 
-  /**
-   * Deploy a rule file documenting the `.claude/` directory write restriction workaround.
-   * Claude Code CLI blocks Write/Edit tools for `.claude/` (sensitive directory) even with
-   * `--dangerously-skip-permissions`. This rule instructs Ships to use Bash alternatives
-   * (`tee`, `cp`, `sed -i`) instead.
-   *
-   * The rule file is written by the Engine (Node.js fs), not by the Ship itself,
-   * so the sensitive directory restriction does not apply here.
-   */
-  private async deployClaudeDirAccessRule(worktreePath: string): Promise<void> {
-    const rulesDir = join(worktreePath, ".claude", "rules");
-    const filePath = join(rulesDir, "claude-dir-access.md");
-
-    const content = `# .claude/ Directory Write Restriction
-
-Claude Code CLI blocks Write/Edit tools and shell redirects (\`>\`, \`>>\`) for \`.claude/\` directory paths.
-This is a sensitive directory protection that applies even with \`--dangerously-skip-permissions\`.
-
-## Workaround
-
-Use Bash tool with \`tee\`, \`cp\`, \`sed -i\`, or \`mv\` to modify files in \`.claude/\`:
-
-- Write: \`echo 'content' | tee .claude/path/to/file\`
-- Copy: \`cp /tmp/draft.md .claude/path/to/file\`
-- Edit in-place: \`sed -i '' 's/old/new/g' .claude/path/to/file\`
-- Multi-line write: \`cat <<'HEREDOC' | tee .claude/path/to/file\`
-
-Read (via Read tool or \`cat\`) works normally for \`.claude/\` files.
-
-**IMPORTANT**: Never use Write or Edit tools, nor shell redirects (\`>\`, \`>>\`), for any path under \`.claude/\`.
-Always use Bash with \`tee\` or \`cp\` instead.
-`;
-
-    await mkdir(rulesDir, { recursive: true });
-    await writeFile(filePath, content, "utf-8");
+  /** Copy all .md files from a rules directory to the destination. */
+  private async copyRulesFromDir(srcDir: string, destDir: string): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(srcDir);
+    } catch {
+      return; // Directory doesn't exist — skip
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      try {
+        await copyFile(join(srcDir, entry), join(destDir, entry));
+      } catch {
+        console.warn(`[ship-manager] Failed to deploy rule ${entry}`);
+      }
+    }
   }
 
   /**

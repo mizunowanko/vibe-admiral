@@ -30,8 +30,8 @@ import type {
 
 // ── Fleet/Settings Persistence Constants ──
 
-/** Admiral repo's skills/ directory, resolved from Engine's own source location. */
-const ADMIRAL_SKILLS_DIR = join(import.meta.dirname, "..", "..", "skills");
+/** Admiral repo's units/ directory, resolved from Engine's own source location. */
+const ADMIRAL_UNITS_DIR = join(import.meta.dirname, "..", "..", "units");
 
 const FLEETS_DIR = getAdmiralHome();
 const FLEETS_FILE = join(FLEETS_DIR, "fleets.json");
@@ -481,7 +481,7 @@ async function handleCommanderSend(
         fleetPath,
         [],
         prompt,
-        ADMIRAL_SKILLS_DIR,
+        ADMIRAL_UNITS_DIR,
         customInstructionsText,
       );
 
