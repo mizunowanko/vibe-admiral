@@ -96,4 +96,4 @@ Engine の `process-manager.ts` は stderr を `RETRYABLE_ERROR_PATTERNS` でパ
 
 ## Skill File Location
 
-Claude CLI expects skills at `.claude/skills/<name>/SKILL.md` inside the project directory, not at the repository root `skills/` directory. The `ShipManager.deploySkills()` method copies skills to worktree during sortie.
+Claude CLI expects skills at `.claude/skills/<name>/SKILL.md` inside the project directory. The canonical source is `units/<unit>/skills/<name>/` in the repository root. `ShipManager.deploySkills()` copies skills from `units/` to the worktree's `.claude/skills/` during sortie.

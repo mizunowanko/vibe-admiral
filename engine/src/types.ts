@@ -60,7 +60,7 @@ export interface AdmiralSettings {
 }
 
 // === Custom Instructions ===
-/** Per-actor custom instructions injected via --append-system-prompt. */
+/** Per-actor custom instructions injected via --append-system-prompt (prompt content loaded from units/<unit>/prompt.md). */
 export interface CustomInstructions {
   /** Instructions shared across all actors (Dock, Flagship, Ship, Escort). */
   shared?: string;
