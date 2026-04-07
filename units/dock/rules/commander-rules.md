@@ -57,6 +57,27 @@ Commanders may only use Read/Glob/Grep for **non-source-code** files:
 
 Reading `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.md` source files directly is **prohibited** — use Dispatch.
 
+## Issue 操作前の状態確認ルール
+
+既存 Issue に対して操作（コメント追記、ラベル追加、`depends-on/*` 設定）を行う前に、**必ず `gh issue view <number> --json state` で状態を確認する**。
+
+### 確認手順
+
+```bash
+STATE=$(gh issue view <number> --json state --jq '.state')
+```
+
+### closed だった場合
+
+操作を中止し、ユーザーに以下のいずれかを提案する:
+
+1. **新規 Issue を作成する** — closed Issue の内容を引き継いで新しい Issue を立てる
+2. **reopen する** — `gh issue reopen <number>` で再オープンしてから操作を続行する
+
+**自動的に closed Issue へコメント・ラベル追加・依存設定してはならない。**
+
+> **背景**: CupClip #181 が既に Ship によって closed されていたのに、Dock がコメントを追記してしまった。closed Issue への操作は無意味で、ユーザーに混乱を与える。
+
 ## Ship 状況確認の /ship-inspect 必須ルール
 
 Ship の状況を確認・報告する際は、**必ず \`/ship-inspect\` スキルを使用する**。
