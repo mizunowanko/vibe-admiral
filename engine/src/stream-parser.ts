@@ -128,10 +128,12 @@ function parseStreamMessageInner(
 
     case "system": {
       const subtype = raw.subtype as string | undefined;
-      // Skip hooks, init, and task_notification — not useful for the user.
+      // Skip hooks, init, task_started, task_progress — not useful for the user.
+      // task_started/task_progress are internal CLI progress notifications that
+      // clutter Escort (and Ship) chat panels with empty bubbles (#891).
       // Agent results are surfaced via task_notification with chat logs.
       // If a task_notification contains a description, surface it as a compact card.
-      if (subtype === "init" || subtype?.startsWith("hook")) {
+      if (subtype === "init" || subtype?.startsWith("hook") || subtype === "task_started" || subtype === "task_progress") {
         return null;
       }
       if (subtype === "task_notification") {

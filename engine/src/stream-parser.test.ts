@@ -288,6 +288,22 @@ describe("parseStreamMessage", () => {
       expect(result).toBeNull();
     });
 
+    it("returns null for task_started subtype (#891)", () => {
+      const result = parseStreamMessage({
+        type: "system",
+        subtype: "task_started",
+      });
+      expect(result).toBeNull();
+    });
+
+    it("returns null for task_progress subtype (#891)", () => {
+      const result = parseStreamMessage({
+        type: "system",
+        subtype: "task_progress",
+      });
+      expect(result).toBeNull();
+    });
+
     it("returns compact-status for compacting status", () => {
       const result = parseStreamMessage({
         type: "system",
