@@ -40,21 +40,35 @@ export async function create(
 
   await git(["fetch", "origin", baseBranch], repoRoot);
 
-  // Clean up stale worktree from a previous failed sortie
-  if (await exists(worktreePath)) {
-    await git(["worktree", "remove", worktreePath, "--force"], repoRoot);
-  }
-  // Delete local branch if it already exists (required to avoid worktree conflicts)
-  await git(["branch", "-D", branchName], repoRoot).catch(() => {});
-  // NOTE: Remote branch is intentionally preserved to maintain existing PRs.
-  // See #324 — re-sortie should reuse remote branches instead of destroying them.
-
-  // Check if remote branch exists — if so, reuse it (preserves previous commits and PR)
+  // Check if remote branch exists (for both reuse and fresh creation)
   await git(["fetch", "origin", branchName], repoRoot).catch(() => {});
   const remoteBranchExists = await git(
     ["rev-parse", "--verify", `origin/${branchName}`],
     repoRoot,
   ).then(() => true).catch(() => false);
+
+  // If the worktree already exists on the correct branch, reuse it (#907).
+  // Force-removing destroys untracked files like .claude/ (gitignored),
+  // which contains logs, workflow state, and skills critical for Ship continuity.
+  if (await exists(worktreePath)) {
+    const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath).catch(() => null);
+    if (currentBranch === branchName) {
+      // Worktree is on the right branch — update in-place instead of recreating
+      if (remoteBranchExists) {
+        await git(["reset", "--hard", `origin/${branchName}`], worktreePath);
+      }
+      console.log(`[worktree] Reused existing worktree at ${worktreePath} (branch: ${branchName})`);
+      return;
+    }
+
+    // Wrong branch — force-remove and recreate
+    await git(["worktree", "remove", worktreePath, "--force"], repoRoot);
+  }
+
+  // Delete local branch if it already exists (required to avoid worktree conflicts)
+  await git(["branch", "-D", branchName], repoRoot).catch(() => {});
+  // NOTE: Remote branch is intentionally preserved to maintain existing PRs.
+  // See #324 — re-sortie should reuse remote branches instead of destroying them.
 
   if (remoteBranchExists) {
     // Create worktree from existing remote branch (preserves commits)

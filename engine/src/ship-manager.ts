@@ -174,17 +174,24 @@ export class ShipManager {
     // 5c. Deploy rules (units/<unit>/rules/ + shared/rules/) and custom instructions
     await this.deployRules(worktreePath, skillSources, customInstructionsText);
 
-    // 6. Remove stale .claude work files from previous sortie (or inherited from main)
-    const staleFiles = [
-      "workflow-state.json",
-      "ship-log.jsonl",
-      "escort-log.jsonl",
-      "gate-request.json",
-      "gate-response.json",
-    ];
-    await Promise.all(
-      staleFiles.map((f) => unlink(join(worktreePath, ".claude", f)).catch(() => {})),
-    );
+    // 6. Remove stale .claude work files — only on fresh sortie, not on re-sortie (#907).
+    // Re-sortie reuses the worktree (with committed code and .claude/ files intact).
+    // Deleting work files during re-sortie destroys logs and workflow state that the
+    // new Ship needs for continuity. collectReSortieContext() already captured the
+    // context, but preserving the actual files allows the new Ship's /implement skill
+    // to detect and resume from workflow-state.json directly.
+    if (!reSortieContext) {
+      const staleFiles = [
+        "workflow-state.json",
+        "ship-log.jsonl",
+        "escort-log.jsonl",
+        "gate-request.json",
+        "gate-response.json",
+      ];
+      await Promise.all(
+        staleFiles.map((f) => unlink(join(worktreePath, ".claude", f)).catch(() => {})),
+      );
+    }
 
     // 7. npm install if web project
     if (await worktree.isWebProject(worktreePath)) {
@@ -1272,7 +1279,16 @@ export class ShipManager {
           this.onResumeToGate?.(shipId, previousPhase as GatePhase);
         }
       } else {
-        // No session to resume — re-sortie
+        // No session to resume — re-launch process in the existing worktree (#907).
+        // Preserve the previous phase instead of hardcoding "plan" — the worktree
+        // may have committed code and workflow-state.json from a later phase.
+        const fallbackPhase = ship.phase === "paused"
+          ? (this.fleetDb?.getPhaseBeforeStopped(shipId) ?? "plan")
+          : ship.phase;
+        console.warn(
+          `[ship-manager] Ship #${ship.issueNumber} (${shipId.slice(0, 8)}...) has no sessionId — ` +
+          `re-launching process at phase ${fallbackPhase}`,
+        );
         this.processManager.sortie(
           shipId,
           ship.worktreePath,
@@ -1281,7 +1297,12 @@ export class ShipManager {
           skill,
           shipEnv,
         );
-        this.updatePhase(shipId, "plan", "Re-sortied");
+        this.updatePhase(shipId, fallbackPhase, `Re-launched (no session, restored to ${fallbackPhase})`);
+
+        // #853: If restoring to a gate phase, trigger Escort launch.
+        if (isGatePhase(fallbackPhase)) {
+          this.onResumeToGate?.(shipId, fallbackPhase as GatePhase);
+        }
       }
     };
 
