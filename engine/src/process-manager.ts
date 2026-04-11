@@ -176,7 +176,8 @@ export class ProcessManager extends EventEmitter {
 
     // Escort processes share the parent Ship's worktree — write to separate log file
     // so ship-manager can load them independently (#729).
-    const logFileName = skill === "/escort" ? "escort-log.jsonl" : "ship-log.jsonl";
+    const isEscort = skill?.startsWith("/escort-") ?? false;
+    const logFileName = isEscort ? "escort-log.jsonl" : "ship-log.jsonl";
     const logFilePath = join(worktreePath, ".claude", logFileName);
     this.setupProcess(id, proc, logFilePath);
     return proc;

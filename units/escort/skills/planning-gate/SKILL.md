@@ -14,12 +14,20 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
 
 ## 環境変数
 
-- `/escort` の Common Setup を参照。追加: `VIBE_ADMIRAL_QA_REQUIRED_PATHS`（qaRequired 強制パス、JSON 配列）
+- `VIBE_ADMIRAL_SHIP_ID` — この Escort の ID
+- `VIBE_ADMIRAL_PARENT_SHIP_ID` — レビュー対象の親 Ship ID
+- `VIBE_ADMIRAL_MAIN_REPO` — Fleet のメインリポジトリ（owner/repo）
+- `VIBE_ADMIRAL_ENGINE_PORT` — Engine API ポート（デフォルト: 9721）
+- `VIBE_ADMIRAL_QA_REQUIRED_PATHS` — qaRequired 強制パス（JSON 配列）
 
 ## Procedure
 
-1. `/escort` の Common Setup でセットアップ済み。追加変数:
+1. セットアップ:
    ```bash
+   PARENT_SHIP_ID="${VIBE_ADMIRAL_PARENT_SHIP_ID}"
+   REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+   ENGINE_PORT="${VIBE_ADMIRAL_ENGINE_PORT:-9721}"
    QA_REQUIRED_PATHS="${VIBE_ADMIRAL_QA_REQUIRED_PATHS:-}"
    ```
 
@@ -75,7 +83,46 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    - 実現可能で適切なスコープか
    - re-review の場合、前回のフィードバックが反映されているか
 
-8. **Gate intent → verdict → GitHub 記録**: `/escort` の Common Gate Protocol に従う。
+8. **Gate intent → verdict → GitHub 記録**:
+
+   Gate API は親 Ship（`PARENT_SHIP_ID`）に対して実行する。`SHIP_ID`（Escort 自身）ではない。
+
+   **8a. Gate intent（verdict 前のフォールバック）**:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "<approve or reject>"}'
+   ```
+
+   **8b. Gate verdict（GitHub コメントより先に実行）**:
+
+   承認:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "approve"}'
+   ```
+
+   拒否（構造化フィードバック付き — ADR-0018）:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "verdict": "reject",
+       "feedback": {
+         "summary": "<1-2文の要約>",
+         "items": [
+           {
+             "category": "<plan|code|test|style|security|performance>",
+             "severity": "<blocker|warning|suggestion>",
+             "message": "<具体的な指摘内容>"
+           }
+         ]
+       }
+     }'
+   ```
+
+   > `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
 
 9. **GitHub にレビュー結果を記録**（verdict 送信後に実行）:
    ```bash

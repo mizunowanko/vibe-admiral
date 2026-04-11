@@ -14,12 +14,19 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
 
 ## 環境変数
 
-- `/escort` の Common Setup を参照
+- `VIBE_ADMIRAL_SHIP_ID` — この Escort の ID
+- `VIBE_ADMIRAL_PARENT_SHIP_ID` — レビュー対象の親 Ship ID
+- `VIBE_ADMIRAL_MAIN_REPO` — Fleet のメインリポジトリ（owner/repo）
+- `VIBE_ADMIRAL_ENGINE_PORT` — Engine API ポート（デフォルト: 9721）
 
 ## Procedure
 
-1. `/escort` の Common Setup でセットアップ済み。追加:
+1. セットアップ:
    ```bash
+   PARENT_SHIP_ID="${VIBE_ADMIRAL_PARENT_SHIP_ID}"
+   REPO="${VIBE_ADMIRAL_MAIN_REPO:-$(git remote get-url origin | sed -E 's#.+github\.com[:/](.+)\.git#\1#' | sed -E 's#.+github\.com[:/](.+)$#\1#')}"
+   SHIP_ID="$VIBE_ADMIRAL_SHIP_ID"
+   ENGINE_PORT="${VIBE_ADMIRAL_ENGINE_PORT:-9721}"
    BRANCH_NAME=$(git branch --show-current)
    ```
 
@@ -55,7 +62,48 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
    - テストカバレッジ
    - re-review の場合、前回の指摘が修正されているか
 
-8. **Gate intent → verdict → GitHub 記録**: `/escort` の Common Gate Protocol に従う。code-review では `file` / `line` フィールドで指摘箇所を特定する。
+8. **Gate intent → verdict → GitHub 記録**:
+
+   Gate API は親 Ship（`PARENT_SHIP_ID`）に対して実行する。`SHIP_ID`（Escort 自身）ではない。
+
+   **8a. Gate intent（verdict 前のフォールバック）**:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "<approve or reject>"}'
+   ```
+
+   **8b. Gate verdict（GitHub コメントより先に実行）**:
+
+   承認:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "approve"}'
+   ```
+
+   拒否（構造化フィードバック付き — ADR-0018。code-review では `file` / `line` フィールドで指摘箇所を特定する）:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "verdict": "reject",
+       "feedback": {
+         "summary": "<1-2文の要約>",
+         "items": [
+           {
+             "category": "<plan|code|test|style|security|performance>",
+             "severity": "<blocker|warning|suggestion>",
+             "message": "<具体的な指摘内容>",
+             "file": "<対象ファイルパス>",
+             "line": "<対象行番号>"
+           }
+         ]
+       }
+     }'
+   ```
+
+   > `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
 
 9. **GitHub にレビュー結果を記録**（verdict 送信後に実行 — プロセスが死んでも verdict は保全済み）:
    - 承認: `gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>"`
