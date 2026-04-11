@@ -59,6 +59,8 @@ export class EscortManager {
   private shipCustomInstructions = new Map<string, string | undefined>();
   /** parentShipId → Escort's pre-verdict intent declaration (fallback if Escort dies before verdict). */
   private gateIntents = new Map<string, GateIntent>();
+  /** parentShipId → pending cleanup promise (stash restore + custom instructions restore). */
+  private cleanupPromises = new Map<string, Promise<void>>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
 
   constructor(processManager: ProcessManagerLike, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
@@ -117,6 +119,15 @@ export class EscortManager {
     shipCustomInstructionsText?: string,
     extraEnv?: Record<string, string>,
   ): Promise<string | null> {
+    // Wait for any pending cleanup from a previous Escort exit to complete.
+    // Without this, stashForEscort() can race with restoreFromEscortStash(),
+    // causing mkdir to fail when the stash directory is being removed (#904).
+    const pendingCleanup = this.cleanupPromises.get(parentShipId);
+    if (pendingCleanup) {
+      await pendingCleanup.catch(() => {});
+      this.cleanupPromises.delete(parentShipId);
+    }
+
     // Prevent duplicate Escorts for the same parent Ship
     const existingEscortId = this.escorts.get(parentShipId);
     if (existingEscortId && this.processManager.isRunning(existingEscortId)) {
@@ -142,18 +153,28 @@ export class EscortManager {
       const existingEscort = db?.getEscortByShipId(parentShipId);
 
       if (existingEscort?.sessionId) {
-        // Resume previous Escort session — preserves context from prior gate reviews
-        const escortId = await this.resumeEscort(existingEscort, parentShip, gatePhase ?? "plan-gate", extraPrompt, gatePrompt, extraEnv);
-        this.escorts.set(parentShipId, escortId);
+        // Try to resume previous Escort session — preserves context from prior gate reviews.
+        // If resume fails, fall back to a fresh sortie to break persistent failure loops (#904).
+        try {
+          const escortId = await this.resumeEscort(existingEscort, parentShip, gatePhase ?? "plan-gate", extraPrompt, gatePrompt, extraEnv);
+          this.escorts.set(parentShipId, escortId);
 
-        console.log(
-          `[escort-manager] Resumed Escort ${escortId.slice(0, 8)}... (session: ${existingEscort.sessionId.slice(0, 12)}...) for Ship ${parentShipId.slice(0, 8)}... at ${gatePhase ?? "unknown"} gate`,
-        );
+          console.log(
+            `[escort-manager] Resumed Escort ${escortId.slice(0, 8)}... (session: ${existingEscort.sessionId.slice(0, 12)}...) for Ship ${parentShipId.slice(0, 8)}... at ${gatePhase ?? "unknown"} gate`,
+          );
 
-        return escortId;
+          return escortId;
+        } catch (resumeErr) {
+          console.warn(
+            `[escort-manager] Resume failed for Escort ${existingEscort.id.slice(0, 8)}... (session: ${existingEscort.sessionId.slice(0, 12)}...) — falling back to fresh sortie. Error:`,
+            resumeErr,
+          );
+          // Clear the stale sessionId so subsequent launches don't keep failing
+          db?.updateEscortSessionId(existingEscort.id, null);
+        }
       }
 
-      // First gate or no sessionId — launch a fresh Escort
+      // First gate, no sessionId, or resume failed — launch a fresh Escort
       const escortId = await this.sortieEscort(parentShip, gatePhase, extraPrompt, gatePrompt, extraEnv);
       this.escorts.set(parentShipId, escortId);
 
@@ -357,8 +378,15 @@ export class EscortManager {
     const stashRulesDir = join(stashBase, "rules");
     const stashSkillsDir = join(stashBase, "skills");
 
-    await mkdir(stashRulesDir, { recursive: true });
-    await mkdir(stashSkillsDir, { recursive: true });
+    try {
+      await mkdir(stashRulesDir, { recursive: true });
+      await mkdir(stashSkillsDir, { recursive: true });
+    } catch (mkdirErr) {
+      // Race with restoreFromEscortStash's rm() can cause ENOENT — retry once (#904)
+      console.warn(`[escort-manager] stashForEscort mkdir failed, retrying:`, mkdirErr);
+      await mkdir(stashRulesDir, { recursive: true });
+      await mkdir(stashSkillsDir, { recursive: true });
+    }
 
     // Stash irrelevant rules
     const rulesDir = join(claudeDir, "rules");
@@ -524,20 +552,23 @@ export class EscortManager {
     const parentShipId = this.findShipIdByEscortId(escortShipId);
     if (!parentShipId) return;
 
-    // Restore stashed rules and skills before restoring Ship's customInstructions
+    // Restore stashed rules/skills and Ship's customInstructions.
+    // Track the cleanup as a promise so launchEscort() can await it
+    // before starting a new Escort — prevents stash/restore race (#904).
     {
       const ship = this.shipManager.getShip(parentShipId);
-      if (ship) {
-        this.restoreFromEscortStash(ship.worktreePath).catch((err) => {
-          console.warn(`[escort-manager] Failed to restore stashed files for ${parentShipId.slice(0, 8)}...:`, err);
+      const cleanupPromise = (async () => {
+        if (ship) {
+          await this.restoreFromEscortStash(ship.worktreePath).catch((err) => {
+            console.warn(`[escort-manager] Failed to restore stashed files for ${parentShipId.slice(0, 8)}...:`, err);
+          });
+        }
+        await this.restoreShipCustomInstructions(parentShipId).catch((err) => {
+          console.warn(`[escort-manager] Failed to restore Ship customInstructions for ${parentShipId.slice(0, 8)}...:`, err);
         });
-      }
+      })();
+      this.cleanupPromises.set(parentShipId, cleanupPromise);
     }
-
-    // Restore Ship's customInstructions (Escort overwrote .claude/rules/custom-instructions.md)
-    this.restoreShipCustomInstructions(parentShipId).catch((err) => {
-      console.warn(`[escort-manager] Failed to restore Ship customInstructions for ${parentShipId.slice(0, 8)}...:`, err);
-    });
 
     // Remove from active process tracking (but preserve DB record for session resume)
     this.escorts.delete(parentShipId);
