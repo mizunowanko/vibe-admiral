@@ -1,11 +1,11 @@
 ---
-name: quality-audit
+name: audit-quality
 description: コード品質監査とアーキテクチャ改善提案。バグ傾向分析→ソースコード精査→ADR+issue起票
 user-invocable: true
 argument-hint: []
 ---
 
-# /quality-audit — コード品質監査 & アーキテクチャ改善提案
+# /audit-quality — コード品質監査 & アーキテクチャ改善提案
 
 過去のバグ傾向を分析し、ソースコードを精査して、抜本的な設計改善を ADR + issue として起票する。
 
@@ -85,7 +85,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "quality-audit-<category>",
+    "name": "audit-quality-<category>",
     "type": "investigate",
     "cwd": "<repo-path>",
     "prompt": "You are a Dispatch agent performing a code quality audit.\n\nRepo: <repo-path>\n\n## Audit Target\n\nCategory: <カテゴリ名>\nRelated bugs: <#xxx, #yyy, #zzz（Step 1 で特定した issue 番号）>\n\n## Task\n\nInvestigate the source code related to these recurring bugs and identify structural problems.\n\n### Investigation Areas\n\n1. **責務の肥大化**: 1 ファイルが担っている責務を列挙し、Single Responsibility Principle に違反しているか判定\n2. **抽象化の欠如**: 同じパターン（エラーハンドリング、状態更新、API 呼び出し等）が複数箇所にコピペされていないか\n3. **状態管理の不整合リスク**: 同じ情報が複数箇所で管理されていないか（二重管理）。同期漏れのリスクがあるか\n4. **エラー伝播の経路**: 例外やエラーがどこで捕捉され、どこで上位に漏れるか。未処理の経路がないか\n\n### Related Files to Check\n\n<Step 1 の分析から推定される関連ファイルのリスト>\n\n### Output Format\n\n```\n## Audit Report: <カテゴリ名>\n\n### Files Analyzed\n| File | Lines | Responsibilities |\n|------|-------|------------------|\n\n### Structural Problems Found\n\n#### Problem 1: <問題名>\n- **Type**: 責務肥大化 | 抽象化欠如 | 状態不整合 | エラー伝播\n- **Location**: <file:line>\n- **Description**: <問題の説明>\n- **Impact**: <この問題が引き起こすバグのパターン>\n- **Suggested Fix**: <改善の方向性>\n- **Effort**: S | M | L\n- **Priority**: High | Medium | Low\n\n### Summary\n- Total problems found: N\n- High priority: N\n- Estimated effort for all fixes: <S/M/L>\n```\n\nDo NOT create issues, ADRs, or make any changes. Only investigate and report."
@@ -114,10 +114,10 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "quality-audit-adr-<number>",
+    "name": "audit-quality-adr-<number>",
     "type": "investigate",
     "cwd": "<repo-path>",
-    "prompt": "You are a Dispatch agent creating an ADR (Architecture Decision Record).\n\nRepo: <repo-path>\n\n## Task\n\nCreate an ADR file based on the following audit findings.\n\n### ADR Content\n\n- **Number**: <NNNN>\n- **Title**: <kebab-case-title>\n- **Status**: Proposed\n- **Issue**: Will be linked after issue creation\n- **Tags**: quality-audit, <category>\n\n### Context (Problem)\n<Step 2 の調査で特定された構造的問題の説明。バグの再発パターン、影響範囲、現状のコード構造の問題点>\n\n### Decision (Proposed Solution)\n<改善案の具体的な説明。代替案とその却下理由も含める>\n\n### Consequences\n<改善による正の影響と負の影響（移行コスト等）>\n\n## Steps\n\n1. Read the ADR template at adr/TEMPLATE.md\n2. Check existing ADRs in adr/ to determine the next number\n3. Create the ADR file at adr/<NNNN>-<title>.md following the template\n4. Report the created file path\n\nYou MUST create the ADR file. This is the one time you are authorized to write files."
+    "prompt": "You are a Dispatch agent creating an ADR (Architecture Decision Record).\n\nRepo: <repo-path>\n\n## Task\n\nCreate an ADR file based on the following audit findings.\n\n### ADR Content\n\n- **Number**: <NNNN>\n- **Title**: <kebab-case-title>\n- **Status**: Proposed\n- **Issue**: Will be linked after issue creation\n- **Tags**: audit-quality, <category>\n\n### Context (Problem)\n<Step 2 の調査で特定された構造的問題の説明。バグの再発パターン、影響範囲、現状のコード構造の問題点>\n\n### Decision (Proposed Solution)\n<改善案の具体的な説明。代替案とその却下理由も含める>\n\n### Consequences\n<改善による正の影響と負の影響（移行コスト等）>\n\n## Steps\n\n1. Read the ADR template at adr/TEMPLATE.md\n2. Check existing ADRs in adr/ to determine the next number\n3. Create the ADR file at adr/<NNNN>-<title>.md following the template\n4. Report the created file path\n\nYou MUST create the ADR file. This is the one time you are authorized to write files."
   }'
 ```
 
@@ -167,7 +167,7 @@ gh issue create \
 
 ## 関連
 
-- #914 — quality-audit スキルによる調査結果
+- #914 — audit-quality スキルによる調査結果
 - ADR-NNNN — <ADR タイトル>
 ISSUEEOF
 )"
@@ -207,7 +207,7 @@ gh issue create \
 
 ## 関連
 
-- #914 — quality-audit スキルによる調査結果
+- #914 — audit-quality スキルによる調査結果
 ISSUEEOF
 )"
 ```
