@@ -79,12 +79,24 @@ export async function handleFleetConfigPatch(
 
   // Apply updates
   if (body.customInstructions !== undefined) {
+    if (typeof body.customInstructions !== "object" || body.customInstructions === null || Array.isArray(body.customInstructions)) {
+      sendJson(res, 400, { ok: false, error: "customInstructions must be an object" });
+      return;
+    }
     fleet.customInstructions = body.customInstructions as CustomInstructions;
   }
   if (body.gatePrompts !== undefined) {
+    if (typeof body.gatePrompts !== "object" || body.gatePrompts === null || Array.isArray(body.gatePrompts)) {
+      sendJson(res, 400, { ok: false, error: "gatePrompts must be an object" });
+      return;
+    }
     fleet.gatePrompts = body.gatePrompts as Partial<Record<GateType, string>>;
   }
   if (body.gates !== undefined) {
+    if (typeof body.gates !== "object" || body.gates === null || Array.isArray(body.gates)) {
+      sendJson(res, 400, { ok: false, error: "gates must be an object" });
+      return;
+    }
     fleet.gates = body.gates as FleetGateSettings;
   }
   if (body.maxConcurrentSorties !== undefined) {
