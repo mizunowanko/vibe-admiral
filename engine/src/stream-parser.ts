@@ -67,7 +67,7 @@ export function parseStreamMessage(
   const type = raw.type as string | undefined;
   const parsed = parseStreamMessageInner(raw, type);
   if (parsed) {
-    parsed.timestamp = Date.now();
+    parsed.timestamp = typeof raw.timestamp === "number" ? raw.timestamp : Date.now();
   }
   return parsed;
 }
