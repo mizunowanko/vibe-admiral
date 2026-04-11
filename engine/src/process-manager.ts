@@ -507,8 +507,10 @@ export class ProcessManager extends EventEmitter {
           this.emit("data", id, msg);
 
           // Persist Ship log: skip system init/hook messages (noisy, may contain env info)
+          // Inject timestamp so loadShipLogs can sort Ship+Escort messages chronologically
           if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
-            appendFile(logFilePath, line + "\n").catch(() => {
+            const msgWithTs = { ...msg, timestamp: Date.now() };
+            appendFile(logFilePath, JSON.stringify(msgWithTs) + "\n").catch(() => {
               // Best-effort: don't crash on write failure
             });
           }
