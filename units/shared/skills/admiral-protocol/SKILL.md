@@ -114,6 +114,29 @@ curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/commander-notify
 
 **Use case**: Flagship discovers a Ship problem → sends heads-up to Dock → Dock creates/triages an Issue. This keeps Flagship focused on Ship management while Dock handles Issue management.
 
+### 7. fleet-config — Get Fleet Configuration
+
+```bash
+curl -s "http://localhost:9721/api/fleet-config?fleetId=${VIBE_ADMIRAL_FLEET_ID}" | jq .
+```
+
+- Returns current Fleet configuration (customInstructions, gates, gatePrompts, maxConcurrentSorties, etc.)
+- Use `/fleet-config` skill for detailed usage examples
+
+### 8. fleet-config — Update Fleet Configuration
+
+```bash
+curl -s -X PATCH http://localhost:9721/api/fleet-config \
+  -H 'Content-Type: application/json' \
+  -d '{"fleetId": "'"${VIBE_ADMIRAL_FLEET_ID}"'", "customInstructions": {"shared": "new instructions"}}'
+```
+
+- Partial update: only specified fields are changed
+- Updatable fields: `customInstructions`, `gatePrompts`, `gates`, `maxConcurrentSorties`, `acceptanceTestRequired`, `qaRequiredPaths`
+- Both Flagship and Dock can use this endpoint (no `callerRole` restriction)
+- Engine auto-notifies running Commanders after update
+- Use `/fleet-config` skill for detailed field examples
+
 ## callerRole — Role-Based Access Control
 
 All Ship write operations (sortie, ship-pause, ship-resume, ship-abandon, ship-reactivate, ship-delete, pr-review-result) require `callerRole` in the request body.

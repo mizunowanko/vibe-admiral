@@ -26,6 +26,7 @@ import { handleShipList, handleShipById, handleShipStatus, handleShipOperation }
 import { handleDispatchCreate, handleDispatchList } from "./dispatch-api.js";
 import { handleCommanderNotify, handleCommanderLogs } from "./commander-api.js";
 import { handleRestart, handleResumeAll } from "./system-api.js";
+import { handleFleetConfigGet, handleFleetConfigPatch } from "./fleet-config-api.js";
 
 // Re-export notifyPhaseWaiters from ship-internal-api for ship-lifecycle.ts
 export { notifyPhaseWaiters } from "./ship-internal-api.js";
@@ -179,9 +180,9 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
 
       // === All remaining routes require fleetId ===
 
-      // For POST routes, we need to peek at the body to extract fleetId
+      // For POST/PATCH routes, we need to peek at the body to extract fleetId
       let parsedBody: Record<string, unknown> | undefined;
-      if (req.method === "POST") {
+      if (req.method === "POST" || req.method === "PATCH") {
         const rawBody = await readBody(req);
         try {
           parsedBody = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
@@ -204,6 +205,16 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
           sendFleetIdRequired(res);
           return;
         }
+      }
+
+      // === Fleet Config API ===
+      if (route === "fleet-config" && req.method === "GET") {
+        await handleFleetConfigGet(deps, req, res, fleetId);
+        return;
+      }
+      if (route === "fleet-config" && req.method === "PATCH") {
+        await handleFleetConfigPatch(deps, req, res, fleetId, parsedBody!);
+        return;
       }
 
       // === Dispatch API ===
