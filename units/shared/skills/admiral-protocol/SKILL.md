@@ -121,8 +121,6 @@ curl -s "http://localhost:9721/api/fleet-config?fleetId=${VIBE_ADMIRAL_FLEET_ID}
 ```
 
 - Returns current Fleet configuration (customInstructions, gates, gatePrompts, maxConcurrentSorties, etc.)
-- Use `/fleet-config` skill for detailed usage examples
-
 ### 8. fleet-config — Update Fleet Configuration
 
 ```bash
@@ -135,7 +133,7 @@ curl -s -X PATCH http://localhost:9721/api/fleet-config \
 - Updatable fields: `customInstructions`, `gatePrompts`, `gates`, `maxConcurrentSorties`, `acceptanceTestRequired`, `qaRequiredPaths`
 - Both Flagship and Dock can use this endpoint (no `callerRole` restriction)
 - Engine auto-notifies running Commanders after update
-- Use `/fleet-config` skill for detailed field examples
+- See field details: `customInstructions` (per-Unit), `gatePrompts` (per-GateType), `gates`, `maxConcurrentSorties`, `acceptanceTestRequired`, `qaRequiredPaths`
 
 ## callerRole — Role-Based Access Control
 
