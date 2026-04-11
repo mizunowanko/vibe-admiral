@@ -26,6 +26,7 @@ playwright-report/
 # Claude work files (transient per-session; must not propagate via main)
 .claude/skills/*/
 !.claude/skills/token-audit/
+!.claude/skills/e2e-audit/
 .claude/ship-log.jsonl
 .claude/escort-log.jsonl
 .claude/workflow-state.json
