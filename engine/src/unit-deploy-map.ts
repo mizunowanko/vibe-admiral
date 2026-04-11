@@ -13,7 +13,7 @@ export const UNIT_DEPLOY_MAP: Record<UnitType, { skills: string[]; sharedSkills:
   },
   escort: {
     skills: ["planning-gate", "implementing-gate", "acceptance-test-gate"],
-    sharedSkills: ["read-issue"],
+    sharedSkills: ["read-issue", "escort-gate-protocol"],
   },
   flagship: {
     skills: ["sortie", "ship-inspect"],
