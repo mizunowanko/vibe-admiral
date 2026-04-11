@@ -73,46 +73,7 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
    > **注意**: Ship と Escort は同じ GitHub アカウントで動作するため、`gh pr review --approve` / `--request-changes` は「自分の PR を自分でレビューできない」制約で失敗する。PR コメント / Issue コメントを使用する。
    > `gh issue comment` / `gh pr comment` の出力がコメント URL になる。この URL を verdict API に渡す。
 
-   **8b. Gate intent（verdict 前のフォールバック）**:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "<approve or reject>"}'
-   ```
-
-   **8c. Gate verdict（commentUrl 必須）**:
-
-   承認:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d "{\"verdict\": \"approve\", \"commentUrl\": \"${COMMENT_URL}\"}"
-   ```
-
-   拒否（構造化フィードバック付き — ADR-0018。code-review では `file` / `line` フィールドで指摘箇所を特定する）:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d "{
-       \"verdict\": \"reject\",
-       \"commentUrl\": \"${COMMENT_URL}\",
-       \"feedback\": {
-         \"summary\": \"<1-2文の要約>\",
-         \"items\": [
-           {
-             \"category\": \"<plan|code|test|style|security|performance>\",
-             \"severity\": \"<blocker|warning|suggestion>\",
-             \"message\": \"<具体的な指摘内容>\",
-             \"file\": \"<対象ファイルパス>\",
-             \"line\": \"<対象行番号>\"
-           }
-         ]
-       }
-     }"
-   ```
-
-   > `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
-   > **IMPORTANT**: `commentUrl` は必須。未指定の場合は 400 エラーとなる。
+   **8b. Gate intent → 8c. Gate verdict**: `/escort-gate-protocol` の手順に従う。code-review では `file` / `line` フィールドで指摘箇所を特定する。
 
 ## Review Guidelines
 

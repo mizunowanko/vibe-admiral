@@ -140,44 +140,7 @@ COMMENT_URL=$(gh pr comment <PR_NUMBER> --repo "$REPO" --body "## Acceptance Tes
 > 1 つでも fail があれば `❌ FAIL` とする。
 > `gh pr comment` の出力がコメント URL になる。この URL を verdict API に渡す。
 
-**4b. Gate intent（verdict 前のフォールバック）**:
-```bash
-curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
-  -H 'Content-Type: application/json' \
-  -d '{"verdict": "<approve or reject>"}'
-```
-
-**4c. Gate verdict（commentUrl 必須）**:
-
-承認:
-```bash
-curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
-  -H 'Content-Type: application/json' \
-  -d "{\"verdict\": \"approve\", \"commentUrl\": \"${COMMENT_URL}\"}"
-```
-
-拒否（構造化フィードバック付き — ADR-0018）:
-```bash
-curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
-  -H 'Content-Type: application/json' \
-  -d "{
-    \"verdict\": \"reject\",
-    \"commentUrl\": \"${COMMENT_URL}\",
-    \"feedback\": {
-      \"summary\": \"<1-2文の要約>\",
-      \"items\": [
-        {
-          \"category\": \"<plan|code|test|style|security|performance>\",
-          \"severity\": \"<blocker|warning|suggestion>\",
-          \"message\": \"<具体的な指摘内容>\"
-        }
-      ]
-    }
-  }"
-```
-
-> `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
-> **IMPORTANT**: `commentUrl` は必須。未指定の場合は 400 エラーとなる。
+**4b. Gate intent → 4c. Gate verdict**: `/escort-gate-protocol` の手順に従う。
 
 ## Test Guidelines
 
