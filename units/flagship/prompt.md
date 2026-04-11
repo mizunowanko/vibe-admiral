@@ -21,59 +21,9 @@ Issue management (triage, clarity assessment, priority decisions) is handled by 
 | /hotfix | User says "hotfix" or "直接修正して", or Engine/Ship is broken |
 | /issue-manage | Create issues for Ship-discovered problems |
 
-## Engine REST API Quick Reference
+## Engine REST API
 
-**Always use `curl` via the Bash tool to call these endpoints. Never output `admiral-request` fenced code blocks or XML tags — they are not processed.**
-
-### sortie — Launch Ships
-```bash
-curl -s http://localhost:9721/api/sortie -H 'Content-Type: application/json' \
-  -d '{"callerRole": "flagship", "items": [{"repo": "owner/repo", "issueNumber": 42}]}'
-```
-- `items`: array of `{ repo, issueNumber, skill? }`
-
-### ship-status — Get Ship Status
-```bash
-curl -s "http://localhost:9721/api/ships?fleetId=${VIBE_ADMIRAL_FLEET_ID}" | jq '.ships[] | {id, issueNumber, issueTitle, phase, processDead}'
-```
-- Returns Ships for this Fleet with current phase, processDead status, gate info, etc.
-- `fleetId` is **required** — omitting it returns a 400 error.
-
-### ship-pause — Pause a Ship (temporary stop, eligible for Resume All)
-```bash
-curl -s http://localhost:9721/api/ship-pause -H 'Content-Type: application/json' \
-  -d '{"callerRole": "flagship", "shipId": "uuid"}'
-```
-
-### ship-resume — Resume a Paused/Dead Ship
-```bash
-curl -s http://localhost:9721/api/ship-resume -H 'Content-Type: application/json' \
-  -d '{"callerRole": "flagship", "shipId": "uuid"}'
-```
-
-### ship-abandon — Abandon a Paused Ship (not eligible for Resume All)
-```bash
-curl -s http://localhost:9721/api/ship-abandon -H 'Content-Type: application/json' \
-  -d '{"callerRole": "flagship", "shipId": "uuid"}'
-```
-
-### ship-reactivate — Reactivate an Abandoned Ship (back to paused)
-```bash
-curl -s http://localhost:9721/api/ship-reactivate -H 'Content-Type: application/json' \
-  -d '{"callerRole": "flagship", "shipId": "uuid"}'
-```
-
-### pr-review-result — Submit PR Review
-```bash
-curl -s http://localhost:9721/api/pr-review-result -H 'Content-Type: application/json' \
-  -d '{"callerRole": "flagship", "shipId": "uuid", "prNumber": 42, "verdict": "approve"}'
-```
-- `verdict`: `"approve"` or `"request-changes"`
-
-### Ship Status Confirmation
-Always query via `curl "http://localhost:9721/api/ships?fleetId=${VIBE_ADMIRAL_FLEET_ID}"` before reporting Ship state to the user. Never rely on conversation history for Ship status — it may be stale after context compaction.
-
-> **Debug only**: `sqlite3 "$VIBE_ADMIRAL_DB_PATH" "SELECT ..."` is available for troubleshooting but should not be used for normal operations.
+API の詳細は `/admiral-protocol` スキルを参照。常に `curl` を Bash ツール経由で呼び出すこと。`admiral-request` コードブロックや XML タグは処理されない。
 
 ## Rules
 
