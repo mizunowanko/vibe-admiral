@@ -5,9 +5,9 @@ user-invocable: true
 argument-hint: []
 ---
 
-# /token-audit — トークン消費分析 & 節約 Issue 起票
+# /token-audit — 総合トークン消費監査 & 節約 Issue 起票
 
-全 Unit（Ship, Escort, Commander, Dispatch）のトークン消費を Dispatch で調査し、削減可能な箇所を特定して issue を起票する。
+チャットログ分析・ソースコード分析・トークン集計データの 3 観点から総合的にトークン消費を監査し、削減可能な箇所を特定して issue を起票する。
 
 ## 前提
 
@@ -15,75 +15,68 @@ argument-hint: []
 - ソースコードの調査は全て Dispatch 経由（Commander はコードを直接読まない）
 - Issue 起票は Commander が `gh issue create` で行う（Dispatch は起票しない）
 
-## Step 1: Dispatch 起動（トークン消費調査）
+## Step 1: Dispatch 起動（3 種の調査を並行実行）
 
-4 種類の Dispatch を順次起動して調査する。各 Dispatch の結果を待ってから次に進む。
+3 つの Dispatch を起動して、それぞれの観点からトークン消費を調査する。
 
-### 1a. プロンプトサイズ計測
+### Dispatch 1: チャットログ分析（Y）
 
-各 Unit に読み込まれるファイルのトークン数を計測する。
+Ship のチャットログからトークン消費パターンと「使い方ミス」を検出する。
+
+まず Ship 一覧を取得する:
 
 ```bash
-curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+SHIPS_JSON=$(curl -sf "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/ships?fleetId=<fleet-id>")
+```
+
+ランダムに 2-3 隻を選び、各 Ship の `worktreePath` を取得してプロンプトに含める。
+
+```bash
+curl -s -X POST "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch?fleetId=<fleet-id>" \
   -H 'Content-Type: application/json' \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "token-audit-prompt-size",
+    "name": "token-audit-chatlog",
     "type": "investigate",
     "cwd": "<repo>",
-    "prompt": "You are a Dispatch agent measuring token consumption of each Unit in the Admiral system.\n\nRepo: <repo>\n\n## Task\n\nMeasure the token size of all files that each Unit type loads into its context.\n\n### Unit types and their loaded files\n\n1. **Ship**: CLAUDE.md, .claude/rules/*.md, .claude/skills/ship-*/*.md, .claude/skills/shared-*/*.md\n2. **Escort**: CLAUDE.md, .claude/rules/*.md, .claude/skills/escort-*/*.md, .claude/skills/shared-*/*.md\n3. **Commander (Flagship/Dock)**: CLAUDE.md, .claude/rules/*.md, units/flagship/ or units/dock/ skills\n4. **Dispatch**: CLAUDE.md, .claude/rules/*.md (minimal skills)\n\n### Steps\n\n1. For each Unit type, glob and read the relevant files from the canonical source at `units/` directory\n2. Count approximate tokens for each file (1 token ≈ 4 chars for English, ≈ 2 chars for Japanese)\n3. Sum totals per Unit type\n4. Identify the largest files and biggest contributors to context size\n\n### Output format\n\n```\n## Unit Token Summary\n\n| Unit | File | Tokens (approx) |\n|------|------|------------------|\n| Ship | units/ship/skills/implement/SKILL.md | NNNN |\n| ... | ... | ... |\n\n## Totals\n| Unit | Total Tokens |\n|------|-------------|\n| Ship | NNNN |\n| Escort | NNNN |\n| Commander | NNNN |\n| Dispatch | NNNN |\n\n## Top 10 Largest Files\n| File | Tokens | Loaded by |\n|------|--------|----------|\n```\n\nDo NOT create issues or make any changes. Only investigate and report."
+    "prompt": "You are a Dispatch agent analyzing Ship chat logs for token consumption patterns.\n\nRepo: <repo>\n\n## Task\n\nAnalyze the following Ship chat logs for token usage anomalies and misuse patterns.\n\n### Target Ships\n<list worktree paths of 2-3 selected ships>\n\n### Steps\n\n1. For each Ship, read the chat log:\n   `cat <worktree>/.claude/ship-log.jsonl`\n\n2. **Token usage anomaly detection**:\n   - Parse `result` messages for `usage` fields (input_tokens, output_tokens)\n   - Identify turns where token consumption spikes significantly (>2x average)\n   - Note which tool calls or content caused the spike\n\n3. **Misuse pattern detection** — check for these patterns:\n   a. **Unnecessary file reads**: Reading files unrelated to the issue being worked on\n   b. **Out-of-scope work**: Performing refactoring, documentation generation, or other tasks not specified in the issue\n   c. **Gate reject loops**: Repeating the same approach after a gate rejection without meaningful changes\n   d. **Excessive tool calls**: Overuse of Read/Glob/Grep (e.g., reading the same file multiple times, searching for things already found)\n   e. **Rule violations**: Not following VIBE_ADMIRAL skills/rules (e.g., skipping plan-gate, not posting plan to issue, not using Engine API for phase transitions)\n\n### Output format\n\n```\n## Chat Log Analysis Report\n\n### Ship: <ship-id> (Issue #<number>)\n\n#### Token Usage Timeline\n| Turn | Tool/Action | Input Tokens | Output Tokens | Notes |\n|------|-----------|-------------|--------------|-------|\n| N | <action> | NNNN | NNNN | <spike?> |\n\n#### Detected Misuse Patterns\n| Pattern | Severity | Description | Estimated Waste |\n|---------|----------|-------------|----------------|\n| <type> | high/medium/low | <details> | ~NNNN tokens |\n\n### Summary\n- Total ships analyzed: N\n- Total misuse patterns found: N\n- Estimated total waste: NNNN tokens\n- Most common misuse: <pattern>\n```\n\nDo NOT create issues or make any changes. Only investigate and report."
   }'
 ```
 
-### 1b. 重複コンテンツ検出
+### Dispatch 2: ソースコード分析（Z）
 
-スキル・ルール間で重複している内容を検出する。
+各 Unit のプロンプトサイズ、重複コンテンツ、キャッシュ効率、不要スキル deploy を分析する。
 
 ```bash
-curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+curl -s -X POST "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch?fleetId=<fleet-id>" \
   -H 'Content-Type: application/json' \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "token-audit-duplicates",
+    "name": "token-audit-source",
     "type": "investigate",
     "cwd": "<repo>",
-    "prompt": "You are a Dispatch agent detecting duplicate content across skills and rules.\n\nRepo: <repo>\n\n## Task\n\nFind content that is duplicated across multiple skill files and rules, wasting tokens.\n\n### Steps\n\n1. Read all files under `units/` directory (skills and rules for all Unit types)\n2. Read `.claude/rules/*.md`\n3. Read `CLAUDE.md`\n4. Identify sections, paragraphs, or code blocks that appear in multiple files (exact or near-duplicate)\n5. For each duplicate found, calculate the wasted tokens (duplicate count - 1) × size\n\n### Known areas to check (from past investigations #798, #799)\n\n- admiral-protocol API docs duplicated across skills\n- Gate verdict submission templates repeated in gate skills\n- Common rules/notes repeated in implement sub-skills\n- CLI subprocess rules that might overlap with CLAUDE.md\n\n### Output format\n\n```\n## Duplicate Content Report\n\n| Content | Files | Tokens per copy | Wasted Tokens |\n|---------|-------|-----------------|---------------|\n| API endpoint docs for X | skill-A, skill-B, skill-C | NNN | NNN×2 |\n\n## Total Wasted Tokens: NNNN\n\n## Consolidation Suggestions\n- [ ] Move X to shared location, saving NNNN tokens\n```\n\nDo NOT create issues or make any changes. Only investigate and report."
+    "prompt": "You are a Dispatch agent analyzing source code for token optimization opportunities.\n\nRepo: <repo>\n\n## Task\n\nPerform a comprehensive source code analysis of the prompt/skill/rule structure for token optimization.\n\n### A. Prompt Size Measurement\n\n1. For each Unit type, glob and read the relevant files from the `units/` directory:\n   - **Ship**: `units/ship/skills/*/SKILL.md`, CLAUDE.md, `.claude/rules/*.md`\n   - **Escort**: `units/escort/skills/*/SKILL.md`, CLAUDE.md, `.claude/rules/*.md`\n   - **Commander (Flagship)**: `units/flagship/skills/*/SKILL.md`, `units/flagship/rules/*.md`, CLAUDE.md, `.claude/rules/*.md`\n   - **Commander (Dock)**: `units/dock/skills/*/SKILL.md`, `units/dock/rules/*.md`, CLAUDE.md, `.claude/rules/*.md`\n   - **Shared skills/rules**: `units/shared/skills/*/SKILL.md`, `units/shared/rules/*.md`\n2. Count approximate tokens for each file (1 token ≈ 4 chars for English, ≈ 2 chars for Japanese)\n3. Sum totals per Unit type (including shared files loaded by each)\n\n### B. Duplicate Content Detection\n\n1. Read all files identified in step A\n2. Identify content that appears in multiple files (exact or near-duplicate paragraphs, code blocks, templates)\n3. For each duplicate: calculate wasted tokens = (copy count - 1) × size\n4. Check known duplication areas:\n   - Admiral-protocol API docs across skills\n   - Gate verdict templates in gate skills\n   - Common notes in implement sub-skills\n   - CLI subprocess rules overlapping with CLAUDE.md\n\n### C. Cache Efficiency Analysis\n\n1. Check file stability: `git log --oneline -10 -- <file>` for each skill/rule file\n2. Identify cache-busting patterns:\n   - Frequently changed files loaded early (breaks cache for everything after)\n   - Dynamic content in otherwise static files\n   - Inconsistent file loading order across Unit types\n\n### D. Unnecessary Skill Deploy Detection\n\n1. Read `engine/src/ship-manager.ts` and find the `deploySkills()` method\n2. Identify which skills are deployed to each Unit type\n3. Cross-reference with actual skill usage in chat logs or skill invocation patterns\n4. Flag skills that are deployed but never or rarely invoked\n\n### Output format\n\n```\n## Source Code Analysis Report\n\n### A. Unit Token Summary\n| Unit | File | Tokens (approx) |\n|------|------|------------------|\n| Ship | units/ship/skills/implement/SKILL.md | NNNN |\n\n| Unit | Total Tokens |\n|------|-------------|\n| Ship | NNNN |\n| Escort | NNNN |\n| Flagship | NNNN |\n| Dock | NNNN |\n\n### B. Duplicate Content\n| Content | Files | Tokens/copy | Wasted |\n|---------|-------|-------------|--------|\nTotal Wasted: NNNN tokens\n\n### C. Cache Efficiency\n| File | Changes (30d) | Cache Impact |\n|------|--------------|-------------|\nCache-busting risks: ...\n\n### D. Unnecessary Deploys\n| Skill | Deployed to | Usage | Recommendation |\n|-------|------------|-------|---------------|\n\n### Top Optimization Opportunities (sorted by impact)\n1. ...\n2. ...\n```\n\nDo NOT create issues or make any changes. Only investigate and report."
   }'
 ```
 
-### 1c. Escort セッション蓄積の影響計測
+### Dispatch 3: トークン集計データ分析（U）
 
-ADR-0020 の計測基盤を使って Escort のトークン消費パターンを分析する。
+ADR-0020 の Escort トークン計測基盤のデータと Ship ごとのトークン消費を分析する。
+
+まず Fleet の全 Ship 一覧を取得し、各 Ship の escort-usage を集める:
 
 ```bash
-curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
+curl -s -X POST "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch?fleetId=<fleet-id>" \
   -H 'Content-Type: application/json' \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "token-audit-escort",
+    "name": "token-audit-aggregation",
     "type": "investigate",
     "cwd": "<repo>",
-    "prompt": "You are a Dispatch agent analyzing Escort session token accumulation.\n\nRepo: <repo>\n\n## Task\n\nAnalyze Escort token consumption patterns using the ADR-0020 measurement infrastructure.\n\n### Steps\n\n1. Check the escorts table schema for token tracking columns (total_input_tokens, total_output_tokens, cost_usd)\n2. Query recent escort data to find token consumption per gate:\n   - Run: curl -s http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/fleet/<fleet-id>/ships to get recent ships\n   - For each ship with escort data, check escort usage via: curl -s http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/<ship-id>/escort-usage\n3. Analyze the pattern: do later gates (coding-gate, qa-gate) consume more tokens than earlier gates (plan-gate)?\n4. Calculate the token growth rate across gates\n5. Estimate potential savings if sessions were reset between gates\n\n### Output format\n\n```\n## Escort Token Accumulation Analysis\n\n### Per-Gate Average (from N ships)\n| Gate | Avg Input Tokens | Avg Output Tokens | Avg Cost |\n|------|-----------------|-------------------|----------|\n| plan-gate | NNNN | NNNN | $X.XX |\n| coding-gate | NNNN | NNNN | $X.XX |\n| qa-gate | NNNN | NNNN | $X.XX |\n\n### Accumulation Pattern\n- Growth rate: X% per gate\n- Estimated savings with per-gate reset: NNNN tokens\n\n### Recommendation\n- [keep-resume / hybrid / per-gate-reset]\n```\n\nIf the escort-usage API is not available or returns no data, report that and suggest manual measurement steps instead.\n\nDo NOT create issues or make any changes. Only investigate and report."
-  }'
-```
-
-### 1d. キャッシュ効率分析
-
-プロンプトキャッシュの効率を分析する。
-
-```bash
-curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "fleetId": "<fleet-id>",
-    "parentRole": "dock",
-    "name": "token-audit-cache",
-    "type": "investigate",
-    "cwd": "<repo>",
-    "prompt": "You are a Dispatch agent analyzing prompt cache efficiency.\n\nRepo: <repo>\n\n## Task\n\nAnalyze how well the current skill/rule structure enables Claude API prompt caching.\n\n### Background\n\nClaude API caches prompt prefixes. Files loaded in consistent order across sessions get cached. Files that change frequently or are loaded in varying order cause cache misses.\n\n### Steps\n\n1. Identify which files are loaded for each Unit type (from units/ directory)\n2. Analyze file stability:\n   - Run: git log --oneline -10 -- <file> for each skill/rule file\n   - Files changed frequently = poor cache candidates\n3. Check file loading order consistency:\n   - Are CLAUDE.md and rules loaded before skills? (good for caching)\n   - Are shared skills loaded in consistent order? (good for caching)\n4. Identify cache-busting patterns:\n   - Dynamic content in otherwise static files\n   - Frequently updated files loaded early in the prompt (breaks cache for everything after)\n\n### Output format\n\n```\n## Cache Efficiency Analysis\n\n### File Stability (last 30 days)\n| File | Changes | Cache Impact |\n|------|---------|-------------|\n| CLAUDE.md | N | High (loaded first, breaks all cache if changed) |\n\n### Cache-Busting Risks\n- [ ] Description of issue and estimated token cost\n\n### Optimization Suggestions\n- [ ] Suggestion with estimated improvement\n```\n\nDo NOT create issues or make any changes. Only investigate and report."
+    "prompt": "You are a Dispatch agent analyzing token consumption aggregation data.\n\nRepo: <repo>\nEngine port: <engine-port>\nFleet ID: <fleet-id>\n\n## Task\n\nAnalyze the Escort token tracking data (ADR-0020) and Ship-level token consumption.\n\n### A. Escort Token Data Collection\n\n1. Get all Ships in the fleet:\n   `curl -sf \"http://localhost:<engine-port>/api/ships?fleetId=<fleet-id>\"`\n2. For each Ship, get Escort usage:\n   `curl -sf \"http://localhost:<engine-port>/api/ship/<ship-id>/escort-usage\"`\n3. Collect: total_input_tokens, total_output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cost_usd\n\n### B. Gate-level Analysis\n\nFrom the collected data:\n1. Group by gate phase (plan-gate, coding-gate, qa-gate)\n2. Calculate averages and medians for each gate\n3. Identify if later gates consume more tokens (session accumulation effect)\n4. Estimate savings if sessions were reset between gates vs current resume approach\n\n### C. Ship-level Variance Analysis\n\n1. Compare total token consumption across Ships\n2. Identify outlier Ships (>1.5x median consumption)\n3. For outliers, check:\n   - Number of gate rejections (more rejections = more tokens)\n   - Issue complexity (larger PRs may justify higher consumption)\n   - Re-sortie count\n4. Correlate token consumption with issue labels (type/feature vs type/bug vs type/skill)\n\n### D. Cost Summary\n\n1. Calculate total cost across all Ships\n2. Average cost per Ship, per gate, per sortie\n3. Project monthly cost at current usage rate\n\n### Output format\n\n```\n## Token Aggregation Analysis Report\n\n### A. Escort Usage by Ship\n| Ship ID | Issue # | Input Tokens | Output Tokens | Cache Read | Cache Creation | Cost |\n|---------|---------|-------------|--------------|-----------|---------------|------|\n\n### B. Gate-level Averages\n| Gate | Avg Input | Avg Output | Avg Cache Read | Avg Cost |\n|------|----------|-----------|---------------|----------|\n| plan-gate | NNNN | NNNN | NNNN | $X.XX |\n| coding-gate | NNNN | NNNN | NNNN | $X.XX |\n| qa-gate | NNNN | NNNN | NNNN | $X.XX |\n\nAccumulation rate: X% increase per gate\nEstimated savings with per-gate reset: NNNN tokens ($X.XX)\n\n### C. Ship Variance\n| Metric | Value |\n|--------|-------|\n| Median tokens/Ship | NNNN |\n| Mean tokens/Ship | NNNN |\n| Std deviation | NNNN |\n| Outlier Ships | <list> |\n\nOutlier analysis: ...\n\n### D. Cost Summary\n| Metric | Value |\n|--------|-------|\n| Total cost | $X.XX |\n| Avg cost/Ship | $X.XX |\n| Projected monthly | $X.XX |\n```\n\nIf the escort-usage API returns no data or 404 for some Ships, report those Ships as having no tracking data and suggest enabling token tracking.\n\nDo NOT create issues or make any changes. Only investigate and report."
   }'
 ```
 
@@ -91,10 +84,29 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
 
 全 Dispatch の結果が揃ったら、以下の観点で分析する:
 
-1. **削減量の大きい順**にソート
-2. **実装容易性**を評価（スキルファイル編集のみ = 容易、Engine 変更 = 中、アーキ変更 = 難）
+Dispatch 完了を確認:
+
+```bash
+curl -sf "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatches?fleetId=<fleet-id>" | \
+  python3 -c "import sys,json; data=json.load(sys.stdin); [print(f'{d[\"name\"]}: {d[\"status\"]}') for d in data.get('dispatches',[]) if d['name'].startswith('token-audit-')]"
+```
+
+各 Dispatch の結果を取得:
+
+```bash
+curl -sf "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatches?fleetId=<fleet-id>" | \
+  python3 -c "import sys,json; data=json.load(sys.stdin); [print(f'=== {d[\"name\"]} ===\n{d.get(\"result\",\"(no result)\")}') for d in data.get('dispatches',[]) if d['name'].startswith('token-audit-') and d['status']=='completed']"
+```
+
+分析の手順:
+
+1. **削減量の大きい順** にソート
+2. **実装容易性** を評価:
+   - 容易: スキル・ルールファイルの編集のみ
+   - 中: Engine コード変更が必要
+   - 難: アーキテクチャ変更が必要
 3. **優先度 = 削減量 × 実装容易性** でランキング
-4. 過去の issue（#798, #799, #800, #811）の対応状況を確認し、既に対応済みの項目は除外
+4. 過去の関連 issue（#798, #799, #800, #811, #900）の対応状況を `gh issue view` で確認し、既に対応済みの項目は除外
 
 ## Step 3: Issue 起票
 
@@ -129,7 +141,7 @@ gh issue create \
 
 ## 関連
 
-- #900 — token-audit スキルによる調査結果
+- #912 — /token-audit 総合監査スキルによる調査結果
 ISSUEEOF
 )"
 ```
@@ -146,13 +158,25 @@ ISSUEEOF
 全ての issue を起票したら、ユーザーに以下のサマリを報告する:
 
 ```
-## トークン消費分析サマリ
+## トークン消費監査サマリ
 
 ### 調査結果
-- 全 Unit 合計コンテキストサイズ: <N tokens>
-- 重複コンテンツ: <N tokens>
-- Escort 蓄積影響: <説明>
+
+#### Dispatch 1: チャットログ分析
+- 分析した Ship 数: N
+- 検出した使い方ミスパターン: N 件
+- 推定無駄トークン: NNNN tokens
+
+#### Dispatch 2: ソースコード分析
+- 全 Unit 合計コンテキストサイズ: N tokens
+- 重複コンテンツ: N tokens
 - キャッシュ効率: <説明>
+- 不要スキル deploy: N 件
+
+#### Dispatch 3: トークン集計データ
+- Escort 蓄積影響: <説明>
+- Ship 間のばらつき: <説明>
+- 月間推定コスト: $X.XX
 
 ### 起票した Issue
 | # | タイトル | 期待削減量 | ラベル |
@@ -160,6 +184,6 @@ ISSUEEOF
 | #NNN | ... | N tokens | type/skill |
 
 ### 期待される総削減効果
-- 合計: **<N tokens>** per sortie
-- 6 Ship 並列時: **<N tokens>** per batch
+- 合計: **N tokens** per sortie
+- 6 Ship 並列時: **N tokens** per batch
 ```
