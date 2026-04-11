@@ -8,6 +8,7 @@ vi.mock("node:fs/promises", () => ({
   unlink: vi.fn().mockResolvedValue(undefined),
   rename: vi.fn().mockResolvedValue(undefined),
   readdir: vi.fn().mockResolvedValue([]),
+  readFile: vi.fn().mockResolvedValue(""),
   rm: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -93,7 +94,7 @@ describe("EscortManager", () => {
       expect(sortieCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
       expect(sortieCall[2]).toBe(42); // issueNumber
       expect(sortieCall[3]).toEqual(expect.stringContaining("plan-gate")); // prompt
-      expect(sortieCall[4]).toBe("/escort"); // skill
+      expect(sortieCall[4]).toBe("/escort-planning-gate"); // skill
       expect(sortieCall[5]).toEqual(
         expect.objectContaining({
           VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
@@ -159,7 +160,7 @@ describe("EscortManager", () => {
       expect(lastCall[1]).toBe("/repo/.worktrees/feature/42-test"); // worktreePath
       expect(lastCall[2]).toBe(42); // issueNumber
       expect(lastCall[3]).toEqual(expect.stringContaining("coding-gate")); // prompt
-      expect(lastCall[4]).toBe("/escort"); // skill
+      expect(lastCall[4]).toBe("/escort-implementing-gate"); // skill
       expect(lastCall[5]).toEqual(
         expect.objectContaining({
           VIBE_ADMIRAL_MAIN_REPO: "owner/repo",
