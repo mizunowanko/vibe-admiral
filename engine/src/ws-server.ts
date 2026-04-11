@@ -173,6 +173,7 @@ export class EngineServer {
       dockManager: this.dockManager,
       caffeinateManager: this.caffeinateManager,
       launchingCommanders: this.launchingCommanders,
+      getFleetDb: () => this.fleetDb,
       broadcast: (msg: ServerMessage) => this.broadcast(msg),
       sendTo: (ws: WebSocket, msg: ServerMessage) => this.sendTo(ws, msg),
     };
