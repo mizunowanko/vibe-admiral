@@ -372,6 +372,8 @@ describe("API Server", () => {
       });
     });
 
+    const VALID_COMMENT_URL = "https://github.com/test/repo/issues/1#issuecomment-123";
+
     describe("POST /api/ship/:id/phase-transition", () => {
       it("transitions phase successfully via XState", async () => {
         const depsWithDb = createMockDepsWithDb();
@@ -381,6 +383,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
             phase: "plan-gate",
+            commentUrl: VALID_COMMENT_URL,
             metadata: { planCommentUrl: "https://example.com" },
           });
           expect(res.status).toBe(200);
@@ -393,7 +396,7 @@ describe("API Server", () => {
           // Then DB persist
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "plan", "plan-gate", "ship",
-            { planCommentUrl: "https://example.com" },
+            { planCommentUrl: "https://example.com", commentUrl: VALID_COMMENT_URL },
             expect.anything(),
           );
           expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
@@ -435,6 +438,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/unknown/phase-transition", {
             phase: "plan-gate",
+            commentUrl: VALID_COMMENT_URL,
           });
           expect(res.status).toBe(404);
         } finally {
@@ -451,6 +455,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
             phase: "plan-gate",
+            commentUrl: VALID_COMMENT_URL,
             metadata: { planCommentUrl: "https://example.com", qaRequired: false },
           });
           expect(res.status).toBe(200);
@@ -471,6 +476,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
             phase: "coding-gate",
+            commentUrl: VALID_COMMENT_URL,
             metadata: {},
           });
           expect(res.status).toBe(200);
@@ -493,6 +499,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
             phase: "qa-gate",
+            commentUrl: VALID_COMMENT_URL,
             metadata: {},
           });
           expect(res.status).toBe(200);
@@ -513,6 +520,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
             phase: "done",
+            commentUrl: VALID_COMMENT_URL,
           });
           expect(res.status).toBe(409);
           expect(res.data.error).toContain("Transition rejected by XState");
@@ -531,6 +539,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
             verdict: "approve",
+            commentUrl: VALID_COMMENT_URL,
           });
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
@@ -540,7 +549,7 @@ describe("API Server", () => {
           );
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "plan-gate", "coding", "escort",
-            { gate_result: "approved" },
+            { gate_result: "approved", commentUrl: VALID_COMMENT_URL },
             expect.anything(),
           );
           expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
@@ -557,6 +566,7 @@ describe("API Server", () => {
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
             verdict: "reject",
+            commentUrl: VALID_COMMENT_URL,
             feedback: "Tests are missing",
           });
           expect(res.status).toBe(200);
@@ -566,7 +576,7 @@ describe("API Server", () => {
           );
           expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
             "ship-1", "coding-gate", "coding", "escort",
-            { gate_result: "rejected", feedback: { summary: "Tests are missing", items: [] } },
+            { gate_result: "rejected", feedback: { summary: "Tests are missing", items: [] }, commentUrl: VALID_COMMENT_URL },
             expect.anything(),
           );
         } finally {
