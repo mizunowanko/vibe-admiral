@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { wsClient } from "@/lib/ws-client";
 import { createHandlerMap, dispatchMessage } from "@/hooks/handlers";
 import type { HandlerContext } from "@/hooks/handlers";
@@ -34,6 +34,8 @@ export function useEngine() {
   const fetchAdmiralSettings = useAdmiralSettingsStore((s) => s.fetchSettings);
   const registerSession = useSessionStore((s) => s.registerSession);
   const setFocus = useSessionStore((s) => s.setFocus);
+  const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
+  const prevFleetIdRef = useRef<string | null>(null);
 
   // Build the handler context and map once per mount.
   const { handlers, ctx } = useMemo(() => {
@@ -134,12 +136,11 @@ export function useEngine() {
         return fetchShips(fleetId);
       }).then(() => {
         const ships = useShipStore.getState().ships;
-        const currentLogs = useShipStore.getState().shipLogs;
         for (const ship of ships.values()) {
           registerSession(
             createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
           );
-          if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
+          if (ship.phase !== "done") {
             wsClient.send({ type: "ship:logs", data: { id: ship.id } });
           }
         }
@@ -162,4 +163,27 @@ export function useEngine() {
     fetchShips,
     registerSession,
   ]);
+
+  // Re-fetch ship logs when the selected fleet changes.
+  // Without this, switching Fleet A → B → A would show stale/partial logs
+  // because ship:logs was never re-requested for Fleet A's ships.
+  useEffect(() => {
+    const prev = prevFleetIdRef.current;
+    prevFleetIdRef.current = selectedFleetId;
+    // Skip the initial mount (handled by onConnect above) and null selections
+    if (!selectedFleetId || prev === null) return;
+    if (selectedFleetId === prev) return;
+
+    void fetchShips(selectedFleetId).then(() => {
+      const ships = useShipStore.getState().ships;
+      for (const ship of ships.values()) {
+        if (ship.fleetId === selectedFleetId && ship.phase !== "done") {
+          registerSession(
+            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
+          );
+          wsClient.send({ type: "ship:logs", data: { id: ship.id } });
+        }
+      }
+    });
+  }, [selectedFleetId, fetchShips, registerSession]);
 }
