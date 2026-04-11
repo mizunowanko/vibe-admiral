@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile, unlink, rename, readdir, rm } from "node:fs/promises";
+import { mkdir, writeFile, unlink, rename, readdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadUnitPrompt } from "./prompt-loader.js";
 import type { ProcessManagerLike } from "./process-manager.js";
@@ -30,13 +30,23 @@ const ESCORT_STASH_DIR = ".escort-stash";
 /** Rules files that are irrelevant to Escort (Commander-only, Engine-implementer docs). */
 const STASH_RULES = ["commander-rules.md", "cli-subprocess.md"];
 
-/** Skills that Escort actually uses — everything else gets stashed. */
+/** Skills that Escort actually uses — everything else gets stashed.
+ *  Names must match the deployed directory names in `.claude/skills/`. */
 const ESCORT_SKILLS = new Set([
-  "escort",
-  "planning-gate",
-  "implementing-gate",
-  "acceptance-test-gate",
+  "escort-planning-gate",
+  "escort-implementing-gate",
+  "escort-acceptance-test-gate",
+  "shared-read-issue",
 ]);
+
+/** Map gate phase to the deployed Escort skill name.
+ *  The Engine now launches the gate-specific skill directly,
+ *  bypassing the deleted `/escort` orchestrator (#896). */
+const GATE_PHASE_SKILL: Record<GatePhase, string> = {
+  "plan-gate": "/escort-planning-gate",
+  "coding-gate": "/escort-implementing-gate",
+  "qa-gate": "/escort-acceptance-test-gate",
+};
 
 export class EscortManager {
   private processManager: ProcessManagerLike;
@@ -214,7 +224,8 @@ export class EscortManager {
     // Stash Ship-only rules and skills to reduce Escort's initial context
     await this.stashForEscort(parentShip.worktreePath);
 
-    // Launch via processManager.sortie() with /escort skill + gate phase context
+    // Launch with the gate-specific skill directly (e.g., /escort-planning-gate).
+    // The old `/escort` orchestrator was deleted in #885 and not migrated (#896).
     const escortEnv: Record<string, string> = {
       VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
       VIBE_ADMIRAL_SHIP_ID: escortId,
@@ -228,12 +239,14 @@ export class EscortManager {
       ? `\n\n${loadUnitPrompt("escort", { gatePhase })}`
       : "";
 
+    const skill = gatePhase ? GATE_PHASE_SKILL[gatePhase] : "/escort-planning-gate";
+
     this.processManager.sortie(
       escortId,
       parentShip.worktreePath,
       parentShip.issueNumber,
       [extraPrompt, gateContext].filter(Boolean).join("\n\n") || undefined,
-      "/escort",
+      skill,
       escortEnv,
     );
 
@@ -549,6 +562,30 @@ export class EscortManager {
     }
 
     // Escort died without submitting verdict while parent is in gate phase.
+    // Log diagnostic info from escort-log.jsonl to aid debugging (#896).
+    {
+      const ship = this.shipManager.getShip(parentShipId);
+      if (ship) {
+        const logPath = join(ship.worktreePath, ".claude", "escort-log.jsonl");
+        readFile(logPath, "utf-8").then((content) => {
+          const lines = content.trim().split("\n").slice(-10);
+          const lastMessages = lines
+            .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+            .filter(Boolean)
+            .filter((m: { type?: string }) => m.type === "assistant" || m.type === "result")
+            .map((m: { type?: string; message?: string; result?: string; costUsd?: number }) => {
+              if (m.type === "result") return `[result] costUsd=${m.costUsd}`;
+              return `[assistant] ${(m.message ?? "").slice(0, 200)}`;
+            });
+          if (lastMessages.length > 0) {
+            console.warn(
+              `[escort-manager] Escort ${escortShipId.slice(0, 8)}... last log entries:\n${lastMessages.join("\n")}`,
+            );
+          }
+        }).catch(() => { /* log file may not exist */ });
+      }
+    }
+
     // Check for a pre-declared gate intent — if the Escort declared "approve"
     // before dying, honour that intent instead of reverting (fallback mechanism).
     const intent = this.gateIntents.get(parentShipId);
