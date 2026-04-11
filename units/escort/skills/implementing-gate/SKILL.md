@@ -62,54 +62,57 @@ Engine が coding-gate フェーズを検知したとき、独立プロセス（
    - テストカバレッジ
    - re-review の場合、前回の指摘が修正されているか
 
-8. **Gate intent → verdict → GitHub 記録**:
+8. **GitHub コメント → Gate intent → verdict**:
 
    Gate API は親 Ship（`PARENT_SHIP_ID`）に対して実行する。`SHIP_ID`（Escort 自身）ではない。
 
-   **8a. Gate intent（verdict 前のフォールバック）**:
+   **8a. GitHub にレビュー結果を記録（verdict より先に実行）**:
+   - 承認: `COMMENT_URL=$(gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>")`
+   - 拒否: `COMMENT_URL=$(gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "<detailed feedback>")`
+
+   > **注意**: Ship と Escort は同じ GitHub アカウントで動作するため、`gh pr review --approve` / `--request-changes` は「自分の PR を自分でレビューできない」制約で失敗する。PR コメント / Issue コメントを使用する。
+   > `gh issue comment` / `gh pr comment` の出力がコメント URL になる。この URL を verdict API に渡す。
+
+   **8b. Gate intent（verdict 前のフォールバック）**:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "<approve or reject>"}'
    ```
 
-   **8b. Gate verdict（GitHub コメントより先に実行）**:
+   **8c. Gate verdict（commentUrl 必須）**:
 
    承認:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}'
+     -d "{\"verdict\": \"approve\", \"commentUrl\": \"${COMMENT_URL}\"}"
    ```
 
    拒否（構造化フィードバック付き — ADR-0018。code-review では `file` / `line` フィールドで指摘箇所を特定する）:
    ```bash
    curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
-     -d '{
-       "verdict": "reject",
-       "feedback": {
-         "summary": "<1-2文の要約>",
-         "items": [
+     -d "{
+       \"verdict\": \"reject\",
+       \"commentUrl\": \"${COMMENT_URL}\",
+       \"feedback\": {
+         \"summary\": \"<1-2文の要約>\",
+         \"items\": [
            {
-             "category": "<plan|code|test|style|security|performance>",
-             "severity": "<blocker|warning|suggestion>",
-             "message": "<具体的な指摘内容>",
-             "file": "<対象ファイルパス>",
-             "line": "<対象行番号>"
+             \"category\": \"<plan|code|test|style|security|performance>\",
+             \"severity\": \"<blocker|warning|suggestion>\",
+             \"message\": \"<具体的な指摘内容>\",
+             \"file\": \"<対象ファイルパス>\",
+             \"line\": \"<対象行番号>\"
            }
          ]
        }
-     }'
+     }"
    ```
 
    > `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
-
-9. **GitHub にレビュー結果を記録**（verdict 送信後に実行 — プロセスが死んでも verdict は保全済み）:
-   - 承認: `gh pr comment <PR_NUMBER> --repo "$REPO" --body "<review summary>"`
-   - 拒否: `gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "<detailed feedback>"`
-
-   > **注意**: Ship と Escort は同じ GitHub アカウントで動作するため、`gh pr review --approve` / `--request-changes` は「自分の PR を自分でレビューできない」制約で失敗する。PR コメント / Issue コメントを使用する。
+   > **IMPORTANT**: `commentUrl` は必須。未指定の場合は 400 エラーとなる。
 
 ## Review Guidelines
 

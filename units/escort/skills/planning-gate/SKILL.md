@@ -83,50 +83,13 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    - 実現可能で適切なスコープか
    - re-review の場合、前回のフィードバックが反映されているか
 
-8. **Gate intent → verdict → GitHub 記録**:
+8. **GitHub コメント → Gate intent → verdict**:
 
    Gate API は親 Ship（`PARENT_SHIP_ID`）に対して実行する。`SHIP_ID`（Escort 自身）ではない。
 
-   **8a. Gate intent（verdict 前のフォールバック）**:
+   **8a. GitHub にレビュー結果を記録（verdict より先に実行）**:
    ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "<approve or reject>"}'
-   ```
-
-   **8b. Gate verdict（GitHub コメントより先に実行）**:
-
-   承認:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d '{"verdict": "approve"}'
-   ```
-
-   拒否（構造化フィードバック付き — ADR-0018）:
-   ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "verdict": "reject",
-       "feedback": {
-         "summary": "<1-2文の要約>",
-         "items": [
-           {
-             "category": "<plan|code|test|style|security|performance>",
-             "severity": "<blocker|warning|suggestion>",
-             "message": "<具体的な指摘内容>"
-           }
-         ]
-       }
-     }'
-   ```
-
-   > `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
-
-9. **GitHub にレビュー結果を記録**（verdict 送信後に実行）:
-   ```bash
-   gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
+   COMMENT_URL=$(gh issue comment <ISSUE_NUMBER> --repo "$REPO" --body "## Plan Review
 
    <詳細なレビュー>
 
@@ -137,8 +100,49 @@ Engine が plan-gate フェーズを検知したとき、独立プロセス（`c
    - Plan's qaRequired: <true or false>
    - Check result: <PASS or FAIL (with reason)>
 
-   **Verdict: APPROVE** (or REJECT)"
+   **Verdict: APPROVE** (or REJECT)")
    ```
+
+   > `gh issue comment` の出力がコメント URL になる。この URL を verdict API に渡す。
+
+   **8b. Gate intent（verdict 前のフォールバック）**:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-intent \
+     -H 'Content-Type: application/json' \
+     -d '{"verdict": "<approve or reject>"}'
+   ```
+
+   **8c. Gate verdict（commentUrl 必須）**:
+
+   承認:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+     -H 'Content-Type: application/json' \
+     -d "{\"verdict\": \"approve\", \"commentUrl\": \"${COMMENT_URL}\"}"
+   ```
+
+   拒否（構造化フィードバック付き — ADR-0018）:
+   ```bash
+   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+     -H 'Content-Type: application/json' \
+     -d "{
+       \"verdict\": \"reject\",
+       \"commentUrl\": \"${COMMENT_URL}\",
+       \"feedback\": {
+         \"summary\": \"<1-2文の要約>\",
+         \"items\": [
+           {
+             \"category\": \"<plan|code|test|style|security|performance>\",
+             \"severity\": \"<blocker|warning|suggestion>\",
+             \"message\": \"<具体的な指摘内容>\"
+           }
+         ]
+       }
+     }"
+   ```
+
+   > `blocker` は修正必須、`warning` は推奨、`suggestion` は任意。
+   > **IMPORTANT**: `commentUrl` は必須。未指定の場合は 400 エラーとなる。
 
 ## Review Guidelines
 

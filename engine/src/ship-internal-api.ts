@@ -12,6 +12,20 @@ import type { Phase, GatePhase } from "./types.js";
 import { shouldSkipGate, resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
 
+// ── Comment URL validation ──
+
+const COMMENT_URL_PATTERN = /^https:\/\/github\.com\/.+\/issues\/\d+#issuecomment-\d+$/;
+
+function validateCommentUrl(url: unknown): { valid: true } | { valid: false; error: string } {
+  if (!url || typeof url !== "string" || url.trim() === "") {
+    return { valid: false, error: "commentUrl is required" };
+  }
+  if (!COMMENT_URL_PATTERN.test(url)) {
+    return { valid: false, error: "commentUrl must match GitHub issue comment URL pattern (https://github.com/.../issues/N#issuecomment-N)" };
+  }
+  return { valid: true };
+}
+
 // ── Escort launch for gate phases ──
 
 /**
@@ -330,6 +344,16 @@ export async function handleShipRoute(
     const metadata = (body.metadata as Record<string, unknown>) ?? {};
     const triggeredBy = (body.triggeredBy as string) ?? "ship";
 
+    // commentUrl is required for Ship-initiated transitions (not Engine-internal ones)
+    if (triggeredBy !== "engine") {
+      const commentUrlResult = validateCommentUrl(body.commentUrl);
+      if (!commentUrlResult.valid) {
+        sendJson(res, 400, { ok: false, error: commentUrlResult.error });
+        return;
+      }
+      metadata.commentUrl = body.commentUrl as string;
+    }
+
     if (targetPhase === "plan-gate" && typeof metadata.qaRequired === "boolean") {
       shipManager.setQaRequired(shipId, metadata.qaRequired);
     }
@@ -472,6 +496,13 @@ export async function handleShipRoute(
       return;
     }
 
+    // commentUrl is required for Escort-submitted verdicts
+    const commentUrlResult = validateCommentUrl(body.commentUrl);
+    if (!commentUrlResult.valid) {
+      sendJson(res, 400, { ok: false, error: commentUrlResult.error });
+      return;
+    }
+
     const rawFeedback = body.feedback as string | Record<string, unknown> | undefined;
     const structuredFeedback = normalizeGateFeedback(rawFeedback as Parameters<typeof normalizeGateFeedback>[0]);
 
@@ -493,8 +524,8 @@ export async function handleShipRoute(
     }
 
     const metadata: Record<string, unknown> = verdict === "approve"
-      ? { gate_result: "approved" }
-      : { gate_result: "rejected", feedback: structuredFeedback ?? "" };
+      ? { gate_result: "approved", commentUrl: body.commentUrl }
+      : { gate_result: "rejected", feedback: structuredFeedback ?? "", commentUrl: body.commentUrl };
 
     const verdictSnapshot = actorManager.getPersistedSnapshot(shipId);
     try {
