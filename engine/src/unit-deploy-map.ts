@@ -8,7 +8,7 @@ export type UnitType = "ship" | "escort" | "flagship" | "dock";
 
 export const UNIT_DEPLOY_MAP: Record<UnitType, { skills: string[]; sharedSkills: string[] }> = {
   ship: {
-    skills: ["implement", "implement-setup", "implement-plan", "implement-code", "implement-review", "implement-merge"],
+    skills: ["implement"],
     sharedSkills: ["admiral-protocol", "read-issue"],
   },
   escort: {
