@@ -656,6 +656,63 @@ describe("EscortManager", () => {
     });
   });
 
+  describe("cleanup/launch race prevention (#904)", () => {
+    it("awaits pending cleanup before launching a new Escort", async () => {
+      // Launch first Escort
+      const firstId = await escortManager.launchEscort("ship-001", "plan-gate");
+      expect(firstId).not.toBeNull();
+
+      // Escort exits while in gate phase → triggers cleanup
+      mockProcessManager.isRunning.mockReturnValue(false);
+      mockDb.getShipById.mockReturnValue({
+        ...makeShip(),
+        phase: "plan-gate",
+        issueTitle: "Test issue",
+      });
+      const mockActorManager = {
+        requestTransition: vi.fn().mockReturnValue({ success: true, fromPhase: "plan-gate", toPhase: "plan" }),
+        getPersistedSnapshot: vi.fn().mockReturnValue(null),
+        getContext: vi.fn().mockReturnValue({ escortFailCount: 0 }),
+        send: vi.fn(),
+      };
+      escortManager.setActorManager(mockActorManager as unknown as ConstructorParameters<typeof EscortManager>[0] extends infer T ? T extends { setActorManager: (a: infer A) => void } ? A : never : never);
+
+      escortManager.onEscortExit(firstId!, 1);
+
+      // Re-launch should succeed (cleanup awaited internally)
+      mockDb.getEscortByShipId.mockReturnValue(undefined);
+      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "plan" });
+      const secondId = await escortManager.launchEscort("ship-001", "plan-gate");
+      expect(secondId).not.toBeNull();
+    });
+
+    it("falls back to fresh sortie when resume fails", async () => {
+      // Simulate an existing Escort with sessionId
+      mockDb.getEscortByShipId.mockReturnValue({
+        id: "escort-001",
+        shipId: "ship-001",
+        sessionId: "bad-session",
+        processPid: null,
+        phase: "plan",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+      });
+
+      // Make resumeSession throw (simulating a corrupted session)
+      mockProcessManager.resumeSession.mockImplementation(() => {
+        throw new Error("Session not found");
+      });
+
+      const escortId = await escortManager.launchEscort("ship-001", "qa-gate");
+
+      // Should have fallen back to sortie (fresh launch)
+      expect(escortId).not.toBeNull();
+      expect(mockProcessManager.sortie).toHaveBeenCalled();
+      // Should have cleared the bad sessionId
+      expect(mockDb.updateEscortSessionId).toHaveBeenCalledWith("escort-001", null);
+    });
+  });
+
   describe("killAll", () => {
     it("kills all running Escorts", async () => {
       // Launch two Escorts for different Ships
