@@ -905,6 +905,11 @@ export class ShipManager {
       return false;
     }
 
+    if (!await this.fileExists(srcPath)) {
+      console.warn(`[ship-manager] Skill source not found: ${srcPath} — /${deployName} will not be available`);
+      throw new Error(`Skill source not found: ${srcPath}`);
+    }
+
     const destDir = join(worktreePath, ".claude", "skills", deployName);
     await mkdir(destDir, { recursive: true });
     await copyFile(srcPath, dest);
