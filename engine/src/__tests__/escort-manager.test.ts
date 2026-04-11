@@ -713,6 +713,39 @@ describe("EscortManager", () => {
     });
   });
 
+  describe("stashForEscort / restoreFromEscortStash — CLAUDE.md handling", () => {
+    it("stashes CLAUDE.md from worktree root during Escort launch", async () => {
+      const { rename } = await import("node:fs/promises");
+
+      await escortManager.launchEscort("ship-001", "plan-gate");
+
+      // CLAUDE.md should be renamed from worktree root to .escort-stash/
+      expect(rename).toHaveBeenCalledWith(
+        "/repo/.worktrees/feature/42-test/CLAUDE.md",
+        "/repo/.worktrees/feature/42-test/.claude/.escort-stash/CLAUDE.md",
+      );
+    });
+
+    it("restores CLAUDE.md to worktree root after Escort exits", async () => {
+      const { rename } = await import("node:fs/promises");
+
+      const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
+
+      // Escort exits normally (phase already moved past gate)
+      mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "coding" });
+      escortManager.onEscortExit(escortId!, 0);
+
+      // Wait for cleanup promise to resolve
+      await new Promise((r) => setTimeout(r, 10));
+
+      // CLAUDE.md should be renamed back from .escort-stash/ to worktree root
+      expect(rename).toHaveBeenCalledWith(
+        "/repo/.worktrees/feature/42-test/.claude/.escort-stash/CLAUDE.md",
+        "/repo/.worktrees/feature/42-test/CLAUDE.md",
+      );
+    });
+  });
+
   describe("killAll", () => {
     it("kills all running Escorts", async () => {
       // Launch two Escorts for different Ships
