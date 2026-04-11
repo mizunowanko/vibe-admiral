@@ -68,11 +68,19 @@ if [ "${VIBE_ADMIRAL}" = "true" ]; then echo "VIBE_ADMIRAL_ENABLED"; else echo "
 
 ### Phase 更新テンプレート
 
+phase 遷移前に issue コメントを投稿し、コメント URL を API に渡す:
+
 ```bash
+# 1. Issue にコメント投稿し URL を取得
+COMMENT_URL=$(gh issue comment <ISSUE_NUMBER> --repo "$VIBE_ADMIRAL_MAIN_REPO" --body "<進捗コメント>")
+
+# 2. commentUrl 付きで phase 遷移
 curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
   -H 'Content-Type: application/json' \
-  -d '{"phase": "<targetPhase>", "metadata": {}}'
+  -d "{\"phase\": \"<targetPhase>\", \"commentUrl\": \"${COMMENT_URL}\", \"metadata\": {}}"
 ```
+
+> **IMPORTANT**: `commentUrl` は必須。未指定の場合は 400 エラーとなる。`gh issue comment` の出力がコメント URL になる。
 
 ### Gate 待ち（HTTP Long-Poll）
 
