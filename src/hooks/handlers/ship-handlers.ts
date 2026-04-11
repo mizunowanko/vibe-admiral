@@ -4,13 +4,12 @@ import { createShipSession } from "@/stores/sessionStore";
 
 export const handleShipData: MessageHandler<"ship:data"> = (msg, ctx) => {
   const shipList = msg.data as Ship[];
-  const currentLogs = ctx.shipStore.getState().shipLogs;
   for (const ship of shipList) {
     ctx.shipStore.upsertShip(ship);
     ctx.sessionStore.registerSession(
       createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
     );
-    if (ship.phase !== "done" && !currentLogs.has(ship.id)) {
+    if (ship.phase !== "done") {
       ctx.wsClient.send({ type: "ship:logs", data: { id: ship.id } });
     }
   }
