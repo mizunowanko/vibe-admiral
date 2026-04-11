@@ -64,20 +64,18 @@ units/                Unit 別スキル・ルール配置（正規配置先）
     planning-gate/     planning-gate Escort スキル
     implementing-gate/ implementing-gate Escort スキル
     acceptance-test-gate/ acceptance-test-gate Escort スキル
-  flagship/            Flagship 用スキル・ルール
+  flagship/            Flagship 用スキル
     skills/sortie/     Sortie 計画・優先順位
     skills/ship-inspect/ Ship 状況確認
-    rules/             commander-rules.md
-  dock/                Dock 用スキル・ルール
+  dock/                Dock 用スキル
     skills/issue-manage/ Issue 作成・整理
     skills/investigate/  調査 Dispatch テンプレート
     skills/dock-ship-status/ Dock Ship ステータス
-    rules/             commander-rules.md
   dispatch/            Dispatch 用（将来拡張）
   shared/              共有スキル・ルール
     skills/admiral-protocol/ admiral-request プロトコル仕様
     skills/read-issue/ Issue 全コンテキスト取得
-    rules/             claude-dir-access.md
+    rules/             commander-rules.md, claude-dir-access.md
 docs/                 ドキュメント
   cli-subprocess.md   Claude Code CLI サブプロセスルール
 adr/                  Architecture Decision Records

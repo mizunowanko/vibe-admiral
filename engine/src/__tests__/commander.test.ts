@@ -431,14 +431,10 @@ describe("CommanderManager", () => {
         await writeFile(join(skillDir, "SKILL.md"), `# ${skill} skill`);
       }
 
-      // Create Flagship rules in units/flagship/rules/
-      const flagshipRulesDir = join(admiralUnitsDir, "flagship", "rules");
-      await mkdir(flagshipRulesDir, { recursive: true });
-      await writeFile(join(flagshipRulesDir, "commander-rules.md"), "# Commander Rules");
-
       // Create shared rules in units/shared/rules/
       const sharedRulesDir = join(admiralUnitsDir, "shared", "rules");
       await mkdir(sharedRulesDir, { recursive: true });
+      await writeFile(join(sharedRulesDir, "commander-rules.md"), "# Commander Rules");
       await writeFile(join(sharedRulesDir, "claude-dir-access.md"), "# Claude Dir Access");
     });
 
@@ -463,7 +459,7 @@ describe("CommanderManager", () => {
     it("deploys rules from units/ to Fleet repo", async () => {
       await manager.launch("fleet-1", fleetPath, [], "prompt", admiralUnitsDir);
 
-      // Flagship-specific rules
+      // Shared rules (commander-rules.md is now in units/shared/rules/)
       const rulesPath = join(fleetPath, ".claude", "rules", "commander-rules.md");
       const content = await readFile(rulesPath, "utf-8");
       expect(content).toBe("# Commander Rules");
