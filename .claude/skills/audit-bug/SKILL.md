@@ -1,11 +1,11 @@
 ---
-name: bug-audit
+name: audit-bug
 description: Ship チャットログ・ソースコード・E2E テストを並行分析し、未発見バグを検出して issue を起票する
 user-invocable: true
 argument-hint: []
 ---
 
-# /bug-audit — 未発見バグの検出 & Issue 起票
+# /audit-bug — 未発見バグの検出 & Issue 起票
 
 Ship チャットログ、ソースコード、E2E テスト実行を 3 つの Dispatch で**並行**分析し、未発見のバグを検出して issue を起票する。
 
@@ -29,7 +29,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "bug-audit-chatlog",
+    "name": "audit-bug-chatlog",
     "type": "investigate",
     "cwd": "<repo-path>",
     "prompt": "You are a Dispatch agent analyzing Ship chat logs for potential bugs.\n\nRepo: <repo-path>\n\n## Task\n\nAnalyze Ship and Escort chat logs to find evidence of bugs.\n\n### Steps\n\n1. Find all worktree directories:\n   ls -d ../.worktrees/feature/*/ 2>/dev/null || ls -d .worktrees/feature/*/ 2>/dev/null\n2. Randomly select 3-5 worktrees that have log files\n3. For each selected worktree, read:\n   - `.claude/ship-log.jsonl` — Ship activity log\n   - `.claude/escort-log.jsonl` — Escort gate review log\n4. Analyze for these bug indicators:\n   - **Error messages**: unhandled exceptions, stack traces, unexpected errors\n   - **Abnormal transitions**: phase transitions that skip steps or go backwards unexpectedly\n   - **Retry loops**: the same operation retried more than 3 times\n   - **Unhandled exceptions**: errors that were not caught or recovered from\n   - **Escort reject patterns**: repeated rejections for the same reason (indicates a systemic issue)\n   - **Process crashes**: processDead events, unexpected exits\n   - **Timeout patterns**: operations that consistently hit timeouts\n\n### Output format\n\n```\n## Chat Log Analysis Results\n\n### Analyzed Ships\n| Ship (worktree) | Issue # | Logs Found |\n|-----------------|---------|------------|\n\n### Potential Bugs Found\n\n#### Bug Y-1: <title>\n- **Source**: <worktree> / <log file>\n- **Evidence**: <relevant log excerpt (max 5 lines)>\n- **Category**: ERROR | ABNORMAL_TRANSITION | RETRY_LOOP | UNHANDLED_EXCEPTION | ESCORT_PATTERN | CRASH | TIMEOUT\n- **Severity**: critical | high | medium | low\n- **Description**: <what the bug appears to be>\n- **Suspected Root Cause**: <hypothesis based on log evidence>\n\n### Escort Reject Patterns\n| Reject Reason | Frequency | Affected Ships |\n|---------------|-----------|----------------|\n```\n\nDo NOT create issues or make changes. Only investigate and report."
@@ -46,7 +46,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "bug-audit-sourcecode",
+    "name": "audit-bug-sourcecode",
     "type": "investigate",
     "cwd": "<repo-path>",
     "prompt": "You are a Dispatch agent performing static analysis on the Engine source code to find potential bugs.\n\nRepo: <repo-path>\n\n## Task\n\nAnalyze the Engine source code for potential bugs in these categories:\n\n### 1. Error Handling Gaps\n- Find async functions without try-catch\n- Find Promise chains without .catch()\n- Find event handlers without error handling\n- Check: grep -rn \"async \" engine/src/ and verify each has proper error handling\n\n### 2. Type Safety Issues\n- Find `as any` type assertions: grep -rn \"as any\" engine/src/\n- Find `as unknown` followed by another assertion\n- Find non-null assertions `!.` in risky contexts\n- Find `@ts-ignore` or `@ts-expect-error` comments\n\n### 3. Race Conditions\n- Find shared mutable state accessed from async contexts\n- Find operations that depend on ordering of async events without locks/guards\n- Check process lifecycle management for cleanup/launch race conditions\n- Look for patterns like: read state → await → use state (state may have changed)\n\n### 4. Dead Code & Unreachable Paths\n- Find exported functions that are never imported elsewhere\n- Find switch/case branches that can never be reached\n- Find conditional branches with conditions that are always true/false\n\n### Output format\n\n```\n## Source Code Analysis Results\n\n### Error Handling Gaps\n\n#### Bug Z-1: <title>\n- **File**: <path>:<line>\n- **Code**: <relevant code snippet (max 5 lines)>\n- **Issue**: <description of the gap>\n- **Severity**: critical | high | medium | low\n- **Suggested Fix**: <brief fix description>\n\n### Type Safety Issues\n(same format)\n\n### Race Conditions\n(same format)\n\n### Dead Code\n(same format)\n\n## Summary\n| Category | Count | Critical | High | Medium | Low |\n|----------|-------|----------|------|--------|-----|\n```\n\nDo NOT create issues or make changes. Only investigate and report."
@@ -63,7 +63,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -d '{
     "fleetId": "<fleet-id>",
     "parentRole": "dock",
-    "name": "bug-audit-e2e",
+    "name": "audit-bug-e2e",
     "type": "investigate",
     "cwd": "<repo-path>",
     "prompt": "You are a Dispatch agent running E2E tests to discover bugs.\n\nRepo: <repo-path>\n\n## Task\n\nRun E2E tests and analyze failures to identify application bugs.\n\n### Steps\n\n1. Check for playwright config:\n   ls playwright*.config.* 2>/dev/null\n2. Run all E2E tests:\n   npx playwright test --config playwright.e2e.config.ts 2>&1\n3. If tests fail, run each failed test individually for detailed output:\n   npx playwright test --config playwright.e2e.config.ts <test-file> 2>&1\n4. Categorize each failure:\n   - **BUG**: Application code is broken (the test correctly catches a real bug)\n   - **TEST_ISSUE**: Test itself is broken (selector changed, timing issue, bad assertion)\n   - **FLAKY**: Intermittent failure (timing-dependent, environment-dependent)\n5. For BUG category failures, trace the root cause in the application code\n6. Identify untested critical paths (coverage gaps) that could hide bugs:\n   - List all E2E test files and what they cover\n   - Cross-reference with key user flows (Fleet CRUD, Ship sortie/stop/resume, Commander chat, Dispatch)\n\n### Output format\n\n```\n## E2E Test Results\n\n### Execution Summary\n- **Total**: N tests\n- **Passed**: N\n- **Failed**: N\n- **Skipped**: N\n\n### Failures\n\n#### Bug W-1: <title>\n- **Test**: `e2e/<file>.spec.ts` — \"<test name>\"\n- **Category**: BUG | TEST_ISSUE | FLAKY\n- **Error**: <error message>\n- **Stack**: <first 5 lines of stack trace>\n- **Root Cause**: <analysis of why this fails>\n- **Severity**: critical | high | medium | low\n\n### Coverage Gaps\n| Untested Area | Risk Level | Description |\n|---------------|-----------|-------------|\n\n## Summary\n| Category | Count |\n|----------|-------|\n| BUG | N |\n| TEST_ISSUE | N |\n| FLAKY | N |\n| Coverage Gaps | N |\n```\n\nDo NOT create issues or make changes. Only run tests and report."
@@ -80,7 +80,7 @@ curl -s "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatches?fleetId=<flee
 import sys, json
 data = json.load(sys.stdin)
 dispatches = data.get('dispatches', [])
-names = ['bug-audit-chatlog', 'bug-audit-sourcecode', 'bug-audit-e2e']
+names = ['audit-bug-chatlog', 'audit-bug-sourcecode', 'audit-bug-e2e']
 for name in names:
     matches = [d for d in dispatches if d['name'] == name]
     if matches:
@@ -111,7 +111,7 @@ curl -s "http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatches?fleetId=<flee
 import sys, json
 data = json.load(sys.stdin)
 dispatches = data.get('dispatches', [])
-for name in ['bug-audit-chatlog', 'bug-audit-sourcecode', 'bug-audit-e2e']:
+for name in ['audit-bug-chatlog', 'audit-bug-sourcecode', 'audit-bug-e2e']:
     matches = [d for d in dispatches if d['name'] == name and d['status'] == 'completed']
     if matches:
         print(f'=== {name} ===')
@@ -185,7 +185,7 @@ gh issue create \
 
 ## 関連
 
-- #913 — bug-audit スキルによる検出
+- #913 — audit-bug スキルによる検出
 ISSUEEOF
 )"
 ```
