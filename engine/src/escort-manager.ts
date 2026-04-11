@@ -396,6 +396,11 @@ export class EscortManager {
       await rename(src, dest).catch(() => {});
     }
 
+    // Stash CLAUDE.md from worktree root (not under .claude/)
+    const claudeMdSrc = join(worktreePath, "CLAUDE.md");
+    const claudeMdDest = join(stashBase, "CLAUDE.md");
+    await rename(claudeMdSrc, claudeMdDest).catch(() => {});
+
     // Stash Ship-only skills (everything not in ESCORT_SKILLS)
     const skillsDir = join(claudeDir, "skills");
     let entries: string[];
@@ -411,7 +416,7 @@ export class EscortManager {
       await rename(src, dest).catch(() => {});
     }
 
-    console.log(`[escort-manager] Stashed Ship rules/skills to ${ESCORT_STASH_DIR}`);
+    console.log(`[escort-manager] Stashed CLAUDE.md + Ship rules/skills to ${ESCORT_STASH_DIR}`);
   }
 
   /**
@@ -446,10 +451,15 @@ export class EscortManager {
       // No stashed skills
     }
 
+    // Restore CLAUDE.md to worktree root
+    const claudeMdStash = join(stashBase, "CLAUDE.md");
+    const claudeMdDest = join(worktreePath, "CLAUDE.md");
+    await rename(claudeMdStash, claudeMdDest).catch(() => {});
+
     // Remove stash directory
     await rm(stashBase, { recursive: true, force: true }).catch(() => {});
 
-    console.log(`[escort-manager] Restored Ship rules/skills from ${ESCORT_STASH_DIR}`);
+    console.log(`[escort-manager] Restored CLAUDE.md + Ship rules/skills from ${ESCORT_STASH_DIR}`);
   }
 
   /** Check if an Escort process is currently running for a parent Ship. */
