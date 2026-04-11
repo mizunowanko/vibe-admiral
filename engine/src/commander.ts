@@ -200,6 +200,7 @@ export class CommanderManager {
 
     // If process died, re-launch it
     if (!this.processManager.isRunning(processId)) {
+      const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
       if (session.sessionId) {
         this.processManager.resumeCommander(
           processId,
@@ -207,6 +208,7 @@ export class CommanderManager {
           session.fleetPath,
           session.additionalDirs,
           session.systemPrompt,
+          commanderEnv,
         );
       } else {
         this.processManager.launchCommander(
@@ -214,6 +216,7 @@ export class CommanderManager {
           session.fleetPath,
           session.additionalDirs,
           session.systemPrompt,
+          commanderEnv,
         );
       }
     }

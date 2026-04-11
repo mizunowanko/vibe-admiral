@@ -157,16 +157,23 @@ describe("CommanderManager", () => {
       expect(history.some((m) => m.content === "Hello Flagship")).toBe(true);
     });
 
-    it("re-launches process if it died", () => {
+    it("re-launches process with VIBE_ADMIRAL_FLEET_ID if it died", () => {
       mockPm.isRunning.mockReturnValue(false);
 
       manager.send("fleet-1", "Resume please");
 
-      // Should re-launch commander
+      // Should re-launch commander with env vars
       expect(mockPm.launchCommander).toHaveBeenCalledTimes(2); // once in launch(), once in send()
+      expect(mockPm.launchCommander).toHaveBeenLastCalledWith(
+        "flagship-fleet-1",
+        "/fleet/path",
+        [],
+        undefined,
+        { VIBE_ADMIRAL_FLEET_ID: "fleet-1" },
+      );
     });
 
-    it("resumes session if process died and sessionId is set", async () => {
+    it("resumes session with VIBE_ADMIRAL_FLEET_ID if process died and sessionId is set", async () => {
       manager.setSessionId("fleet-1", "sess-123");
       mockPm.isRunning.mockReturnValue(false);
 
@@ -178,6 +185,7 @@ describe("CommanderManager", () => {
         "/fleet/path",
         [],
         undefined,
+        { VIBE_ADMIRAL_FLEET_ID: "fleet-1" },
       );
     });
 
@@ -340,6 +348,7 @@ describe("CommanderManager", () => {
         expect.any(String),
         expect.any(Array),
         undefined,
+        { VIBE_ADMIRAL_FLEET_ID: "fleet-1" },
       );
     });
 

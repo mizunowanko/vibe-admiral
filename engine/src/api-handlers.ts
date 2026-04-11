@@ -22,6 +22,7 @@ import { buildFlagshipSystemPrompt } from "./flagship-system-prompt.js";
 import { buildDockSystemPrompt } from "./dock-system-prompt.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import { applyTemplate, mergeSettings } from "./deep-merge.js";
+import type { FleetDatabase } from "./db.js";
 import type {
   Fleet, FleetRepo, FleetSkillSources, FleetGateSettings, GateType,
   CustomInstructions, ClientMessage, StreamMessage, CommanderRole,
@@ -204,6 +205,7 @@ export interface MessageHandlerDeps {
   dockManager: DockManager;
   caffeinateManager: CaffeinateManager;
   launchingCommanders: Set<string>;
+  getFleetDb: () => FleetDatabase | null;
   broadcast: (msg: ServerMessage) => void;
   sendTo: (ws: WebSocket, msg: ServerMessage) => void;
 }
@@ -229,6 +231,17 @@ export async function handleMessage(
           data.name as string,
           data.repos as FleetRepo[],
         );
+        // Register repos in DB with fleet_id so Commander can use them immediately
+        const db = deps.getFleetDb();
+        if (db) {
+          for (const repo of newFleet.repos) {
+            if (!repo.remote) continue;
+            const [owner, name] = repo.remote.split("/");
+            if (owner && name) {
+              db.ensureRepo(owner, name, newFleet.id);
+            }
+          }
+        }
         const fleets = await loadFleets();
         sendTo(ws, {
           type: "fleet:created",
