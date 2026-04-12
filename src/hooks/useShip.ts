@@ -13,7 +13,11 @@ export function useShip(shipId: string | null) {
     shipId ? s.shipLogs.get(shipId) ?? EMPTY_LOGS : EMPTY_LOGS,
   );
 
-  return { ship, logs };
+  const escortLogs = useShipStore((s) =>
+    shipId ? s.escortLogs.get(shipId) ?? EMPTY_LOGS : EMPTY_LOGS,
+  );
+
+  return { ship, logs, escortLogs };
 }
 
 export function useShipsByFleet(fleetId: string | null): Ship[] {

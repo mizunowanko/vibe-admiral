@@ -3,6 +3,7 @@ import type { Ship, Phase, StreamMessage, GateCheckState } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 import * as api from "@/lib/api-client";
 import { useFleetStore } from "@/stores/fleetStore";
+import { useSessionStore, createShipSession } from "@/stores/sessionStore";
 
 interface ShipPhaseData {
   fleetId?: string;
@@ -14,7 +15,8 @@ interface ShipPhaseData {
 // --- Log batching ---
 // Buffer incoming logs and flush once per animation frame to avoid
 // creating a new Map reference on every single CLI output line.
-const pendingLogs = new Map<string, StreamMessage[]>();
+const pendingShipLogs = new Map<string, StreamMessage[]>();
+const pendingEscortLogs = new Map<string, StreamMessage[]>();
 let flushScheduled = false;
 
 function scheduleBatchFlush() {
@@ -22,16 +24,30 @@ function scheduleBatchFlush() {
   flushScheduled = true;
   requestAnimationFrame(() => {
     flushScheduled = false;
-    const batch = new Map(pendingLogs);
-    pendingLogs.clear();
-    if (batch.size === 0) return;
+    const shipBatch = new Map(pendingShipLogs);
+    const escortBatch = new Map(pendingEscortLogs);
+    pendingShipLogs.clear();
+    pendingEscortLogs.clear();
+    if (shipBatch.size === 0 && escortBatch.size === 0) return;
     useShipStore.setState((state) => {
-      const shipLogs = new Map(state.shipLogs);
-      for (const [id, msgs] of batch) {
-        const existing = shipLogs.get(id) ?? [];
-        shipLogs.set(id, [...existing, ...msgs]);
+      const updates: Partial<ShipState> = {};
+      if (shipBatch.size > 0) {
+        const shipLogs = new Map(state.shipLogs);
+        for (const [id, msgs] of shipBatch) {
+          const existing = shipLogs.get(id) ?? [];
+          shipLogs.set(id, [...existing, ...msgs]);
+        }
+        updates.shipLogs = shipLogs;
       }
-      return { shipLogs };
+      if (escortBatch.size > 0) {
+        const escortLogs = new Map(state.escortLogs);
+        for (const [id, msgs] of escortBatch) {
+          const existing = escortLogs.get(id) ?? [];
+          escortLogs.set(id, [...existing, ...msgs]);
+        }
+        updates.escortLogs = escortLogs;
+      }
+      return updates;
     });
   });
 }
@@ -39,17 +55,20 @@ function scheduleBatchFlush() {
 interface ShipState {
   ships: Map<string, Ship>;
   shipLogs: Map<string, StreamMessage[]>;
+  escortLogs: Map<string, StreamMessage[]>;
 
   addShip: (ship: Partial<Ship> & { id: string; phase: Phase }) => void;
   setShipPhase: (id: string, phase: Phase, extra?: ShipPhaseData) => void;
   setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
+  addEscortLog: (id: string, message: StreamMessage) => void;
   mergeShipHistory: (id: string, messages: StreamMessage[]) => void;
+  mergeEscortHistory: (id: string, messages: StreamMessage[]) => void;
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
 
-  updateShipFromApi: (shipId: string) => Promise<void>;
+  updateShipFromApi: (shipId: string, knownFleetId?: string) => Promise<void>;
   upsertShip: (ship: Ship) => void;
   removeShip: (id: string) => void;
   fetchShips: (fleetId: string) => Promise<void>;
@@ -64,6 +83,7 @@ interface ShipState {
 export const useShipStore = create<ShipState>((set) => ({
   ships: new Map(),
   shipLogs: new Map(),
+  escortLogs: new Map(),
 
   addShip: (shipData) => {
     set((state) => {
@@ -136,16 +156,23 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
   addShipLog: (id, message) => {
-    const buf = pendingLogs.get(id) ?? [];
+    const buf = pendingShipLogs.get(id) ?? [];
     buf.push(message);
-    pendingLogs.set(id, buf);
+    pendingShipLogs.set(id, buf);
+    scheduleBatchFlush();
+  },
+
+  addEscortLog: (id, message) => {
+    const buf = pendingEscortLogs.get(id) ?? [];
+    buf.push(message);
+    pendingEscortLogs.set(id, buf);
     scheduleBatchFlush();
   },
 
   mergeShipHistory: (id, messages) => {
     // Drain any pending buffered messages for this ship so they aren't lost
-    const buffered = pendingLogs.get(id) ?? [];
-    pendingLogs.delete(id);
+    const buffered = pendingShipLogs.get(id) ?? [];
+    pendingShipLogs.delete(id);
 
     set((state) => {
       const shipLogs = new Map(state.shipLogs);
@@ -164,6 +191,26 @@ export const useShipStore = create<ShipState>((set) => ({
 
       shipLogs.set(id, [...messages, ...newer]);
       return { shipLogs };
+    });
+  },
+
+  mergeEscortHistory: (id, messages) => {
+    const buffered = pendingEscortLogs.get(id) ?? [];
+    pendingEscortLogs.delete(id);
+
+    set((state) => {
+      const escortLogs = new Map(state.escortLogs);
+      const existing = escortLogs.get(id) ?? [];
+
+      const lastMsg = messages[messages.length - 1];
+      const historyLatestTs = lastMsg ? (lastMsg.timestamp ?? 0) : 0;
+
+      const newer = [...existing, ...buffered].filter(
+        (m) => (m.timestamp ?? 0) > historyLatestTs,
+      );
+
+      escortLogs.set(id, [...messages, ...newer]);
+      return { escortLogs };
     });
   },
 
@@ -205,10 +252,10 @@ export const useShipStore = create<ShipState>((set) => ({
   },
 
 
-  updateShipFromApi: async (shipId) => {
+  updateShipFromApi: async (shipId, knownFleetId?) => {
     try {
       const existing = useShipStore.getState().ships.get(shipId);
-      const fleetId = existing?.fleetId ?? useFleetStore.getState().selectedFleetId;
+      const fleetId = knownFleetId ?? existing?.fleetId ?? useFleetStore.getState().selectedFleetId;
       if (!fleetId) {
         console.warn(`[shipStore] updateShipFromApi: Ship ${shipId} — no fleetId available, skipping`);
         return;
@@ -237,6 +284,12 @@ export const useShipStore = create<ShipState>((set) => ({
       }
       return { ships };
     });
+    // Auto-register session (ADR-0023 Decision 4)
+    if (serverShip.fleetId && serverShip.issueNumber) {
+      useSessionStore.getState().registerSession(
+        createShipSession(serverShip.id, serverShip.fleetId, serverShip.issueNumber, serverShip.issueTitle),
+      );
+    }
   },
 
   removeShip: (id) => {
@@ -245,10 +298,12 @@ export const useShipStore = create<ShipState>((set) => ({
       ships.delete(id);
       const shipLogs = new Map(state.shipLogs);
       shipLogs.delete(id);
-      return { ships, shipLogs };
+      const escortLogs = new Map(state.escortLogs);
+      escortLogs.delete(id);
+      return { ships, shipLogs, escortLogs };
     });
-    // Also drain pending log buffer for this ship
-    pendingLogs.delete(id);
+    pendingShipLogs.delete(id);
+    pendingEscortLogs.delete(id);
   },
 
   fetchShips: async (fleetId) => {

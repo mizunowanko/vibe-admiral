@@ -11,6 +11,7 @@ import type {
   StreamMessage,
   Fleet,
   Ship,
+  Dispatch,
   Session,
   GateCheckState,
   AdmiralSettings,
@@ -50,14 +51,16 @@ export interface HandlerContext {
   };
   shipStore: {
     upsertShip: (ship: Ship) => void;
-    updateShipFromApi: (shipId: string) => Promise<void>;
+    updateShipFromApi: (shipId: string, knownFleetId?: string) => Promise<void>;
     addShipLog: (id: string, message: StreamMessage) => void;
+    addEscortLog: (id: string, message: StreamMessage) => void;
     mergeShipHistory: (id: string, messages: StreamMessage[]) => void;
+    mergeEscortHistory: (id: string, messages: StreamMessage[]) => void;
     setShipCompacting: (id: string, isCompacting: boolean) => void;
     setGateCheck: (id: string, gateCheck: GateCheckState) => void;
     clearGateCheck: (id: string) => void;
     removeShip: (id: string) => void;
-    getState: () => { shipLogs: Map<string, StreamMessage[]>; ships: Map<string, Ship> };
+    getState: () => { shipLogs: Map<string, StreamMessage[]>; escortLogs: Map<string, StreamMessage[]>; ships: Map<string, Ship> };
   };
   uiStore: {
     setMainView: (view: "command" | "fleet-settings" | "admiral-settings") => void;
@@ -68,6 +71,8 @@ export interface HandlerContext {
   };
   sessionStore: {
     registerSession: (session: Session) => void;
+    upsertDispatch: (dispatch: Dispatch) => void;
+    addDispatchLog: (dispatchId: string, message: StreamMessage) => void;
     setFocus: (sessionId: string | null, source?: FocusSource) => void;
     getState: () => {
       focusedSessionId: string | null;

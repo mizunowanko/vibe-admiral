@@ -10,6 +10,7 @@
 // Domain types (Fleet, Ship, etc.) are imported by consumers, not defined here.
 
 export type CommanderRole = "dock" | "flagship";
+export type DispatchStatus = "running" | "completed" | "failed";
 export type GatePhase = "plan-gate" | "coding-gate" | "qa-gate";
 export type GateType = "plan-review" | "code-review" | "playwright" | "auto-approve";
 export type GateStatus = "pending" | "approved" | "rejected";
@@ -92,22 +93,27 @@ export interface FleetData {
   name: string;
 }
 
-/** Minimal Ship shape for ship:data messages. */
+/** Minimal Ship shape for ship:data / ship:created / ship:updated / ship:done messages. */
 export interface ShipData {
   id: string;
   fleetId: string;
+  phase: string;
+  issueNumber: number;
+  issueTitle: string;
+  repo: string;
 }
 
-/** Minimal Dispatch shape for dispatch:completed messages. */
+/** Minimal Dispatch shape for dispatch:created / dispatch:completed messages. */
 export interface DispatchData {
   id: string;
   parentRole: CommanderRole;
   fleetId: string;
   name: string;
-  status: string;
+  status: DispatchStatus;
   startedAt: number;
   completedAt?: number;
   result?: string;
+  parentSessionId: string;
 }
 
 /** Minimal AdmiralSettings shape for admiral-settings:data messages. */
@@ -141,10 +147,10 @@ export type ServerMessage =
   | { type: "escort:stream"; data: { id: string; escortId: string; fleetId?: string; issueNumber?: number; message: StreamMessage } }
   | { type: "escort:completed"; data: { id: string; escortId: string; exitCode: number | null; fleetId?: string; issueNumber?: number } }
   | { type: "ship:history"; data: { id: string; messages: StreamMessage[] } }
-  | { type: "ship:updated"; data: { shipId: string } }
+  | { type: "ship:updated"; data: ShipData }
   | { type: "ship:compacting"; data: { id: string; isCompacting: boolean } }
-  | { type: "ship:created"; data: { shipId: string } }
-  | { type: "ship:done"; data: { shipId: string } }
+  | { type: "ship:created"; data: ShipData }
+  | { type: "ship:done"; data: ShipData }
   | { type: "ship:removed"; data: { shipId: string } }
   | { type: "ship:gate-pending"; data: { id: string; gatePhase: GatePhase; gateType: GateType; fleetId: string; issueNumber: number; issueTitle: string } }
   | { type: "ship:gate-resolved"; data: { id: string; gatePhase: GatePhase; gateType: GateType; approved: boolean; feedback?: string } }

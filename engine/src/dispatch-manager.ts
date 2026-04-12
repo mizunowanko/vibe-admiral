@@ -130,6 +130,7 @@ export class DispatchManager {
       startedAt: dp.startedAt,
       completedAt: dp.completedAt,
       result: dp.result,
+      parentSessionId: `${dp.parentRole}-${dp.fleetId}`,
     };
   }
 

@@ -5,7 +5,6 @@ import {
   useSessionStore,
   commanderSessionId,
   createCommanderSession,
-  createShipSession,
 } from "@/stores/sessionStore";
 import { useShipStore } from "@/stores/shipStore";
 import { SessionChat } from "@/components/session/SessionChat";
@@ -41,19 +40,9 @@ export function MainPanel() {
       focus(commanderSessionId("flagship", selectedFleetId), "fleet-change");
     }
 
-    // Fetch ships for the newly selected fleet and register their sessions.
-    // Without this, ships are only fetched on WS connect — switching fleets
-    // would leave the new fleet's ship list empty (#855).
-    const fleetId = selectedFleetId;
-    void useShipStore.getState().fetchShips(fleetId).then(() => {
-      const ships = useShipStore.getState().ships;
-      const { registerSession: register } = useSessionStore.getState();
-      for (const ship of ships.values()) {
-        if (ship.fleetId === fleetId) {
-          register(createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle));
-        }
-      }
-    });
+    // Fetch ships for the newly selected fleet.
+    // Session registration now handled by upsertShip (ADR-0023).
+    void useShipStore.getState().fetchShips(selectedFleetId);
   }, [selectedFleetId]);
 
   // Keyboard shortcuts: Ctrl+1 → Dock, Ctrl+2 → Flagship, Ctrl+3..N → Ships, ? or Ctrl+/ → help
