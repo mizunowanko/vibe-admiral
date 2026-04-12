@@ -19,11 +19,6 @@ import {
 } from "@/test-utils/store-helpers";
 import { useSessionStore } from "@/stores/sessionStore";
 
-// Mock the dispatch listener hook (depends on wsClient)
-vi.mock("@/hooks/useDispatchListener", () => ({
-  useDispatchListener: () => {},
-}));
-
 // Mock ActiveShipSummary to avoid deep render tree
 vi.mock("@/components/ship/ActiveShipSummary", () => ({
   ActiveShipSummary: () => <span data-testid="active-ship-summary" />,

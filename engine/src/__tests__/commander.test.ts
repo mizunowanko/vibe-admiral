@@ -24,8 +24,8 @@ function createMockProcessManager(): MockProcessManager {
   return {
     launchCommander: vi.fn(),
     resumeCommander: vi.fn(),
-    sendMessage: vi.fn(),
-    sendToolResult: vi.fn(),
+    sendMessage: vi.fn().mockReturnValue({ ok: true }),
+    sendToolResult: vi.fn().mockReturnValue({ ok: true }),
     isRunning: vi.fn().mockReturnValue(true),
     kill: vi.fn(),
   };

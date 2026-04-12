@@ -9,6 +9,7 @@ import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { PhaseTransactionService } from "./phase-transaction-service.js";
 import type { EscortProcess, GatePhase, GateType, GateIntent, Phase } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
+import { safeJsonParse } from "./util/json-safe.js";
 
 /**
  * On-demand Escort coordination layer using session resume.
@@ -628,12 +629,12 @@ export class EscortManager {
         readFile(logPath, "utf-8").then((content) => {
           const lines = content.trim().split("\n").slice(-10);
           const lastMessages = lines
-            .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-            .filter(Boolean)
-            .filter((m: { type?: string }) => m.type === "assistant" || m.type === "result")
-            .map((m: { type?: string; message?: string; result?: string; costUsd?: number }) => {
-              if (m.type === "result") return `[result] costUsd=${m.costUsd}`;
-              return `[assistant] ${(m.message ?? "").slice(0, 200)}`;
+            .map((l) => safeJsonParse<Record<string, unknown>>(l, { source: "escort.lastLog" }))
+            .filter((m): m is Record<string, unknown> => m != null)
+            .filter((m) => m.type === "assistant" || m.type === "result")
+            .map((m) => {
+              if (m.type === "result") return `[result] costUsd=${m.costUsd as number | undefined}`;
+              return `[assistant] ${(String(m.message ?? "")).slice(0, 200)}`;
             });
           if (lastMessages.length > 0) {
             console.warn(

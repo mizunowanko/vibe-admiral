@@ -190,6 +190,7 @@ export interface Dispatch {
   startedAt: number;
   completedAt?: number;
   result?: string;
+  parentSessionId?: string;
 }
 
 /** Build a deterministic session ID for dispatch sessions. */

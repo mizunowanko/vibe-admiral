@@ -8,7 +8,7 @@
  * Used by EngineServer when running in Supervisor mode.
  */
 import { EventEmitter } from "node:events";
-import type { ProcessManagerLike } from "../process-manager.js";
+import type { ProcessManagerLike, SendResult } from "../process-manager.js";
 import type { IpcCommand, IpcEvent } from "./ipc-types.js";
 
 /**
@@ -145,16 +145,14 @@ export class IpcProcessManager extends EventEmitter implements ProcessManagerLik
     id: string,
     message: string,
     images?: Array<{ base64: string; mediaType: string }>,
-  ): null {
+  ): SendResult {
     this.sendCommand({ type: "send-message", id, message, images });
-    // Return null since we can't return the ChildProcess from another process.
-    // Callers don't use the return value in practice.
-    return null;
+    return { ok: true };
   }
 
-  sendToolResult(id: string, toolUseId: string, result: string): null {
+  sendToolResult(id: string, toolUseId: string, result: string): SendResult {
     this.sendCommand({ type: "send-tool-result", id, toolUseId, result });
-    return null;
+    return { ok: true };
   }
 
   // ── Lifecycle methods ──

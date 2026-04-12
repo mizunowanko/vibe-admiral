@@ -1,6 +1,20 @@
 import type { MessageHandler } from "./handler-types";
 import { createDispatchSession } from "@/stores/sessionStore";
 
+export const handleDispatchCreated: MessageHandler<"dispatch:created"> = (msg, ctx) => {
+  const { dispatch, fleetId } = msg.data;
+  ctx.sessionStore.upsertDispatch(dispatch);
+  ctx.sessionStore.registerSession(
+    createDispatchSession(
+      dispatch.id,
+      fleetId,
+      dispatch.name,
+      dispatch.parentRole,
+      dispatch.parentSessionId,
+    ),
+  );
+};
+
 export const handleDispatchStream: MessageHandler<"dispatch:stream"> = (msg, ctx) => {
   const existingSession = ctx.sessionStore.getState().sessions.get(`dispatch-${msg.data.id}`);
   if (!existingSession) {
@@ -15,11 +29,9 @@ export const handleDispatchStream: MessageHandler<"dispatch:stream"> = (msg, ctx
       ),
     );
   }
-  // Log routing handled by useDispatchListener
+  ctx.sessionStore.addDispatchLog(msg.data.id, msg.data.message);
 };
 
-/** Handled by useDispatchListener */
-export const handleDispatchCreated: MessageHandler<"dispatch:created"> = () => {};
-
-/** Handled by useDispatchListener */
-export const handleDispatchCompleted: MessageHandler<"dispatch:completed"> = () => {};
+export const handleDispatchCompleted: MessageHandler<"dispatch:completed"> = (msg, ctx) => {
+  ctx.sessionStore.upsertDispatch(msg.data.dispatch);
+};

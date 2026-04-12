@@ -297,6 +297,7 @@ export interface Dispatch {
   startedAt: number;
   completedAt?: number;
   result?: string;
+  parentSessionId: string;
 }
 
 /** Full Dispatch process state tracked by DispatchManager. */

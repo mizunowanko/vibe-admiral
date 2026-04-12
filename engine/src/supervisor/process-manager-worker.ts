@@ -71,13 +71,13 @@ process.on("message", (msg: ProcessManagerWorkerMessage) => {
 
     case "send-message": {
       const result = pm.sendMessage(msg.id, msg.message, msg.images);
-      sendIpc({ type: "send-result", id: msg.id, success: result !== null });
+      sendIpc({ type: "send-result", id: msg.id, success: result.ok });
       break;
     }
 
     case "send-tool-result": {
       const result = pm.sendToolResult(msg.id, msg.toolUseId, msg.result);
-      sendIpc({ type: "send-result", id: msg.id, success: result !== null });
+      sendIpc({ type: "send-result", id: msg.id, success: result.ok });
       break;
     }
 

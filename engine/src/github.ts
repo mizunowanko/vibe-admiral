@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Issue, LabelOps, PRStatus } from "./types.js";
+import { safeJsonParse } from "./util/json-safe.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,12 +31,12 @@ export async function listIssues(
   }
   const raw = await gh(args);
   if (!raw) return [];
-  const issues = JSON.parse(raw) as Array<{
+  const issues = safeJsonParse<Array<{
     number: number;
     title: string;
     body: string;
     labels: Array<{ name: string }>;
-  }>;
+  }>>(raw, { source: "getIssues", fallback: [] }) ?? [];
   return issues.map((i) => ({
     number: i.number,
     title: i.title,
@@ -55,13 +56,13 @@ export async function getIssue(repo: string, number: number): Promise<Issue> {
     "--json",
     "number,title,body,labels,state",
   ]);
-  const i = JSON.parse(raw) as {
+  const i = safeJsonParse<{
     number: number;
     title: string;
     body: string;
     labels: Array<{ name: string }>;
     state: string;
-  };
+  }>(raw, { source: `getIssue(${number})`, onError: "throw" })!;
   return {
     number: i.number,
     title: i.title,
@@ -287,7 +288,7 @@ export async function getPRStatus(
     "--json",
     "number,state,mergeable,statusCheckRollup",
   ]);
-  const pr = JSON.parse(raw) as {
+  const pr = safeJsonParse<{
     number: number;
     state: string;
     mergeable: string;
@@ -295,7 +296,7 @@ export async function getPRStatus(
       status: string;
       conclusion: string;
     }> | null;
-  };
+  }>(raw, { source: `getPRStatus(${prNumber})`, onError: "throw" })!;
 
   const checks = pr.statusCheckRollup;
   let checksStatus: PRStatus["checksStatus"];
@@ -336,7 +337,7 @@ export async function getMergedPRForBranch(
       "--jq", ".[0]",
     ]);
     if (!raw) return null;
-    return JSON.parse(raw) as { number: number; url: string };
+    return safeJsonParse<{ number: number; url: string }>(raw, { source: "findMergedPR" });
   } catch {
     return null;
   }
@@ -368,7 +369,7 @@ export async function listSubIssues(
     "-F",
     `number=${number}`,
   ]);
-  const result = JSON.parse(raw) as {
+  const result = safeJsonParse<{
     data: {
       repository: {
         issue: {
@@ -378,7 +379,7 @@ export async function listSubIssues(
         };
       };
     };
-  };
+  }>(raw, { source: `getSubIssues(${number})`, onError: "throw" })!;
   return result.data.repository.issue.subIssues.nodes.map((n) => ({
     number: n.number,
     title: n.title,
@@ -430,16 +431,13 @@ export async function addSubIssue(
     `number=${childNumber}`,
   ]);
 
-  const parentId = (
-    JSON.parse(parentRaw) as {
-      data: { repository: { issue: { id: string } } };
-    }
-  ).data.repository.issue.id;
-  const childId = (
-    JSON.parse(childRaw) as {
-      data: { repository: { issue: { id: string } } };
-    }
-  ).data.repository.issue.id;
+  type GqlIssueId = { data: { repository: { issue: { id: string } } } };
+  const parentId = safeJsonParse<GqlIssueId>(
+    parentRaw, { source: `addSubIssue.parent(${parentNumber})`, onError: "throw" },
+  )!.data.repository.issue.id;
+  const childId = safeJsonParse<GqlIssueId>(
+    childRaw, { source: `addSubIssue.child(${childNumber})`, onError: "throw" },
+  )!.data.repository.issue.id;
 
   await gh([
     "api",

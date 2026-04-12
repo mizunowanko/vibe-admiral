@@ -18,7 +18,8 @@ import {
   extractResultUsage,
 } from "./stream-parser.js";
 import type { FleetDatabase } from "./db.js";
-import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification, GatePhase } from "./types.js";
+import type { ServerMessage, StreamMessage, CommanderRole, HeadsUpNotification, GatePhase, ShipProcess } from "./types.js";
+import type { ShipData } from "../../shared/message-types.js";
 import { notifyPhaseWaiters } from "./api-server.js";
 import type { ApiDeps } from "./api-server.js";
 import { launchEscortForGate } from "./ship-internal-api.js";
@@ -56,6 +57,17 @@ function resolveCommander(
   return null;
 }
 
+function toShipData(ship: ShipProcess): ShipData {
+  return {
+    id: ship.id,
+    fleetId: ship.fleetId,
+    phase: ship.phase,
+    issueNumber: ship.issueNumber,
+    issueTitle: ship.issueTitle,
+    repo: ship.repo,
+  };
+}
+
 /** Check if a process ID belongs to a commander (Dock or Flagship). */
 function isCommanderProcess(id: string): boolean {
   return id.startsWith("flagship-") || id.startsWith("dock-");
@@ -84,8 +96,11 @@ function detectPRCreation(
   // Store PR URL on ship (DB + runtime)
   shipManager.setPrUrl(id, prUrl);
 
-  // Broadcast PR detection as ship:updated notification — Frontend fetches via REST API
-  broadcast({ type: "ship:updated", data: { shipId: id } });
+  // Re-read ship after PR URL update to include latest state
+  const updatedShip = shipManager.getShip(id);
+  if (updatedShip) {
+    broadcast({ type: "ship:updated", data: toShipData(updatedShip) });
+  }
 }
 
 function detectCompactStatus(
@@ -563,11 +578,13 @@ export function setupShipStatusHandler(deps: ShipStatusDeps): void {
     // Resolve any pending long-poll requests waiting for this ship's phase change
     notifyPhaseWaiters(id, phase);
 
-    // Event Notification pattern: send minimal notification, Frontend fetches via REST API
-    if (phase === "done") {
-      broadcast({ type: "ship:done", data: { shipId: id } });
-    } else {
-      broadcast({ type: "ship:updated", data: { shipId: id } });
+    if (ship) {
+      const data = toShipData(ship);
+      if (phase === "done") {
+        broadcast({ type: "ship:done", data });
+      } else {
+        broadcast({ type: "ship:updated", data });
+      }
     }
 
     // Inject Ship status into Flagship chat (Ship management is Flagship's domain)
@@ -619,7 +636,10 @@ export function setupShipCreatedHandler(
   broadcast: (msg: ServerMessage) => void,
 ): void {
   shipManager.setShipCreatedHandler((id) => {
-    broadcast({ type: "ship:created", data: { shipId: id } });
+    const ship = shipManager.getShip(id);
+    if (ship) {
+      broadcast({ type: "ship:created", data: toShipData(ship) });
+    }
   });
 }
 

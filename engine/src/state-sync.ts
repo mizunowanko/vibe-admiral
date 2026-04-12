@@ -7,6 +7,7 @@ import type { StatusManager } from "./status-manager.js";
 import type { Phase } from "./types.js";
 import * as github from "./github.js";
 import * as worktree from "./worktree.js";
+import { safeJsonParse } from "./util/json-safe.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -414,7 +415,8 @@ export class StateSync {
       const trimmed = stdout.trim();
       if (!trimmed) return false;
 
-      const pr = JSON.parse(trimmed) as { number: number; url: string };
+      const pr = safeJsonParse<{ number: number; url: string }>(trimmed, { source: "stateSync.prCheck" });
+      if (!pr) return false;
       console.log(
         `[state-sync] Ship #${issueNumber} (${shipId.slice(0, 8)}...) died in coding phase ` +
         `but PR #${pr.number} exists — auto-transitioning to coding-gate`,
