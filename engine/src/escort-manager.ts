@@ -6,6 +6,7 @@ import type { ProcessManagerLike } from "./process-manager.js";
 import type { ShipManager } from "./ship-manager.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
+import type { PhaseTransactionService } from "./phase-transaction-service.js";
 import type { EscortProcess, GatePhase, GateType, GateIntent, Phase } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 
@@ -53,12 +54,11 @@ export class EscortManager {
   private shipManager: ShipManager;
   private getDatabase: () => FleetDatabase | null;
   private actorManager: ShipActorManager | null = null;
+  private phaseTx: PhaseTransactionService | null = null;
   /** parentShipId → escortId mapping (one Escort per parent Ship). */
   private escorts = new Map<string, string>();
   /** parentShipId → Ship's customInstructionsText (for restoring after Escort exits). */
   private shipCustomInstructions = new Map<string, string | undefined>();
-  /** parentShipId → Escort's pre-verdict intent declaration (fallback if Escort dies before verdict). */
-  private gateIntents = new Map<string, GateIntent>();
   /** parentShipId → pending cleanup promise (stash restore + custom instructions restore). */
   private cleanupPromises = new Map<string, Promise<void>>();
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
@@ -73,32 +73,49 @@ export class EscortManager {
     this.actorManager = actorManager;
   }
 
+  setPhaseTransactionService(phaseTx: PhaseTransactionService): void {
+    this.phaseTx = phaseTx;
+  }
+
   /** Set callback for Escort death notifications (sent to Flagship). */
   setEscortDeathHandler(handler: (shipId: string, message: string) => void): void {
     this.onEscortDeathCallback = handler;
   }
 
   /**
-   * Store Escort's pre-verdict intent declaration.
+   * Store Escort's pre-verdict intent declaration (DB-backed, ADR-0021).
    * Called via gate-intent API before the actual gate-verdict.
    * If the Escort dies before submitting the verdict, this intent
    * is used as a fallback in onEscortExit().
    */
   setGateIntent(parentShipId: string, intent: GateIntent): void {
-    this.gateIntents.set(parentShipId, intent);
+    const db = this.getDatabase();
+    if (db) {
+      const feedbackStr = intent.feedback ? (typeof intent.feedback === "string" ? intent.feedback : JSON.stringify(intent.feedback)) : undefined;
+      db.setGateIntent(parentShipId, intent.verdict, feedbackStr);
+    }
     console.log(
       `[escort-manager] Gate intent declared for Ship ${parentShipId.slice(0, 8)}...: ${intent.verdict}`,
     );
   }
 
-  /** Get stored gate intent for a parent Ship. */
+  /** Get stored gate intent for a parent Ship (DB-backed). */
   getGateIntent(parentShipId: string): GateIntent | undefined {
-    return this.gateIntents.get(parentShipId);
+    const db = this.getDatabase();
+    if (!db) return undefined;
+    const row = db.getGateIntent(parentShipId);
+    if (!row) return undefined;
+    return {
+      verdict: row.verdict,
+      feedback: row.feedback ?? undefined,
+      declaredAt: row.declaredAt,
+    };
   }
 
   /** Clear stored gate intent (called after verdict is submitted or on cleanup). */
   clearGateIntent(parentShipId: string): void {
-    this.gateIntents.delete(parentShipId);
+    const db = this.getDatabase();
+    if (db) db.clearGateIntent(parentShipId);
   }
 
   /**
@@ -629,85 +646,49 @@ export class EscortManager {
 
     // Check for a pre-declared gate intent — if the Escort declared "approve"
     // before dying, honour that intent instead of reverting (fallback mechanism).
-    const intent = this.gateIntents.get(parentShipId);
+    const intent = this.getGateIntent(parentShipId);
     this.clearGateIntent(parentShipId);
 
-    if (intent?.verdict === "approve") {
+    if (intent?.verdict === "approve" && this.phaseTx) {
       console.log(
         `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict, but gate-intent was "approve" — auto-approving for Ship ${parentShipId.slice(0, 8)}...`,
       );
 
-      const approveResult = this.actorManager?.requestTransition(parentShipId, {
-        type: "GATE_APPROVED",
+      const approveResult = this.phaseTx.commit(parentShipId, {
+        event: { type: "GATE_APPROVED" },
+        triggeredBy: "escort",
+        metadata: {
+          gate_result: "approved",
+          fallback: true,
+          reason: `Escort died (code=${code}) but had declared approve intent — auto-approved`,
+        },
       });
 
-      if (approveResult?.success) {
-        try {
-          const snapshot = this.actorManager?.getPersistedSnapshot(parentShipId);
-          db.persistPhaseTransition(parentShipId, approveResult.fromPhase, approveResult.toPhase, "escort", {
-            gate_result: "approved",
-            fallback: true,
-            reason: `Escort died (code=${code}) but had declared approve intent — auto-approved`,
-          }, snapshot);
-          this.shipManager.syncPhaseFromDb(parentShipId);
-          this.shipManager.clearGateCheck(parentShipId);
-        } catch (err) {
-          console.error(`[escort-manager] Failed to persist fallback approval for Ship ${parentShipId.slice(0, 8)}...:`, err);
-        }
+      if (approveResult.success) {
         return;
       }
-      // If XState rejected the auto-approve (e.g., phase already changed), fall through to revert logic
       console.warn(
-        `[escort-manager] XState rejected fallback GATE_APPROVED for Ship ${parentShipId.slice(0, 8)}... (current: ${approveResult?.currentPhase}) — falling through to revert`,
+        `[escort-manager] Fallback GATE_APPROVED failed for Ship ${parentShipId.slice(0, 8)}...: ${approveResult.error} — falling through to revert`,
       );
     }
 
-    // No approve intent or fallback failed — treat as rejection (original behaviour)
+    // No approve intent or fallback failed — treat as rejection
     const prevPhase = GATE_PREV_PHASE[currentPhase as GatePhase];
     console.warn(
       `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict — reverting Ship ${parentShipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
     );
 
-    // XState is the sole authority: request transition through XState first
     const feedback = `Escort process exited unexpectedly (code=${code}) without submitting verdict`;
-    const result = this.actorManager?.requestTransition(parentShipId, {
-      type: "ESCORT_DIED",
-      exitCode: code,
-      feedback,
-    });
-
-    // If XState approved the revert, persist to DB
-    if (result?.success) {
-      try {
-        const snapshot = this.actorManager?.getPersistedSnapshot(parentShipId);
-        db.persistPhaseTransition(parentShipId, result.fromPhase, result.toPhase, "escort", {
-          gate_result: "rejected",
-          feedback,
-        }, snapshot);
-        this.shipManager.syncPhaseFromDb(parentShipId);
-      } catch (err) {
-        console.error(`[escort-manager] Failed to persist phase revert for Ship ${parentShipId.slice(0, 8)}...:`, err);
-      }
-    } else {
-      // XState rejected the transition — force DB to match XState to prevent divergence
-      console.error(`[escort-manager] XState rejected ESCORT_DIED for Ship ${parentShipId.slice(0, 8)}... (current: ${result?.currentPhase}) — forcing DB sync`);
-      const xstatePhase = result?.currentPhase;
-      if (xstatePhase) {
-        try {
-          const snapshot = this.actorManager?.getPersistedSnapshot(parentShipId);
-          db.persistPhaseTransition(parentShipId, currentPhase as Phase, xstatePhase, "escort", {
-            gate_result: "rejected",
-            feedback: `${feedback} (XState rejected ESCORT_DIED, forcing DB sync to ${xstatePhase})`,
-          }, snapshot);
-          this.shipManager.syncPhaseFromDb(parentShipId);
-        } catch (err) {
-          console.error(`[escort-manager] Failed to force DB sync for Ship ${parentShipId.slice(0, 8)}...:`, err);
-        }
+    if (this.phaseTx) {
+      const result = this.phaseTx.commit(parentShipId, {
+        event: { type: "ESCORT_DIED", exitCode: code, feedback },
+        triggeredBy: "escort",
+        metadata: { gate_result: "rejected", feedback },
+      });
+      if (!result.success) {
+        console.error(`[escort-manager] Phase revert failed for Ship ${parentShipId.slice(0, 8)}...: ${result.error}`);
       }
     }
-
-    // Clear gate check state
-    this.shipManager.clearGateCheck(parentShipId);
 
     // Check if Escort fail count has exceeded the limit — auto-stop the Ship
     const MAX_ESCORT_FAILS = 3;

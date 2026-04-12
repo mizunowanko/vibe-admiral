@@ -35,6 +35,7 @@ function createMockDeps() {
     getDispatchManager: vi.fn().mockReturnValue({ launch: vi.fn(), toDispatch: vi.fn(), getDispatchesByFleet: vi.fn().mockReturnValue([]) }),
     getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn(), isEscortRunning: vi.fn().mockReturnValue(false), setGateIntent: vi.fn(), clearGateIntent: vi.fn() }),
     getActorManager: vi.fn().mockReturnValue({ send: vi.fn() }),
+    getPhaseTransactionService: vi.fn().mockReturnValue({ commit: vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" }) }),
     getCommanderHistory: vi.fn().mockResolvedValue([]),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",

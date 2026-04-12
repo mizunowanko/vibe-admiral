@@ -34,6 +34,9 @@ type MockFleetDatabase = {
   updateEscortSessionId: ReturnType<typeof vi.fn>;
   getShipById: ReturnType<typeof vi.fn>;
   persistPhaseTransition: ReturnType<typeof vi.fn>;
+  getGateIntent: ReturnType<typeof vi.fn>;
+  setGateIntent: ReturnType<typeof vi.fn>;
+  clearGateIntent: ReturnType<typeof vi.fn>;
 };
 
 function makeShip(overrides: Record<string, unknown> = {}) {
@@ -73,6 +76,9 @@ describe("EscortManager", () => {
       updateEscortSessionId: vi.fn(),
       getShipById: vi.fn(),
       persistPhaseTransition: vi.fn(),
+      getGateIntent: vi.fn().mockReturnValue(undefined),
+      setGateIntent: vi.fn(),
+      clearGateIntent: vi.fn(),
     };
     escortManager = new EscortManager(
       mockProcessManager as unknown as ConstructorParameters<typeof EscortManager>[0],
@@ -310,6 +316,9 @@ describe("EscortManager", () => {
         getContext: ReturnType<typeof vi.fn>;
         getPersistedSnapshot: ReturnType<typeof vi.fn>;
       };
+      let mockPhaseTx: {
+        commit: ReturnType<typeof vi.fn>;
+      };
       let deathHandler: ReturnType<typeof vi.fn>;
 
       beforeEach(() => {
@@ -319,50 +328,36 @@ describe("EscortManager", () => {
           getContext: vi.fn().mockReturnValue({ escortFailCount: 0 }),
           getPersistedSnapshot: vi.fn().mockReturnValue({ value: "plan", context: {} }),
         };
+        mockPhaseTx = {
+          commit: vi.fn().mockReturnValue({ success: true, fromPhase: "plan-gate", toPhase: "plan" }),
+        };
         deathHandler = vi.fn();
 
         escortManager.setActorManager(mockActorManager as unknown as Parameters<EscortManager["setActorManager"]>[0]);
+        escortManager.setPhaseTransactionService(mockPhaseTx as unknown as Parameters<EscortManager["setPhaseTransactionService"]>[0]);
         escortManager.setEscortDeathHandler(deathHandler as unknown as Parameters<EscortManager["setEscortDeathHandler"]>[0]);
       });
 
-      it("reverts gate phase via XState requestTransition and persists to DB", async () => {
+      it("reverts gate phase via PhaseTransactionService.commit()", async () => {
         const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
-        // Parent ship is in gate phase
         mockDb.getShipById.mockReturnValue({
           ...makeShip(),
           phase: "plan-gate",
           issueTitle: "Test issue",
         });
-        mockActorManager.requestTransition.mockReturnValue({
-          success: true,
-          fromPhase: "plan-gate",
-          toPhase: "plan",
-        });
 
         escortManager.onEscortExit(escortId!, 1);
 
-        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
-          type: "ESCORT_DIED",
-          exitCode: 1,
-          feedback: expect.stringContaining("exited unexpectedly"),
+        expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
+          event: expect.objectContaining({ type: "ESCORT_DIED", exitCode: 1 }),
+          triggeredBy: "escort",
+          metadata: expect.objectContaining({ gate_result: "rejected" }),
         });
-
-        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-          "ship-001",
-          "plan-gate",
-          "plan",
-          "escort",
-          expect.objectContaining({ gate_result: "rejected" }),
-          expect.anything(),
-        );
-
-        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
-        expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
         expect(deathHandler).toHaveBeenCalled();
       });
 
-      it("forces DB sync when XState rejects ESCORT_DIED", async () => {
+      it("logs error when PhaseTransactionService.commit() fails for ESCORT_DIED", async () => {
         const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
         mockDb.getShipById.mockReturnValue({
@@ -370,27 +365,19 @@ describe("EscortManager", () => {
           phase: "plan-gate",
           issueTitle: "Test issue",
         });
-        mockActorManager.requestTransition.mockReturnValue({
+        mockPhaseTx.commit.mockReturnValue({
           success: false,
-          currentPhase: "coding",
+          error: "Transition rejected",
+          code: "TRANSITION_REJECTED",
         });
 
         escortManager.onEscortExit(escortId!, 1);
 
-        expect(mockActorManager.requestTransition).toHaveBeenCalled();
-        // Now forces DB sync to match XState phase even on rejection
-        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-          "ship-001",
-          "plan-gate",
-          "coding",
-          "escort",
-          expect.objectContaining({ feedback: expect.stringContaining("forcing DB sync") }),
-          expect.anything(),
-        );
-        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
+        expect(mockPhaseTx.commit).toHaveBeenCalled();
+        expect(deathHandler).toHaveBeenCalled();
       });
 
-      it("skips XState when parent is no longer in gate phase", async () => {
+      it("skips transition when parent is no longer in gate phase", async () => {
         const escortId = await escortManager.launchEscort("ship-001", "plan-gate");
 
         // Parent already moved past gate (verdict was submitted)
@@ -401,8 +388,7 @@ describe("EscortManager", () => {
 
         escortManager.onEscortExit(escortId!, 0);
 
-        expect(mockActorManager.requestTransition).not.toHaveBeenCalled();
-        expect(mockDb.persistPhaseTransition).not.toHaveBeenCalled();
+        expect(mockPhaseTx.commit).not.toHaveBeenCalled();
         expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
       });
 
@@ -416,13 +402,15 @@ describe("EscortManager", () => {
           issueTitle: "Test issue",
         });
 
-        // Escort declared approve intent before dying
-        escortManager.setGateIntent("ship-001", {
+        // Escort declared approve intent before dying (DB-backed)
+        mockDb.getGateIntent.mockReturnValue({
           verdict: "approve",
+          feedback: null,
+          commentUrl: null,
           declaredAt: new Date().toISOString(),
         });
 
-        mockActorManager.requestTransition.mockReturnValue({
+        mockPhaseTx.commit.mockReturnValue({
           success: true,
           fromPhase: "coding-gate",
           toPhase: "qa",
@@ -430,26 +418,16 @@ describe("EscortManager", () => {
 
         escortManager.onEscortExit(escortId!, 1);
 
-        // Should send GATE_APPROVED (not ESCORT_DIED)
-        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
-          type: "GATE_APPROVED",
-        });
-
-        // Should persist as approved with fallback flag
-        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-          "ship-001",
-          "coding-gate",
-          "qa",
-          "escort",
-          expect.objectContaining({
+        // Should use PhaseTransactionService with GATE_APPROVED
+        expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
+          event: { type: "GATE_APPROVED" },
+          triggeredBy: "escort",
+          metadata: expect.objectContaining({
             gate_result: "approved",
             fallback: true,
           }),
-          expect.anything(),
-        );
+        });
 
-        expect(mockShipManager.syncPhaseFromDb).toHaveBeenCalledWith("ship-001");
-        expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
         // Should NOT notify death handler (auto-approved successfully)
         expect(deathHandler).not.toHaveBeenCalled();
       });
@@ -463,36 +441,22 @@ describe("EscortManager", () => {
           issueTitle: "Test issue",
         });
 
-        // Escort declared reject intent
-        escortManager.setGateIntent("ship-001", {
+        // Escort declared reject intent (DB-backed)
+        mockDb.getGateIntent.mockReturnValue({
           verdict: "reject",
           feedback: "Tests missing",
+          commentUrl: null,
           declaredAt: new Date().toISOString(),
-        });
-
-        mockActorManager.requestTransition.mockReturnValue({
-          success: true,
-          fromPhase: "coding-gate",
-          toPhase: "coding",
         });
 
         escortManager.onEscortExit(escortId!, 1);
 
-        // Should send ESCORT_DIED (not GATE_APPROVED)
-        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
-          type: "ESCORT_DIED",
-          exitCode: 1,
-          feedback: expect.stringContaining("exited unexpectedly"),
+        // Should send ESCORT_DIED (not GATE_APPROVED) — reject intent doesn't auto-approve
+        expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
+          event: expect.objectContaining({ type: "ESCORT_DIED", exitCode: 1 }),
+          triggeredBy: "escort",
+          metadata: expect.objectContaining({ gate_result: "rejected" }),
         });
-
-        expect(mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-          "ship-001",
-          "coding-gate",
-          "coding",
-          "escort",
-          expect.objectContaining({ gate_result: "rejected" }),
-          expect.anything(),
-        );
       });
 
       it("reverts normally when no gate-intent is stored", async () => {
@@ -504,21 +468,15 @@ describe("EscortManager", () => {
           issueTitle: "Test issue",
         });
 
-        // No gate-intent set
-
-        mockActorManager.requestTransition.mockReturnValue({
-          success: true,
-          fromPhase: "coding-gate",
-          toPhase: "coding",
-        });
+        // No gate-intent set (DB returns undefined)
 
         escortManager.onEscortExit(escortId!, 1);
 
-        // Should send ESCORT_DIED
-        expect(mockActorManager.requestTransition).toHaveBeenCalledWith("ship-001", {
-          type: "ESCORT_DIED",
-          exitCode: 1,
-          feedback: expect.stringContaining("exited unexpectedly"),
+        // Should commit ESCORT_DIED via PhaseTransactionService
+        expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
+          event: expect.objectContaining({ type: "ESCORT_DIED", exitCode: 1 }),
+          triggeredBy: "escort",
+          metadata: expect.objectContaining({ gate_result: "rejected" }),
         });
       });
 
@@ -543,7 +501,7 @@ describe("EscortManager", () => {
         expect(escortManager.getGateIntent("ship-001")).toBeUndefined();
       });
 
-      it("falls through to revert when XState rejects fallback GATE_APPROVED", async () => {
+      it("falls through to revert when fallback GATE_APPROVED fails", async () => {
         const escortId = await escortManager.launchEscort("ship-001", "coding-gate");
 
         mockDb.getShipById.mockReturnValue({
@@ -552,29 +510,29 @@ describe("EscortManager", () => {
           issueTitle: "Test issue",
         });
 
-        escortManager.setGateIntent("ship-001", {
+        // DB-backed gate intent
+        mockDb.getGateIntent.mockReturnValue({
           verdict: "approve",
+          feedback: null,
+          commentUrl: null,
           declaredAt: new Date().toISOString(),
         });
 
-        // XState rejects GATE_APPROVED
-        mockActorManager.requestTransition
-          .mockReturnValueOnce({ success: false, currentPhase: "coding-gate" })
-          // Falls through to ESCORT_DIED which succeeds
+        // First commit (GATE_APPROVED) fails, second (ESCORT_DIED) succeeds
+        mockPhaseTx.commit
+          .mockReturnValueOnce({ success: false, error: "Rejected", code: "TRANSITION_REJECTED" })
           .mockReturnValueOnce({ success: true, fromPhase: "coding-gate", toPhase: "coding" });
 
         escortManager.onEscortExit(escortId!, 1);
 
         // Should have tried GATE_APPROVED first, then ESCORT_DIED
-        expect(mockActorManager.requestTransition).toHaveBeenCalledTimes(2);
-        expect(mockActorManager.requestTransition).toHaveBeenNthCalledWith(1, "ship-001", {
-          type: "GATE_APPROVED",
-        });
-        expect(mockActorManager.requestTransition).toHaveBeenNthCalledWith(2, "ship-001", {
-          type: "ESCORT_DIED",
-          exitCode: 1,
-          feedback: expect.stringContaining("exited unexpectedly"),
-        });
+        expect(mockPhaseTx.commit).toHaveBeenCalledTimes(2);
+        expect(mockPhaseTx.commit).toHaveBeenNthCalledWith(1, "ship-001", expect.objectContaining({
+          event: { type: "GATE_APPROVED" },
+        }));
+        expect(mockPhaseTx.commit).toHaveBeenNthCalledWith(2, "ship-001", expect.objectContaining({
+          event: expect.objectContaining({ type: "ESCORT_DIED" }),
+        }));
       });
     });
   });
