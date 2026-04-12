@@ -592,6 +592,21 @@ export class ShipManager {
   }
 
   /**
+   * Kill the Ship's CLI process without changing its phase.
+   * Used when the Ship is transitioning to a terminal state (e.g. done via
+   * EXTERNAL_CLOSE) and the caller has already updated the phase via XState.
+   * Returns true if a process was killed.
+   */
+  killProcess(shipId: string): boolean {
+    const killed = this.processManager.kill(shipId);
+    if (killed) {
+      const rt = this.runtime.get(shipId);
+      if (rt) rt.isCompacting = false;
+    }
+    return killed;
+  }
+
+  /**
    * Abandon a Ship: transition from paused → abandoned.
    * Marks the Ship as permanently abandoned (not eligible for Resume All).
    * Returns true if the ship was abandoned, false if not in "paused" phase.

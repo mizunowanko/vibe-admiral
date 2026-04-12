@@ -342,6 +342,107 @@ describe("shipMachine", () => {
     });
   });
 
+  describe("EXTERNAL_CLOSE (#923)", () => {
+    it("transitions plan → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "EXTERNAL_CLOSE", reason: "issue closed externally" });
+      expect(actor.getSnapshot().value).toBe("done");
+      expect(actor.getSnapshot().status).toBe("done");
+      actor.stop();
+    });
+
+    it("transitions plan-gate → done on EXTERNAL_CLOSE and clears gateCheck", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" });
+      expect(actor.getSnapshot().value).toBe("plan-gate");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("done");
+      expect(actor.getSnapshot().context.gateCheck).toBeNull();
+      actor.stop();
+    });
+
+    it("transitions coding → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      expect(actor.getSnapshot().value).toBe("coding");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("done");
+      actor.stop();
+    });
+
+    it("transitions coding-gate → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      expect(actor.getSnapshot().value).toBe("coding-gate");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("done");
+      expect(actor.getSnapshot().context.gateCheck).toBeNull();
+      actor.stop();
+    });
+
+    it("transitions qa → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      expect(actor.getSnapshot().value).toBe("qa");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("done");
+      actor.stop();
+    });
+
+    it("transitions qa-gate → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      expect(actor.getSnapshot().value).toBe("qa-gate");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("done");
+      expect(actor.getSnapshot().context.gateCheck).toBeNull();
+      actor.stop();
+    });
+
+    it("transitions merging → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor({ qaRequired: false });
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      actor.send({ type: "GATE_APPROVED" });
+      actor.send({ type: "GATE_ENTER" });
+      expect(actor.getSnapshot().value).toBe("merging");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("done");
+      actor.stop();
+    });
+
+    it("does NOT transition paused → done on EXTERNAL_CLOSE (user intent preserved)", () => {
+      const actor = createTestActor();
+      actor.send({ type: "PAUSE" });
+      expect(actor.getSnapshot().value).toBe("paused");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      // paused is a user-intent state; external close should not override it.
+      expect(actor.getSnapshot().value).toBe("paused");
+      actor.stop();
+    });
+
+    it("does NOT transition abandoned → done on EXTERNAL_CLOSE", () => {
+      const actor = createTestActor();
+      actor.send({ type: "PAUSE" });
+      actor.send({ type: "ABANDON" });
+      expect(actor.getSnapshot().value).toBe("abandoned");
+      actor.send({ type: "EXTERNAL_CLOSE" });
+      expect(actor.getSnapshot().value).toBe("abandoned");
+      actor.stop();
+    });
+  });
+
   describe("global context events", () => {
     it("updates lastOutputAt and clears processDead on PROCESS_OUTPUT", () => {
       const actor = createTestActor();

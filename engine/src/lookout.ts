@@ -19,6 +19,8 @@ export interface LookoutConfig {
   noOutputStallMs?: number;
   excessiveRetryThreshold?: number;
   scanIntervalMs?: number;
+  /** How often to check for externally-closed GitHub issues. Default 5 min. */
+  externalCloseCheckIntervalMs?: number;
 }
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = {
@@ -44,6 +46,7 @@ const DEFAULT_GATE_WAIT_STALL_MS = 10 * 60 * 1000;
 const DEFAULT_NO_OUTPUT_STALL_MS = 10 * 60 * 1000;
 const DEFAULT_EXCESSIVE_RETRY_THRESHOLD = 2;
 const DEFAULT_SCAN_INTERVAL_MS = 30_000;
+const DEFAULT_EXTERNAL_CLOSE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 export class Lookout {
   private shipManager: ShipManager;
@@ -51,6 +54,9 @@ export class Lookout {
   private escortManager: EscortManager;
   private timer: ReturnType<typeof setInterval> | null = null;
   private onAlerts: ((alerts: LookoutAlert[]) => void) | null = null;
+  private onExternalCloseCheck: (() => Promise<unknown>) | null = null;
+  private externalCloseCheckInFlight = false;
+  private lastExternalCloseCheckAt = 0;
   private alertsSent = new Map<string, number>();
 
   private readonly minSeverity: AlertSeverity;
@@ -58,6 +64,7 @@ export class Lookout {
   private readonly noOutputStallMs: number;
   private readonly excessiveRetryThreshold: number;
   private readonly scanIntervalMs: number;
+  private readonly externalCloseCheckIntervalMs: number;
 
   constructor(
     shipManager: ShipManager,
@@ -73,10 +80,21 @@ export class Lookout {
     this.noOutputStallMs = config?.noOutputStallMs ?? DEFAULT_NO_OUTPUT_STALL_MS;
     this.excessiveRetryThreshold = config?.excessiveRetryThreshold ?? DEFAULT_EXCESSIVE_RETRY_THRESHOLD;
     this.scanIntervalMs = config?.scanIntervalMs ?? DEFAULT_SCAN_INTERVAL_MS;
+    this.externalCloseCheckIntervalMs =
+      config?.externalCloseCheckIntervalMs ?? DEFAULT_EXTERNAL_CLOSE_CHECK_INTERVAL_MS;
   }
 
   setAlertBatchHandler(handler: (alerts: LookoutAlert[]) => void): void {
     this.onAlerts = handler;
+  }
+
+  /**
+   * Register a handler that checks for externally-closed GitHub issues.
+   * Invoked by the periodic scan at `externalCloseCheckIntervalMs` cadence.
+   * Typically wired to `StateSync.syncExternallyClosedIssues()`.
+   */
+  setExternalCloseCheckHandler(handler: () => Promise<unknown>): void {
+    this.onExternalCloseCheck = handler;
   }
 
   start(): void {
@@ -122,6 +140,28 @@ export class Lookout {
     if (batch.length > 0 && this.onAlerts) {
       this.onAlerts(batch);
     }
+
+    this.maybeRunExternalCloseCheck(now);
+  }
+
+  /**
+   * Fire the external-close check at most once per `externalCloseCheckIntervalMs`,
+   * and never while a previous check is still in flight.
+   */
+  private maybeRunExternalCloseCheck(now: number): void {
+    if (!this.onExternalCloseCheck) return;
+    if (this.externalCloseCheckInFlight) return;
+    if (now - this.lastExternalCloseCheckAt < this.externalCloseCheckIntervalMs) return;
+
+    this.externalCloseCheckInFlight = true;
+    this.lastExternalCloseCheckAt = now;
+    Promise.resolve(this.onExternalCloseCheck())
+      .catch((err) => {
+        console.warn("[lookout] External-close check failed:", err);
+      })
+      .finally(() => {
+        this.externalCloseCheckInFlight = false;
+      });
   }
 
   private checkGateWaitStall(ship: ShipProcess, now: number, batch: LookoutAlert[]): void {

@@ -575,4 +575,96 @@ describe("Lookout", () => {
       noHandlerLookout.stop();
     });
   });
+
+  describe("external-close check (#923)", () => {
+    it("does not run external-close check when no handler is registered", () => {
+      const ship = makeShip({ retryCount: 0 });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      lookout.start();
+      vi.advanceTimersByTime(10 * 60 * 1000);
+      // No assertion needed — absence of a thrown error is the check.
+    });
+
+    it("invokes external-close handler on first scan and throttles subsequent scans", async () => {
+      const handler = vi.fn().mockResolvedValue(undefined);
+      const throttledLookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { externalCloseCheckIntervalMs: 2 * 60 * 1000 },
+      );
+      throttledLookout.setExternalCloseCheckHandler(handler);
+
+      const ship = makeShip({ retryCount: 0 });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      throttledLookout.start();
+      // First scan at 30s triggers handler (lastExternalCloseCheckAt is 0)
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Next scans within 2min throttle window should not re-trigger
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // After the throttle window elapses, the next scan fires again
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(handler).toHaveBeenCalledTimes(2);
+
+      throttledLookout.stop();
+    });
+
+    it("does not run multiple checks concurrently", async () => {
+      const resolvers: Array<() => void> = [];
+      const handler = vi.fn().mockImplementation(
+        () => new Promise<void>((resolve) => { resolvers.push(resolve); }),
+      );
+      const throttledLookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { externalCloseCheckIntervalMs: 0 }, // always eligible
+      );
+      throttledLookout.setExternalCloseCheckHandler(handler);
+
+      const ship = makeShip({ retryCount: 0 });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      throttledLookout.start();
+      vi.advanceTimersByTime(30_000); // fires handler, returns unresolved promise
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Second scan should skip because the previous check is in flight
+      vi.advanceTimersByTime(30_000);
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Resolve the first handler and wait for the finally block
+      resolvers[0]?.();
+      await vi.waitFor(() => {
+        vi.advanceTimersByTime(30_000);
+        expect(handler).toHaveBeenCalledTimes(2);
+      });
+
+      throttledLookout.stop();
+    });
+
+    it("logs and continues when handler rejects", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const handler = vi.fn().mockRejectedValue(new Error("boom"));
+      const throttledLookout = createLookout(
+        { shipManager: mockShipManager, processManager: mockProcessManager, escortManager: mockEscortManager },
+        { externalCloseCheckIntervalMs: 0 },
+      );
+      throttledLookout.setExternalCloseCheckHandler(handler);
+
+      const ship = makeShip({ retryCount: 0 });
+      mockShipManager.getAllShips.mockReturnValue([ship]);
+
+      throttledLookout.start();
+      vi.advanceTimersByTime(30_000);
+      await vi.waitFor(() => {
+        expect(warn).toHaveBeenCalled();
+      });
+
+      throttledLookout.stop();
+      warn.mockRestore();
+    });
+  });
 });
