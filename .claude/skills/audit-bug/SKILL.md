@@ -196,7 +196,52 @@ ISSUEEOF
 - TEST_ISSUE / FLAKY カテゴリは `type/test` ラベルで起票する（`type/bug` ではない）
 - 1 回の audit で起票する issue は最大 **10 件**（多すぎると管理不能）
 
-## Step 4: サマリ報告
+## Step 4: E2E テスト増強 issue の起票
+
+W-1（Dispatch W）のカバレッジギャップ分析結果に基づき、不足している E2E テストの増強 issue を `type/test` で起票する。
+
+- `/audit-quality` の分析結果も参照し、構造的弱点のテストカバレッジを優先する
+- issue には具体的なテストシナリオとカバーすべきバグ番号を記載する
+
+```bash
+gh issue create \
+  --title "test: <テスト対象領域> の E2E テストを追加" \
+  --label "type/test" \
+  --body "$(cat <<'ISSUEEOF'
+## 概要
+
+<カバレッジギャップの説明（1-2 文）>
+
+## 追加すべきテストシナリオ
+
+- [ ] <シナリオ 1>
+- [ ] <シナリオ 2>
+- [ ] <シナリオ 3>
+
+## カバーすべきバグ
+
+- #<bug-issue-number> — <バグの簡潔な説明>
+
+## 背景
+
+- **検出元**: /audit-bug E2E カバレッジギャップ分析
+- **リスクレベル**: <high | medium>
+- **対象領域**: <Fleet CRUD | Ship lifecycle | Commander chat | Dispatch | etc.>
+
+## 関連
+
+- #913 — audit-bug スキルによる検出
+ISSUEEOF
+)"
+```
+
+### 起票ルール
+
+- Coverage Gaps のうち Risk Level が `high` または `medium` のもののみ起票する
+- Step 3 で起票した `type/bug` issue のうち、E2E テストで検出可能なものは対応するテスト増強 issue にバグ番号を含める
+- 1 回の audit で起票する E2E テスト増強 issue は最大 **5 件**
+
+## Step 5: サマリ報告
 
 全結果をユーザーに報告する。
 
