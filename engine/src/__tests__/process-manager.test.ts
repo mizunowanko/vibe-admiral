@@ -399,9 +399,9 @@ describe("ProcessManager", () => {
       ]);
     });
 
-    it("returns null when process not found", () => {
+    it("returns failure when process not found", () => {
       const result = pm.sendMessage("nonexistent", "Hello");
-      expect(result).toBeNull();
+      expect(result).toEqual({ ok: false, reason: "process-not-found" });
     });
   });
 
