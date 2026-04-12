@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAdmiralHome } from "./admiral-home.js";
+import { safeJsonParse } from "./util/json-safe.js";
 
 /** Retryable error patterns in stderr / error output from Claude CLI.
  *  Covers rate limits (429), overload (529), server errors (500),
@@ -37,6 +38,10 @@ export const isRateLimitError = isRetryableError;
  */
 export const COMMANDER_ALLOWED_TOOLS =
   "Bash,Read,Glob,Grep,WebSearch,WebFetch";
+
+export type SendResult =
+  | { ok: true }
+  | { ok: false; reason: "not-writable" | "process-not-found" };
 
 export interface ProcessEvents {
   data: (id: string, message: Record<string, unknown>) => void;
@@ -97,8 +102,8 @@ export interface ProcessManagerLike {
     id: string,
     message: string,
     images?: Array<{ base64: string; mediaType: string }>,
-  ): unknown;
-  sendToolResult(id: string, toolUseId: string, result: string): unknown;
+  ): SendResult;
+  sendToolResult(id: string, toolUseId: string, result: string): SendResult;
 
   // Lifecycle methods
   kill(id: string): boolean;
@@ -289,9 +294,10 @@ export class ProcessManager extends EventEmitter {
     id: string,
     message: string,
     images?: Array<{ base64: string; mediaType: string }>,
-  ): ChildProcess | null {
+  ): SendResult {
     const proc = this.processes.get(id);
-    if (!proc?.stdin?.writable) return null;
+    if (!proc) return { ok: false, reason: "process-not-found" };
+    if (!proc.stdin?.writable) return { ok: false, reason: "not-writable" };
 
     let content: string | Array<Record<string, unknown>> = message;
     if (images && images.length > 0) {
@@ -313,16 +319,17 @@ export class ProcessManager extends EventEmitter {
       message: { role: "user", content },
     });
     proc.stdin.write(payload + "\n");
-    return proc;
+    return { ok: true };
   }
 
   sendToolResult(
     id: string,
     toolUseId: string,
     result: string,
-  ): ChildProcess | null {
+  ): SendResult {
     const proc = this.processes.get(id);
-    if (!proc?.stdin?.writable) return null;
+    if (!proc) return { ok: false, reason: "process-not-found" };
+    if (!proc.stdin?.writable) return { ok: false, reason: "not-writable" };
     const payload = JSON.stringify({
       type: "user",
       message: {
@@ -338,7 +345,7 @@ export class ProcessManager extends EventEmitter {
       },
     });
     proc.stdin.write(payload + "\n");
-    return proc;
+    return { ok: true };
   }
 
   /**
@@ -502,20 +509,13 @@ export class ProcessManager extends EventEmitter {
 
       for (const line of lines) {
         if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line) as Record<string, unknown>;
-          this.emit("data", id, msg);
+        const msg = safeJsonParse<Record<string, unknown>>(line, { source: `proc:${shortId}.stdout` });
+        if (!msg) continue;
+        this.emit("data", id, msg);
 
-          // Persist Ship log: skip system init/hook messages (noisy, may contain env info)
-          // Inject timestamp so loadShipLogs can sort Ship+Escort messages chronologically
-          if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
-            const msgWithTs = { ...msg, timestamp: Date.now() };
-            appendFile(logFilePath, JSON.stringify(msgWithTs) + "\n").catch(() => {
-              // Best-effort: don't crash on write failure
-            });
-          }
-        } catch {
-          // Non-JSON output, ignore
+        if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
+          const msgWithTs = { ...msg, timestamp: Date.now() };
+          appendFile(logFilePath, JSON.stringify(msgWithTs) + "\n").catch(() => {});
         }
       }
     });

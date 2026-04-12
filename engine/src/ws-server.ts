@@ -428,20 +428,27 @@ export class EngineServer {
       }
 
       ws.on("message", (data) => {
+        let msg: ClientMessage;
         try {
-          const msg = JSON.parse(data.toString()) as ClientMessage;
-          if (msg.type === "pong") {
-            // Application-level pong response — mark client as alive
-            this.clientAliveMap.set(ws, true);
-            return;
-          }
-          handleMessage(this.messageHandlerDeps, ws, msg);
+          msg = JSON.parse(data.toString()) as ClientMessage;
         } catch (err) {
           this.sendTo(ws, {
             type: "error",
-            data: { source: "ws", message: `Invalid message: ${err}` },
+            data: { source: "ws", message: `Invalid JSON: ${err}` },
           });
+          return;
         }
+        if (msg.type === "pong") {
+          this.clientAliveMap.set(ws, true);
+          return;
+        }
+        handleMessage(this.messageHandlerDeps, ws, msg).catch((err) => {
+          console.error(`[ws] Unhandled error in handleMessage(${msg.type}):`, err);
+          this.sendTo(ws, {
+            type: "error",
+            data: { source: msg.type, message: err instanceof Error ? err.message : String(err) },
+          });
+        });
       });
 
       ws.on("close", () => {

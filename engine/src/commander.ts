@@ -4,6 +4,7 @@ import type { ProcessManagerLike } from "./process-manager.js";
 import { getAdmiralHome } from "./admiral-home.js";
 import type { StreamMessage, PersistedCommanderSession, CommanderRole, Dispatch, DispatchStatus } from "./types.js";
 import { UNIT_DEPLOY_MAP } from "./unit-deploy-map.js";
+import { safeJsonParse } from "./util/json-safe.js";
 
 const MAX_HISTORY = 500;
 
@@ -221,8 +222,11 @@ export class CommanderManager {
       }
     }
 
-    // Send immediately — writing to stdin also unblocks Bun's pipe handling.
-    this.processManager.sendMessage(processId, message, images);
+    const sendResult = this.processManager.sendMessage(processId, message, images);
+    if (!sendResult.ok) {
+      console.warn(`[${this.role}] sendMessage failed for fleet ${fleetId}: ${sendResult.reason}`);
+      return false;
+    }
     return true;
   }
 
@@ -545,11 +549,8 @@ export class CommanderManager {
     const lines = content.trimEnd().split("\n").filter(Boolean);
     const messages: StreamMessage[] = [];
     for (const line of lines) {
-      try {
-        messages.push(JSON.parse(line) as StreamMessage);
-      } catch {
-        // Skip malformed lines
-      }
+      const msg = safeJsonParse<StreamMessage>(line, { source: "commander.history" });
+      if (msg) messages.push(msg);
     }
     return messages.slice(-MAX_HISTORY);
   }
@@ -577,15 +578,15 @@ export class CommanderManager {
     const filePath = this.sessionPath(fleetId);
     try {
       const content = await readFile(filePath, "utf-8");
-      return JSON.parse(content) as PersistedCommanderSession;
+      return safeJsonParse<PersistedCommanderSession>(content, { source: "commander.loadSession" });
     } catch {
       // Try legacy bridge-session.json for migration
       if (this.role === "flagship") {
         try {
           const legacyPath = join(this.fleetDir(fleetId), "bridge-session.json");
           const content = await readFile(legacyPath, "utf-8");
-          const legacy = JSON.parse(content) as { fleetId: string; sessionId: string | null; createdAt: string };
-          return { ...legacy, role: "flagship" };
+          const legacy = safeJsonParse<{ fleetId: string; sessionId: string | null; createdAt: string }>(content, { source: "commander.legacySession" });
+          if (legacy) return { ...legacy, role: "flagship" };
         } catch {
           // No legacy file
         }

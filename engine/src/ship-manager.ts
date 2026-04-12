@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { loadUnitPrompt } from "./prompt-loader.js";
 import type { ProcessManagerLike } from "./process-manager.js";
 import { parseStreamMessage } from "./stream-parser.js";
+import { safeJsonParse } from "./util/json-safe.js";
 import type { StatusManager } from "./status-manager.js";
 import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
@@ -211,10 +212,12 @@ export class ShipManager {
       ]);
       const trimmed = stdout.trim();
       if (trimmed) {
-        const pr = JSON.parse(trimmed) as { number: number; url: string };
-        existingPrUrl = pr.url;
-        existingPrReviewStatus = "pending";
-        console.log(`[ship-manager] Existing PR detected for #${issueNumber}: ${pr.url}`);
+        const pr = safeJsonParse<{ number: number; url: string }>(trimmed, { source: "sortie.existingPR" });
+        if (pr) {
+          existingPrUrl = pr.url;
+          existingPrReviewStatus = "pending";
+          console.log(`[ship-manager] Existing PR detected for #${issueNumber}: ${pr.url}`);
+        }
       }
     } catch {
       // No existing PR or gh failed — continue without it
@@ -1375,12 +1378,10 @@ export class ShipManager {
         const lines = content.trimEnd().split("\n").filter(Boolean);
         const msgs: StreamMessage[] = [];
         for (const line of lines) {
-          try {
-            const parsed = parseStreamMessage(JSON.parse(line));
-            if (parsed) msgs.push(parsed);
-          } catch {
-            // Skip malformed lines
-          }
+          const raw = safeJsonParse<Record<string, unknown>>(line, { source: "loadShipLogs.jsonl" });
+          if (!raw) continue;
+          const parsed = parseStreamMessage(raw);
+          if (parsed) msgs.push(parsed);
         }
         return msgs;
       } catch {
@@ -1425,16 +1426,14 @@ export class ShipManager {
         const decompressed = gunzipSync(row.data).toString("utf-8");
         const lines = decompressed.trimEnd().split("\n").filter(Boolean);
         for (const line of lines) {
-          try {
-            const parsed = parseStreamMessage(JSON.parse(line));
-            if (parsed) {
-              if (row.logType === "escort") {
-                parsed.meta = { ...parsed.meta, category: "escort-log" };
-              }
-              allMsgs.push(parsed);
+          const raw = safeJsonParse<Record<string, unknown>>(line, { source: "loadShipLogs.db" });
+          if (!raw) continue;
+          const parsed = parseStreamMessage(raw);
+          if (parsed) {
+            if (row.logType === "escort") {
+              parsed.meta = { ...parsed.meta, category: "escort-log" };
             }
-          } catch {
-            // Skip malformed lines
+            allMsgs.push(parsed);
           }
         }
       } catch {
