@@ -11,7 +11,7 @@ argument-hint: []
 
 ## 前提
 
-- Commander（Dock）から呼び出される
+- 任意の Unit（Commander, Ship 等）から呼び出せる
 - ソースコードの調査は全て Dispatch 経由（Commander はコードを直接読まない）
 - ADR ファイル作成は Dispatch 経由で行う
 - Issue 起票は Commander が `gh issue create` で行う（Dispatch は起票しない）
@@ -84,7 +84,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -H 'Content-Type: application/json' \
   -d '{
     "fleetId": "<fleet-id>",
-    "parentRole": "dock",
+    "parentRole": "commander",
     "name": "audit-quality-<category>",
     "type": "investigate",
     "cwd": "<repo-path>",
@@ -113,7 +113,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   -H 'Content-Type: application/json' \
   -d '{
     "fleetId": "<fleet-id>",
-    "parentRole": "dock",
+    "parentRole": "commander",
     "name": "audit-quality-adr-<number>",
     "type": "investigate",
     "cwd": "<repo-path>",
