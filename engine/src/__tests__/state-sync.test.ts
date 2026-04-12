@@ -47,6 +47,7 @@ type MockShipManager = {
   resetRapidDeathCount: ReturnType<typeof vi.fn>;
   setPrUrl: ReturnType<typeof vi.fn>;
   persistChatLogs: ReturnType<typeof vi.fn>;
+  killProcess: ReturnType<typeof vi.fn>;
 };
 
 type MockStatusManager = {
@@ -135,6 +136,7 @@ describe("StateSync", () => {
       resetRapidDeathCount: vi.fn(),
       setPrUrl: vi.fn(),
       persistChatLogs: vi.fn().mockResolvedValue(undefined),
+      killProcess: vi.fn().mockReturnValue(false),
     };
     mockStatusManager = {
       getStatus: vi.fn(),
@@ -477,6 +479,139 @@ describe("StateSync", () => {
     it("skips repos without remote", async () => {
       await stateSync.reconcileOnStartup([{ localPath: "/repo" }]);
       expect(mockListIssues).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("syncExternallyClosedIssues (#923)", () => {
+    function makeMockActor(response: { success: boolean; currentPhase?: string } = { success: true }) {
+      return {
+        requestTransition: vi.fn().mockReturnValue(response),
+        send: vi.fn(),
+        reconcilePhase: vi.fn(),
+        assertPhaseConsistency: vi.fn().mockReturnValue(true),
+      };
+    }
+
+    it("returns empty list when no active ships", async () => {
+      mockShipManager.getAllShips.mockReturnValue([]);
+      const result = await stateSync.syncExternallyClosedIssues();
+      expect(result).toEqual([]);
+      expect(mockGetIssue).not.toHaveBeenCalled();
+    });
+
+    it("ignores ships in done/paused/abandoned phases", async () => {
+      mockShipManager.getAllShips.mockReturnValue([
+        makeShip({ id: "s-done", phase: "done" }),
+        makeShip({ id: "s-paused", phase: "paused" }),
+        makeShip({ id: "s-abandoned", phase: "abandoned" }),
+      ]);
+      const result = await stateSync.syncExternallyClosedIssues();
+      expect(result).toEqual([]);
+      expect(mockGetIssue).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when active ship's issue is still open", async () => {
+      mockShipManager.getAllShips.mockReturnValue([
+        makeShip({ id: "s1", phase: "plan", issueNumber: 10 }),
+      ]);
+      mockGetIssue.mockResolvedValue(makeIssue({ number: 10, state: "open" }));
+
+      const result = await stateSync.syncExternallyClosedIssues();
+      expect(result).toEqual([]);
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
+      expect(mockShipManager.killProcess).not.toHaveBeenCalled();
+    });
+
+    it("transitions ship to done and cleans up when issue is closed externally", async () => {
+      const actor = makeMockActor();
+      stateSync.setActorManager(actor as unknown as Parameters<typeof stateSync.setActorManager>[0]);
+
+      mockShipManager.getAllShips.mockReturnValue([
+        makeShip({ id: "s1", phase: "plan", issueNumber: 10, worktreePath: "/wt/s1" }),
+      ]);
+      mockGetIssue.mockResolvedValue(makeIssue({ number: 10, state: "closed" }));
+      mockShipManager.hasRunningProcess.mockReturnValue(true);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockStatusManager.markDone.mockResolvedValue(undefined);
+
+      const result = await stateSync.syncExternallyClosedIssues();
+
+      expect(result).toEqual(["s1"]);
+      expect(actor.requestTransition).toHaveBeenCalledWith(
+        "s1",
+        expect.objectContaining({ type: "EXTERNAL_CLOSE" }),
+      );
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("s1", "done");
+      expect(mockShipManager.killProcess).toHaveBeenCalledWith("s1");
+      expect(mockEscortManager.cleanupForDoneShip).toHaveBeenCalledWith("s1");
+      expect(mockShipManager.persistChatLogs).toHaveBeenCalledWith("s1");
+      expect(mockWorktreeRemove).toHaveBeenCalled();
+      expect(mockStatusManager.markDone).toHaveBeenCalledWith(REPO, 10);
+    });
+
+    it("skips cleanup when XState rejects the transition", async () => {
+      const actor = makeMockActor({ success: false, currentPhase: "paused" });
+      stateSync.setActorManager(actor as unknown as Parameters<typeof stateSync.setActorManager>[0]);
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      mockShipManager.getAllShips.mockReturnValue([
+        makeShip({ id: "s1", phase: "plan", issueNumber: 10 }),
+      ]);
+      mockGetIssue.mockResolvedValue(makeIssue({ number: 10, state: "closed" }));
+
+      const result = await stateSync.syncExternallyClosedIssues();
+
+      expect(result).toEqual([]);
+      expect(mockShipManager.updatePhase).not.toHaveBeenCalled();
+      expect(mockShipManager.killProcess).not.toHaveBeenCalled();
+      expect(mockWorktreeRemove).not.toHaveBeenCalled();
+      vi.mocked(console.warn).mockRestore();
+    });
+
+    it("continues processing remaining ships when one issue fetch fails", async () => {
+      const actor = makeMockActor();
+      stateSync.setActorManager(actor as unknown as Parameters<typeof stateSync.setActorManager>[0]);
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      mockShipManager.getAllShips.mockReturnValue([
+        makeShip({ id: "s-fail", phase: "plan", issueNumber: 10 }),
+        makeShip({ id: "s-ok", phase: "coding", issueNumber: 20, worktreePath: "/wt/s-ok" }),
+      ]);
+      mockGetIssue.mockImplementation(async (_repo: string, num: number) => {
+        if (num === 10) throw new Error("network error");
+        return makeIssue({ number: num, state: "closed" });
+      });
+      mockShipManager.hasRunningProcess.mockReturnValue(false);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockStatusManager.markDone.mockResolvedValue(undefined);
+
+      const result = await stateSync.syncExternallyClosedIssues();
+
+      expect(result).toEqual(["s-ok"]);
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("s-ok", "done");
+      vi.mocked(console.warn).mockRestore();
+    });
+
+    it("still runs full cleanup when no process is running (idempotent kill)", async () => {
+      const actor = makeMockActor();
+      stateSync.setActorManager(actor as unknown as Parameters<typeof stateSync.setActorManager>[0]);
+
+      mockShipManager.getAllShips.mockReturnValue([
+        makeShip({ id: "s1", phase: "plan", issueNumber: 10 }),
+      ]);
+      mockGetIssue.mockResolvedValue(makeIssue({ number: 10, state: "closed" }));
+      mockShipManager.hasRunningProcess.mockReturnValue(false);
+      mockGetRepoRoot.mockResolvedValue("/repo");
+      mockWorktreeRemove.mockResolvedValue(undefined);
+      mockStatusManager.markDone.mockResolvedValue(undefined);
+
+      await stateSync.syncExternallyClosedIssues();
+
+      // killProcess is idempotent — safe to call even without a running process.
+      expect(mockShipManager.killProcess).toHaveBeenCalledWith("s1");
+      expect(mockShipManager.updatePhase).toHaveBeenCalledWith("s1", "done");
     });
   });
 });

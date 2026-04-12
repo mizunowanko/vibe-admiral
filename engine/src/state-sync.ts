@@ -589,6 +589,101 @@ export class StateSync {
     }
   }
 
+  /**
+   * Detect Ships whose GitHub issue has been closed externally (e.g. by another
+   * Ship's PR merge via "Closes #N", by a user, or as a duplicate) and transition
+   * them to `done` via XState `EXTERNAL_CLOSE` event, then run cleanup.
+   *
+   * Only Ships in active phases (not done/paused/abandoned) are inspected.
+   * Returns the list of Ship IDs that were transitioned to done.
+   */
+  async syncExternallyClosedIssues(): Promise<string[]> {
+    const closedShipIds: string[] = [];
+    const activeShips = this.shipManager.getAllShips().filter(
+      (s) =>
+        s.phase !== "done" &&
+        s.phase !== "paused" &&
+        s.phase !== "abandoned",
+    );
+    if (activeShips.length === 0) return closedShipIds;
+
+    const results = await Promise.allSettled(
+      activeShips.map(async (ship) => {
+        const issue = await github.getIssue(ship.repo, ship.issueNumber);
+        return { ship, closed: issue.state === "closed" };
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.warn(
+          `[state-sync] syncExternallyClosedIssues: failed to fetch issue state:`,
+          result.reason,
+        );
+        continue;
+      }
+      const { ship, closed } = result.value;
+      if (!closed) continue;
+
+      const transition = this.actorManager?.requestTransition(ship.id, {
+        type: "EXTERNAL_CLOSE",
+        reason: "Issue closed externally on GitHub",
+      });
+      if (transition && !transition.success) {
+        console.warn(
+          `[state-sync] syncExternallyClosedIssues: EXTERNAL_CLOSE rejected for Ship #${ship.issueNumber} ` +
+          `(${ship.id.slice(0, 8)}...): current phase is ${transition.currentPhase ?? "unknown"}`,
+        );
+        continue;
+      }
+
+      console.log(
+        `[state-sync] Ship #${ship.issueNumber} (${ship.id.slice(0, 8)}...) issue closed externally — transitioning to done`,
+      );
+
+      this.shipManager.updatePhase(ship.id, "done");
+      closedShipIds.push(ship.id);
+
+      // Kill any running Ship process so it doesn't try to continue work.
+      this.shipManager.killProcess(ship.id);
+
+      // Clean up Escort and persist chat logs before worktree removal.
+      this.escortManager?.cleanupForDoneShip(ship.id);
+      try {
+        await this.shipManager.persistChatLogs(ship.id);
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to persist chat logs for externally-closed Ship #${ship.issueNumber}:`,
+          err,
+        );
+      }
+
+      await this.removeWorktreeWithRetry(ship.worktreePath);
+
+      // Remove leftover status/sortied label (issue is already closed so markDone
+      // skips the close, but the label still needs cleanup).
+      try {
+        await this.statusManager.markDone(ship.repo, ship.issueNumber);
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to clean up labels for externally-closed #${ship.issueNumber}:`,
+          err,
+        );
+      }
+
+      try {
+        await this.auditDependencies(ship.repo, ship.issueNumber);
+      } catch (err) {
+        console.warn(
+          `[state-sync] Failed to audit dependencies for externally-closed #${ship.issueNumber}:`,
+          err,
+        );
+      }
+    }
+
+    return closedShipIds;
+  }
+
   async reconcileOnStartup(
     repos: Array<{ remote?: string; localPath: string }>,
   ): Promise<void> {
@@ -684,7 +779,20 @@ export class StateSync {
       }
     }
 
-    // 4. Restored ships with no running process remain in their phase.
+    // 4. Detect Ships whose GitHub issue was closed externally (e.g. by another
+    // Ship's PR via "Closes #N", by a user, or as a duplicate) and transition
+    // them to done. Must run before step 5 so process-dead notifications aren't
+    // emitted for Ships that are now properly marked done.
+    try {
+      await this.syncExternallyClosedIssues();
+    } catch (err) {
+      console.warn(
+        "[state-sync] syncExternallyClosedIssues failed during startup:",
+        err,
+      );
+    }
+
+    // 5. Restored ships with no running process remain in their phase.
     // The UI will show them as "process dead" based on the derived state.
     // Notify for each so Bridge gets the process-dead notification.
     for (const ship of this.shipManager.getAllShips()) {

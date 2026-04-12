@@ -60,6 +60,7 @@ export type ShipMachineEvent =
   | { type: "COMPACT_START" }
   | { type: "COMPACT_END" }
   | { type: "NOTHING_TO_DO"; reason?: string }
+  | { type: "EXTERNAL_CLOSE"; reason?: string }
   | { type: "SET_SESSION_ID"; sessionId: string }
   | { type: "SET_PR_URL"; prUrl: string }
   | { type: "SET_QA_REQUIRED"; qaRequired: boolean }
@@ -188,6 +189,7 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "plan",
           }),
         },
+        EXTERNAL_CLOSE: { target: "done" },
       },
     },
 
@@ -214,6 +216,10 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "plan-gate",
           }),
         },
+        EXTERNAL_CLOSE: {
+          target: "done",
+          actions: "clearGateCheck",
+        },
       },
     },
 
@@ -229,6 +235,7 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "coding",
           }),
         },
+        EXTERNAL_CLOSE: { target: "done" },
       },
     },
 
@@ -255,6 +262,10 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "coding-gate",
           }),
         },
+        EXTERNAL_CLOSE: {
+          target: "done",
+          actions: "clearGateCheck",
+        },
       },
     },
 
@@ -276,6 +287,7 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "qa",
           }),
         },
+        EXTERNAL_CLOSE: { target: "done" },
       },
     },
 
@@ -302,6 +314,10 @@ export const shipMachine = setup({
             phaseBeforeStopped: (): Phase | null => "qa-gate",
           }),
         },
+        EXTERNAL_CLOSE: {
+          target: "done",
+          actions: "clearGateCheck",
+        },
       },
     },
 
@@ -315,6 +331,7 @@ export const shipMachine = setup({
           }),
         },
         NOTHING_TO_DO: { target: "done" },
+        EXTERNAL_CLOSE: { target: "done" },
       },
     },
 

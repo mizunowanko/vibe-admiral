@@ -363,6 +363,12 @@ export class EngineServer {
       inspectScheduler: this.inspectScheduler,
     });
 
+    // Detect externally-closed GitHub issues (e.g. by another Ship's PR merge
+    // or manual close) during periodic Lookout scans.
+    this.lookout.setExternalCloseCheckHandler(() =>
+      this.stateSync.syncExternallyClosedIssues(),
+    );
+
     this.processLivenessTimer = startProcessLivenessCheck({
       shipManager: this.shipManager,
       processManager: this.processManager,
