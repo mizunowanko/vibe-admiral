@@ -35,7 +35,7 @@ Engine が qa-gate フェーズを検知したとき、独立プロセス（`cla
 2. PR が見つかった場合のみコメント投稿（ヘッダー `## Acceptance Test: ⏭️ SKIPPED` or `AUTO-APPROVED`、理由、`🤖 Generated with [Claude Code](https://claude.com/claude-code)` フッター）
 3. gate-verdict approve を送信:
    ```bash
-   curl -sf http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
+   curl -sS --fail-with-body http://localhost:${ENGINE_PORT}/api/ship/${PARENT_SHIP_ID}/gate-verdict \
      -H 'Content-Type: application/json' \
      -d '{"verdict": "approve"}'
    ```

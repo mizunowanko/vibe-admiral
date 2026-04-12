@@ -21,7 +21,7 @@ user-invocable: false
 `qaRequired: true` の場合、Engine REST API で `qa-gate` に遷移し、Escort が Playwright テストを実施する:
 
 ```bash
-curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+curl -sS --fail-with-body http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
   -H 'Content-Type: application/json' \
   -d '{"phase": "qa-gate", "metadata": {}}'
 ```
@@ -153,7 +153,7 @@ RETROEOF
 **`VIBE_ADMIRAL` 設定時**: Engine REST API で `done` に遷移:
 
 ```bash
-curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+curl -sS --fail-with-body http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
   -H 'Content-Type: application/json' \
   -d '{"phase": "done", "metadata": {}}'
 ```
