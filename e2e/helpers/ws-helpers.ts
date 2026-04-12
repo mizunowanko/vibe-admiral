@@ -261,6 +261,126 @@ export async function getSelectedFleetId(page: Page): Promise<string> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Dispatch seeding — notification-only WS protocol (ADR-0019)
+// ---------------------------------------------------------------------------
+
+/** Dispatch seed data for E2E tests. */
+export interface DispatchSeed {
+  id: string;
+  parentRole: "dock" | "flagship";
+  fleetId: string;
+  name: string;
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
+}
+
+/**
+ * Seed a dispatch into the frontend by injecting a `dispatch:created` WS
+ * notification. The frontend's useDispatchListener picks this up and calls
+ * sessionStore.upsertDispatch().
+ */
+export async function seedDispatch(page: Page, dispatch: DispatchSeed) {
+  await injectWsMessage(page, {
+    type: "dispatch:created",
+    data: {
+      fleetId: dispatch.fleetId,
+      dispatch: {
+        id: dispatch.id,
+        parentRole: dispatch.parentRole,
+        fleetId: dispatch.fleetId,
+        name: dispatch.name,
+        status: dispatch.status,
+        startedAt: dispatch.startedAt,
+        completedAt: dispatch.completedAt,
+        result: dispatch.result,
+      },
+    },
+  });
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Update a dispatch's status by injecting a `dispatch:completed` WS notification.
+ */
+export async function updateDispatchStatus(
+  page: Page,
+  dispatch: DispatchSeed,
+) {
+  await injectWsMessage(page, {
+    type: "dispatch:completed",
+    data: {
+      fleetId: dispatch.fleetId,
+      dispatch: {
+        id: dispatch.id,
+        parentRole: dispatch.parentRole,
+        fleetId: dispatch.fleetId,
+        name: dispatch.name,
+        status: dispatch.status,
+        startedAt: dispatch.startedAt,
+        completedAt: dispatch.completedAt,
+        result: dispatch.result,
+      },
+    },
+  });
+  await page.waitForTimeout(200);
+}
+
+// ---------------------------------------------------------------------------
+// Escort message injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Inject an Escort log message for a specific ship.
+ * Uses the `escort:stream` WS message which routes through
+ * escort-handlers → shipStore.addShipLog() with meta.category = "escort-log".
+ */
+export async function injectEscortMessage(
+  page: Page,
+  shipId: string,
+  content: string,
+  timestamp?: number,
+) {
+  await injectWsMessage(page, {
+    type: "escort:stream",
+    data: {
+      id: shipId,
+      message: {
+        type: "assistant",
+        content,
+        timestamp: timestamp ?? Date.now(),
+        meta: { category: "escort-log" },
+      },
+    },
+  });
+  await page.waitForTimeout(200);
+}
+
+/**
+ * Inject a Ship stream message for a specific ship.
+ */
+export async function injectShipMessage(
+  page: Page,
+  shipId: string,
+  content: string,
+  timestamp?: number,
+) {
+  await injectWsMessage(page, {
+    type: "ship:stream",
+    data: {
+      id: shipId,
+      message: {
+        type: "assistant",
+        content,
+        timestamp: timestamp ?? Date.now(),
+      },
+    },
+  });
+  await page.waitForTimeout(200);
+}
+
 /**
  * Wait for a specific WS message type to arrive.
  * Installs a temporary message listener and resolves when matched.
