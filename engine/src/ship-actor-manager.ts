@@ -227,6 +227,16 @@ export class ShipActorManager {
   }
 
   /**
+   * Get the raw XState snapshot for dry-run transitions (ADR-0021).
+   * Used by PhaseTransactionService to validate transitions without side effects.
+   */
+  getSnapshot(shipId: string): ReturnType<Actor<typeof shipMachine>["getSnapshot"]> | undefined {
+    const actor = this.actors.get(shipId);
+    if (!actor) return undefined;
+    return actor.getSnapshot();
+  }
+
+  /**
    * Get the persisted snapshot for a Ship's Actor (ADR-0017).
    * Returns the serializable snapshot suitable for DB storage and later restoration
    * via `createActor(shipMachine, { snapshot })`.
@@ -298,20 +308,13 @@ export class ShipActorManager {
   }
 
   /**
-   * Reconcile XState actor to match the DB phase by destroying and re-creating
-   * the actor with event replay. This fixes split-brain where XState and DB
-   * have diverged (e.g., DB persist failed after XState transition, or
-   * gate reject updated DB but not XState).
-   *
-   * Returns true if reconciliation was performed, false if phases already match
-   * or reconciliation was not possible (no actor, terminal phase).
-   *
-   * @see https://github.com/mizunowanko/vibe-admiral/issues/694
+   * @deprecated Downgraded to drift detection logger (ADR-0021).
+   * PhaseTransactionService now ensures DB-first ordering, making routine reconciliation unnecessary.
+   * Still used for: (1) Engine restart/restore flows, (2) DB persist failure rollback in PhaseTransactionService.
    */
   reconcilePhase(shipId: string, dbPhase: Phase, persistedSnapshot?: unknown): boolean {
     const actorPhase = this.getPhase(shipId);
 
-    // No actor — nothing to reconcile
     if (actorPhase === undefined) {
       console.warn(
         `[ship-actor-manager] reconcilePhase: no actor for Ship ${shipId.slice(0, 8)}... — skipping`,
@@ -319,10 +322,9 @@ export class ShipActorManager {
       return false;
     }
 
-    // Already in sync
     if (actorPhase === dbPhase) return false;
 
-    // Terminal phases cannot be replayed to
+    // Terminal phases: stop actor
     if (dbPhase === "done") {
       console.warn(
         `[ship-actor-manager] reconcilePhase: DB phase is "done" for Ship ${shipId.slice(0, 8)}... — stopping actor`,
@@ -331,18 +333,15 @@ export class ShipActorManager {
       return true;
     }
 
+    // Log drift for observability but still repair (needed for Engine restart)
     console.warn(
-      `[ship-actor-manager] reconcilePhase: repairing Ship ${shipId.slice(0, 8)}... ` +
-      `XState=${actorPhase} → DB=${dbPhase}`,
+      `[ship-actor-manager] reconcilePhase: drift detected for Ship ${shipId.slice(0, 8)}... ` +
+      `XState=${actorPhase}, DB=${dbPhase} — repairing`,
     );
 
-    // Preserve context from old actor for re-creation
     const oldContext = this.getContext(shipId);
-
-    // Stop the out-of-sync actor
     this.stopActor(shipId);
 
-    // Build input for re-creation (used by both snapshot and replay paths)
     const input: ShipMachineInput = {
       shipId,
       fleetId: oldContext?.fleetId ?? "",
@@ -356,7 +355,6 @@ export class ShipActorManager {
       phaseBeforeStopped: oldContext?.phaseBeforeStopped ?? null,
     };
 
-    // ADR-0017: Try snapshot-based reconciliation first
     if (persistedSnapshot) {
       try {
         const actor = createActor(shipMachine, {
@@ -376,7 +374,6 @@ export class ShipActorManager {
           return true;
         }
 
-        // Snapshot doesn't match DB phase — fall through to replay
         console.warn(
           `[ship-actor-manager] reconcilePhase: snapshot mismatch for Ship ${shipId.slice(0, 8)}...: ` +
           `snapshot=${restoredPhase}, DB=${dbPhase} — falling back to replay`,
@@ -391,7 +388,6 @@ export class ShipActorManager {
       }
     }
 
-    // Fallback: replay-based reconciliation
     const actor = createActor(shipMachine, { input });
     this.setupSubscription(shipId, actor, { suppressInitial: true });
     actor.start();
@@ -399,7 +395,6 @@ export class ShipActorManager {
 
     this.replayToPhase(shipId, actor, dbPhase, oldContext?.phaseBeforeStopped ?? null);
 
-    // Verify replay succeeded
     const newPhase = this.getPhase(shipId);
     if (newPhase !== dbPhase) {
       console.error(

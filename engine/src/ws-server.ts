@@ -19,6 +19,7 @@ import { StateSync } from "./state-sync.js";
 import { FlagshipRequestHandler } from "./bridge-request-handler.js";
 import { EscortManager } from "./escort-manager.js";
 import { ShipActorManager } from "./ship-actor-manager.js";
+import { PhaseTransactionService } from "./phase-transaction-service.js";
 import { DispatchManager } from "./dispatch-manager.js";
 import { CaffeinateManager } from "./caffeinate-manager.js";
 import type { FleetDatabase } from "./db.js";
@@ -49,6 +50,7 @@ export class EngineServer {
   private requestHandler: FlagshipRequestHandler;
   private escortManager: EscortManager;
   private actorManager: ShipActorManager;
+  private phaseTransactionService: PhaseTransactionService;
   private dispatchManager: DispatchManager;
   private lookout: Lookout;
   private inspectScheduler: InspectScheduler;
@@ -85,6 +87,7 @@ export class EngineServer {
     this.requestHandler = new FlagshipRequestHandler(this.shipManager, this.stateSync);
     this.escortManager = new EscortManager(this.processManager, this.shipManager, () => this.fleetDb);
     this.actorManager = new ShipActorManager();
+    this.phaseTransactionService = new PhaseTransactionService(this.actorManager, this.shipManager, () => this.fleetDb);
     this.dispatchManager = new DispatchManager(this.processManager);
 
     this.lookout = new Lookout(this.shipManager, this.processManager, this.escortManager);
@@ -99,6 +102,7 @@ export class EngineServer {
     // Wire up ShipActorManager to ShipManager, EscortManager, and StateSync
     this.shipManager.setActorManager(this.actorManager);
     this.escortManager.setActorManager(this.actorManager);
+    this.escortManager.setPhaseTransactionService(this.phaseTransactionService);
     this.stateSync.setActorManager(this.actorManager);
     this.stateSync.setEscortManager(this.escortManager);
 
@@ -186,6 +190,7 @@ export class EngineServer {
       getDispatchManager: () => this.dispatchManager,
       getEscortManager: () => this.escortManager,
       getActorManager: () => this.actorManager,
+      getPhaseTransactionService: () => this.phaseTransactionService,
       getCommanderHistory: (role, fleetId) => {
         const manager: CommanderManager = role === "flagship" ? this.flagshipManager : this.dockManager;
         return manager.getHistoryWithDiskFallback(fleetId);

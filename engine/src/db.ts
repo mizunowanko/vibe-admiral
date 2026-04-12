@@ -112,6 +112,9 @@ export class FleetDatabase {
     if (version < 14) {
       this.applyV14();
     }
+    if (version < 15) {
+      this.applyV15();
+    }
   }
 
   private applyV1(): void {
@@ -536,6 +539,22 @@ export class FleetDatabase {
       ALTER TABLE repos ADD COLUMN fleet_id TEXT;
 
       INSERT INTO schema_version (version) VALUES (14);
+    `);
+  }
+
+  private applyV15(): void {
+    // V15: gate_intents table (ADR-0021) — replaces in-memory Map.
+    // commentUrl is required to satisfy audit log contract (#751).
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS gate_intents (
+        ship_id TEXT PRIMARY KEY REFERENCES ships(id),
+        verdict TEXT NOT NULL CHECK(verdict IN ('approve', 'reject')),
+        feedback TEXT,
+        comment_url TEXT,
+        declared_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO schema_version (version) VALUES (15);
     `);
   }
 
@@ -1104,6 +1123,37 @@ export class FleetDatabase {
     this.db.prepare(
       "UPDATE ships SET actor_snapshot = ? WHERE id = ?",
     ).run(JSON.stringify(snapshot), shipId);
+  }
+
+  // === Gate Intent DB methods (ADR-0021) ===
+
+  setGateIntent(shipId: string, verdict: "approve" | "reject", feedback?: string, commentUrl?: string): void {
+    this.db.prepare(`
+      INSERT INTO gate_intents (ship_id, verdict, feedback, comment_url, declared_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(ship_id) DO UPDATE SET
+        verdict = excluded.verdict,
+        feedback = excluded.feedback,
+        comment_url = excluded.comment_url,
+        declared_at = excluded.declared_at
+    `).run(shipId, verdict, feedback ?? null, commentUrl ?? null);
+  }
+
+  getGateIntent(shipId: string): { verdict: "approve" | "reject"; feedback: string | null; commentUrl: string | null; declaredAt: string } | undefined {
+    const row = this.db.prepare(
+      "SELECT verdict, feedback, comment_url, declared_at FROM gate_intents WHERE ship_id = ?",
+    ).get(shipId) as { verdict: string; feedback: string | null; comment_url: string | null; declared_at: string } | undefined;
+    if (!row) return undefined;
+    return {
+      verdict: row.verdict as "approve" | "reject",
+      feedback: row.feedback,
+      commentUrl: row.comment_url,
+      declaredAt: row.declared_at,
+    };
+  }
+
+  clearGateIntent(shipId: string): void {
+    this.db.prepare("DELETE FROM gate_intents WHERE ship_id = ?").run(shipId);
   }
 
   private rowToShipProcess(row: ShipJoinRow): ShipProcess {

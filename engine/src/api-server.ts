@@ -41,6 +41,7 @@ export interface ApiDeps {
   getDispatchManager: () => DispatchManager;
   getEscortManager: () => EscortManager;
   getActorManager: () => ShipActorManager;
+  getPhaseTransactionService: () => import("./phase-transaction-service.js").PhaseTransactionService;
   getCommanderHistory: (role: "flagship" | "dock", fleetId: string) => Promise<import("./types.js").StreamMessage[]>;
   loadFleets: () => Promise<Array<{
     id: string;

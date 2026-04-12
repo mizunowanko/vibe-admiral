@@ -18,6 +18,7 @@ function createMockDeps() {
     getDispatchManager: vi.fn().mockReturnValue({ launch: vi.fn(), toDispatch: vi.fn(), getDispatchesByFleet: vi.fn().mockReturnValue([]) }),
     getEscortManager: vi.fn().mockReturnValue({ launchEscort: vi.fn().mockReturnValue("escort-1"), isEscortRunning: vi.fn().mockReturnValue(false), setGateIntent: vi.fn(), clearGateIntent: vi.fn() }),
     getActorManager: vi.fn().mockReturnValue({ send: vi.fn() }),
+    getPhaseTransactionService: vi.fn().mockReturnValue({ commit: vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" }) }),
     getCommanderHistory: vi.fn().mockResolvedValue([]),
     loadFleets: vi.fn().mockResolvedValue([{
       id: "fleet-1",
@@ -60,6 +61,10 @@ function createMockDepsWithDb() {
   const getPersistedSnapshot = vi.fn().mockReturnValue({ value: "plan", context: {} });
   deps.getActorManager.mockReturnValue({ send: vi.fn(), requestTransition, assertPhaseConsistency, reconcilePhase, getPersistedSnapshot });
 
+  // Default: PhaseTransactionService.commit succeeds
+  const phaseTxCommit = vi.fn().mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
+  deps.getPhaseTransactionService.mockReturnValue({ commit: phaseTxCommit });
+
   return {
     ...deps,
     _mockDb: mockDb,
@@ -67,6 +72,7 @@ function createMockDepsWithDb() {
     _setGateCheck: setGateCheck,
     _clearGateCheck: clearGateCheck,
     _requestTransition: requestTransition,
+    _phaseTxCommit: phaseTxCommit,
   };
 }
 
@@ -375,10 +381,10 @@ describe("API Server", () => {
     const VALID_COMMENT_URL = "https://github.com/test/repo/issues/1#issuecomment-123";
 
     describe("POST /api/ship/:id/phase-transition", () => {
-      it("transitions phase successfully via XState", async () => {
+      it("transitions phase successfully via PhaseTransactionService", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "plan" });
-        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
@@ -389,17 +395,13 @@ describe("API Server", () => {
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
           expect(res.data.phase).toBe("plan-gate");
-          // XState requestTransition should be called first
-          expect(depsWithDb._requestTransition).toHaveBeenCalledWith(
-            "ship-1", { type: "GATE_ENTER" },
+          expect(depsWithDb._phaseTxCommit).toHaveBeenCalledWith(
+            "ship-1",
+            expect.objectContaining({
+              event: { type: "GATE_ENTER" },
+              triggeredBy: "ship",
+            }),
           );
-          // Then DB persist
-          expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-            "ship-1", "plan", "plan-gate", "ship",
-            { planCommentUrl: "https://example.com", commentUrl: VALID_COMMENT_URL },
-            expect.anything(),
-          );
-          expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
         } finally {
           s2.server.close();
         }
@@ -448,9 +450,8 @@ describe("API Server", () => {
 
       it("does not skip plan-gate when qaRequired=false (#835)", async () => {
         const depsWithDb = createMockDepsWithDb();
-        // Ship has qaRequired: false — but plan-gate should still launch Escort
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "plan", fleetId: "fleet-1", qaRequired: false });
-        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "plan-gate" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
@@ -460,7 +461,6 @@ describe("API Server", () => {
           });
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
-          // plan-gate should NOT be auto-approved — Escort should be launched
           expect(res.data.phase).toBe("plan-gate");
           expect(depsWithDb.notifyGateSkip).not.toHaveBeenCalled();
         } finally {
@@ -471,7 +471,7 @@ describe("API Server", () => {
       it("does not skip coding-gate when qaRequired=false (#835)", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "coding", fleetId: "fleet-1", qaRequired: false });
-        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "coding", toPhase: "coding-gate" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: true, fromPhase: "coding", toPhase: "coding-gate" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
@@ -481,7 +481,6 @@ describe("API Server", () => {
           });
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
-          // coding-gate should NOT be auto-approved
           expect(res.data.phase).toBe("coding-gate");
           expect(depsWithDb.notifyGateSkip).not.toHaveBeenCalled();
         } finally {
@@ -492,7 +491,8 @@ describe("API Server", () => {
       it("skips qa-gate when qaRequired=false", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "qa", fleetId: "fleet-1", qaRequired: false });
-        depsWithDb._requestTransition
+        // First commit: qa → qa-gate, second: qa-gate skip auto-approve → merging
+        depsWithDb._phaseTxCommit
           .mockReturnValueOnce({ success: true, fromPhase: "qa", toPhase: "qa-gate" })
           .mockReturnValueOnce({ success: true, fromPhase: "qa-gate", toPhase: "merging" });
         const s2 = await startServer(depsWithDb);
@@ -504,7 +504,6 @@ describe("API Server", () => {
           });
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
-          // qa-gate should be auto-approved when qaRequired=false
           expect(res.data.phase).toBe("merging");
           expect(depsWithDb.notifyGateSkip).toHaveBeenCalledWith("ship-1", "qa-gate", "qaRequired: false");
         } finally {
@@ -512,10 +511,10 @@ describe("API Server", () => {
         }
       });
 
-      it("returns 409 when XState rejects transition", async () => {
+      it("returns 409 when PhaseTransactionService rejects transition", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "plan" });
-        depsWithDb._requestTransition.mockReturnValue({ success: false, currentPhase: "plan" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: false, error: "Transition rejected by XState: event=COMPLETE, phase=plan", code: "TRANSITION_REJECTED" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/phase-transition", {
@@ -523,7 +522,7 @@ describe("API Server", () => {
             commentUrl: VALID_COMMENT_URL,
           });
           expect(res.status).toBe(409);
-          expect(res.data.error).toContain("Transition rejected by XState");
+          expect(res.data.error).toContain("Transition rejected");
         } finally {
           s2.server.close();
         }
@@ -531,10 +530,10 @@ describe("API Server", () => {
     });
 
     describe("POST /api/ship/:id/gate-verdict", () => {
-      it("approves gate via XState and persists to DB", async () => {
+      it("approves gate via PhaseTransactionService", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "plan-gate" });
-        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "plan-gate", toPhase: "coding" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: true, fromPhase: "plan-gate", toPhase: "coding" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
@@ -544,24 +543,22 @@ describe("API Server", () => {
           expect(res.status).toBe(200);
           expect(res.data.ok).toBe(true);
           expect(res.data.phase).toBe("coding");
-          expect(depsWithDb._requestTransition).toHaveBeenCalledWith(
-            "ship-1", { type: "GATE_APPROVED" },
+          expect(depsWithDb._phaseTxCommit).toHaveBeenCalledWith(
+            "ship-1",
+            expect.objectContaining({
+              event: { type: "GATE_APPROVED" },
+              triggeredBy: "escort",
+            }),
           );
-          expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-            "ship-1", "plan-gate", "coding", "escort",
-            { gate_result: "approved", commentUrl: VALID_COMMENT_URL },
-            expect.anything(),
-          );
-          expect(depsWithDb._syncPhaseFromDb).toHaveBeenCalledWith("ship-1");
         } finally {
           s2.server.close();
         }
       });
 
-      it("rejects gate via XState and persists to DB", async () => {
+      it("rejects gate via PhaseTransactionService", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "coding-gate" });
-        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "coding-gate", toPhase: "coding" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: true, fromPhase: "coding-gate", toPhase: "coding" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/gate-verdict", {
@@ -571,13 +568,12 @@ describe("API Server", () => {
           });
           expect(res.status).toBe(200);
           expect(res.data.phase).toBe("coding");
-          expect(depsWithDb._requestTransition).toHaveBeenCalledWith(
-            "ship-1", { type: "GATE_REJECTED", feedback: { summary: "Tests are missing", items: [] } },
-          );
-          expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-            "ship-1", "coding-gate", "coding", "escort",
-            { gate_result: "rejected", feedback: { summary: "Tests are missing", items: [] }, commentUrl: VALID_COMMENT_URL },
-            expect.anything(),
+          expect(depsWithDb._phaseTxCommit).toHaveBeenCalledWith(
+            "ship-1",
+            expect.objectContaining({
+              event: { type: "GATE_REJECTED", feedback: { summary: "Tests are missing", items: [] } },
+              triggeredBy: "escort",
+            }),
           );
         } finally {
           s2.server.close();
@@ -615,10 +611,10 @@ describe("API Server", () => {
     });
 
     describe("POST /api/ship/:id/nothing-to-do", () => {
-      it("transitions ship to done via XState", async () => {
+      it("transitions ship to done via PhaseTransactionService", async () => {
         const depsWithDb = createMockDepsWithDb();
         depsWithDb._mockDb.getShipById.mockReturnValue({ id: "ship-1", phase: "plan" });
-        depsWithDb._requestTransition.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "done" });
+        depsWithDb._phaseTxCommit.mockReturnValue({ success: true, fromPhase: "plan", toPhase: "done" });
         const s2 = await startServer(depsWithDb);
         try {
           const res = await apiRequest(s2.port, "POST", "/api/ship/ship-1/nothing-to-do", {
@@ -626,13 +622,13 @@ describe("API Server", () => {
           });
           expect(res.status).toBe(200);
           expect(res.data.phase).toBe("done");
-          expect(depsWithDb._requestTransition).toHaveBeenCalledWith(
-            "ship-1", { type: "NOTHING_TO_DO", reason: "Issue already resolved" },
-          );
-          expect(depsWithDb._mockDb.persistPhaseTransition).toHaveBeenCalledWith(
-            "ship-1", "plan", "done", "ship",
-            { reason: "Issue already resolved", nothingToDo: true },
-            expect.anything(),
+          expect(depsWithDb._phaseTxCommit).toHaveBeenCalledWith(
+            "ship-1",
+            expect.objectContaining({
+              event: { type: "NOTHING_TO_DO", reason: "Issue already resolved" },
+              triggeredBy: "ship",
+              metadata: { reason: "Issue already resolved", nothingToDo: true },
+            }),
           );
         } finally {
           s2.server.close();

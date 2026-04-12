@@ -43,7 +43,6 @@ export async function launchEscortForGate(
 ): Promise<{ launched: boolean; escortId?: string; skipped?: boolean; skipPhase?: string; error?: string }> {
   const db = deps.getDatabase();
   const shipManager = deps.getShipManager();
-  const actorManager = deps.getActorManager();
 
   if (!db) {
     return { launched: false, error: "No database" };
@@ -72,19 +71,12 @@ export async function launchEscortForGate(
   if (skipResult.skip) {
     const { reason } = skipResult;
     console.log(`[ship-internal-api] Gate ${gatePhase} skipped (${reason}) for Ship ${shipId.slice(0, 8)}...`);
-    const autoResult = actorManager.requestTransition(shipId, { type: "GATE_APPROVED" });
-    if (autoResult.success) {
-      const autoSnapshot = actorManager.getPersistedSnapshot(shipId);
-      try {
-        db.persistPhaseTransition(shipId, autoResult.fromPhase, autoResult.toPhase, "engine", {
-          gate_result: "approved",
-          feedback: `Escort skipped (${reason})`,
-        }, autoSnapshot);
-      } catch (err) {
-        console.error(`[ship-internal-api] DB persist failed for auto-approve on Ship ${shipId.slice(0, 8)}...:`, err);
-      }
-      shipManager.syncPhaseFromDb(shipId);
-    }
+    const phaseTx = deps.getPhaseTransactionService();
+    const autoResult = phaseTx.commit(shipId, {
+      event: { type: "GATE_APPROVED" },
+      triggeredBy: "engine",
+      metadata: { gate_result: "approved", feedback: `Escort skipped (${reason})` },
+    });
     deps.notifyGateSkip(shipId, gatePhase, reason);
     return { launched: false, skipped: true, skipPhase: autoResult.success ? autoResult.toPhase : gatePhase };
   }
@@ -137,24 +129,12 @@ export async function launchEscortForGate(
     console.error(
       `[ship-internal-api] Escort launch failed for Ship ${shipId.slice(0, 8)}... — reverting from ${gatePhase} to ${prevPhase}`,
     );
-    const revertResult = actorManager.requestTransition(shipId, {
-      type: "ESCORT_DIED",
-      exitCode: null,
-      feedback: "Escort launch failed — reverting to pre-gate phase for retry",
+    const phaseTx = deps.getPhaseTransactionService();
+    phaseTx.commit(shipId, {
+      event: { type: "ESCORT_DIED", exitCode: null, feedback: "Escort launch failed — reverting to pre-gate phase for retry" },
+      triggeredBy: "engine",
+      metadata: { gate_result: "rejected", feedback: "Escort launch failed — reverting to pre-gate phase for retry" },
     });
-    if (revertResult.success) {
-      const revertSnapshot = actorManager.getPersistedSnapshot(shipId);
-      try {
-        db.persistPhaseTransition(shipId, revertResult.fromPhase, revertResult.toPhase, "engine", {
-          gate_result: "rejected",
-          feedback: "Escort launch failed — reverting to pre-gate phase for retry",
-        }, revertSnapshot);
-      } catch (revertErr) {
-        console.error(`[ship-internal-api] DB persist failed for revert on Ship ${shipId.slice(0, 8)}...:`, revertErr);
-      }
-      shipManager.syncPhaseFromDb(shipId);
-    }
-    shipManager.clearGateCheck(shipId);
     escortManager.notifyLaunchFailure(shipId, gatePhase, "Escort launch returned null — reverting to pre-gate phase for retry");
     return { launched: false, error: "Escort launch failed" };
   }
@@ -176,8 +156,10 @@ interface PendingLongPoll {
 const pendingPhaseWaiters = new Map<string, Set<PendingLongPoll>>();
 
 /**
- * Notify all long-poll waiters for a ship that its phase has changed.
+ * Notify long-poll waiters for a ship that its phase has changed.
  * Called from ship-lifecycle.ts when a phase transition occurs.
+ * #947 fix: deletes individual waiters (not the entire Map entry)
+ * and only removes the Map key when the set is empty.
  */
 export function notifyPhaseWaiters(shipId: string, newPhase: string): void {
   const waiters = pendingPhaseWaiters.get(shipId);
@@ -390,7 +372,6 @@ export async function handleShipRoute(
       }
     }
 
-    const actorManager = deps.getActorManager();
     let xstateEvent: import("./ship-machine.js").ShipMachineEvent;
     if (isGatePhase(targetPhase as Phase)) {
       xstateEvent = { type: "GATE_ENTER" };
@@ -401,42 +382,23 @@ export async function handleShipRoute(
       return;
     }
 
-    const dbPhase = ship.phase as Phase;
-    if (!actorManager.assertPhaseConsistency(shipId, dbPhase)) {
-      console.warn(`[ship-internal-api] Pre-transition reconciliation for Ship ${shipId.slice(0, 8)}...`);
-      actorManager.reconcilePhase(shipId, dbPhase);
-    }
+    const phaseTx = deps.getPhaseTransactionService();
+    const result = phaseTx.commit(shipId, {
+      event: xstateEvent,
+      triggeredBy: triggeredBy as "ship" | "escort" | "flagship" | "engine" | "engine-recovery",
+      metadata,
+    });
 
-    const result = actorManager.requestTransition(shipId, xstateEvent);
     if (!result.success) {
-      sendJson(res, 409, { ok: false, error: `Transition rejected by XState: current phase is ${result.currentPhase ?? "unknown"}, cannot process ${xstateEvent.type}` });
+      const errorCode = result.code === "TRANSITION_REJECTED" ? 409 : result.code === "DB_PERSIST_FAILED" ? 500 : 400;
+      sendJson(res, errorCode, { ok: false, error: result.error });
       return;
     }
-
-    const actorSnapshot = actorManager.getPersistedSnapshot(shipId);
-    try {
-      db.persistPhaseTransition(
-        shipId,
-        result.fromPhase,
-        result.toPhase,
-        triggeredBy,
-        metadata,
-        actorSnapshot,
-      );
-    } catch (err) {
-      console.error(`[ship-internal-api] DB persist failed after XState transition for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
-      actorManager.reconcilePhase(shipId, result.fromPhase);
-      sendJson(res, 500, { ok: false, error: "Phase transition failed: DB persist error" });
-      return;
-    }
-
-    shipManager.syncPhaseFromDb(shipId);
 
     if (isGatePhase(result.toPhase)) {
       const gateResult = await launchEscortForGate(deps, shipId, result.toPhase as GatePhase);
 
       if (gateResult.skipped) {
-        // Gate was auto-approved (skip). Phase already advanced by launchEscortForGate.
         sendJson(res, 200, { ok: true, phase: gateResult.skipPhase ?? result.toPhase });
         return;
       }
@@ -507,42 +469,26 @@ export async function handleShipRoute(
     const rawFeedback = body.feedback as string | Record<string, unknown> | undefined;
     const structuredFeedback = normalizeGateFeedback(rawFeedback as Parameters<typeof normalizeGateFeedback>[0]);
 
-    const actorManager = deps.getActorManager();
-
-    if (!actorManager.assertPhaseConsistency(shipId, currentPhase)) {
-      console.warn(`[ship-internal-api] Pre-verdict reconciliation for Ship ${shipId.slice(0, 8)}...`);
-      actorManager.reconcilePhase(shipId, currentPhase);
-    }
-
     const xstateEvent: import("./ship-machine.js").ShipMachineEvent = verdict === "approve"
       ? { type: "GATE_APPROVED" }
       : { type: "GATE_REJECTED", feedback: structuredFeedback ?? "" };
-
-    const result = actorManager.requestTransition(shipId, xstateEvent);
-    if (!result.success) {
-      sendJson(res, 409, { ok: false, error: `Gate verdict rejected by XState: current phase is ${result.currentPhase ?? "unknown"}` });
-      return;
-    }
 
     const metadata: Record<string, unknown> = verdict === "approve"
       ? { gate_result: "approved", commentUrl: body.commentUrl }
       : { gate_result: "rejected", feedback: structuredFeedback ?? "", commentUrl: body.commentUrl };
 
-    const verdictSnapshot = actorManager.getPersistedSnapshot(shipId);
-    try {
-      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "escort", metadata, verdictSnapshot);
-    } catch (err) {
-      console.error(`[ship-internal-api] DB persist failed after gate verdict for Ship ${shipId.slice(0, 8)}... — reverting XState`, err);
-      actorManager.reconcilePhase(shipId, result.fromPhase);
-      sendJson(res, 500, { ok: false, error: "Gate verdict failed: DB persist error" });
+    const phaseTx = deps.getPhaseTransactionService();
+    const result = phaseTx.commit(shipId, {
+      event: xstateEvent,
+      triggeredBy: "escort",
+      metadata,
+    });
+
+    if (!result.success) {
+      const errorCode = result.code === "TRANSITION_REJECTED" ? 409 : 500;
+      sendJson(res, errorCode, { ok: false, error: result.error });
       return;
     }
-
-    shipManager.syncPhaseFromDb(shipId);
-    shipManager.clearGateCheck(shipId);
-
-    const escortMgr = deps.getEscortManager();
-    escortMgr.clearGateIntent(shipId);
 
     sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
@@ -557,22 +503,19 @@ export async function handleShipRoute(
       return;
     }
 
-    const actorManager = deps.getActorManager();
-    const result = actorManager.requestTransition(shipId, { type: "NOTHING_TO_DO", reason });
+    const phaseTx = deps.getPhaseTransactionService();
+    const result = phaseTx.commit(shipId, {
+      event: { type: "NOTHING_TO_DO", reason },
+      triggeredBy: "ship",
+      metadata: { reason, nothingToDo: true },
+    });
+
     if (!result.success) {
-      sendJson(res, 409, { ok: false, error: `Nothing-to-do rejected by XState: current phase is ${result.currentPhase ?? "unknown"}` });
+      sendJson(res, 409, { ok: false, error: result.error });
       return;
     }
 
-    const nothingToDoSnapshot = actorManager.getPersistedSnapshot(shipId);
-    try {
-      db.persistPhaseTransition(shipId, result.fromPhase, result.toPhase, "ship", { reason, nothingToDo: true }, nothingToDoSnapshot);
-    } catch (err) {
-      console.error(`[ship-internal-api] DB persist failed after nothing-to-do for Ship ${shipId.slice(0, 8)}...:`, err);
-    }
-
-    shipManager.syncPhaseFromDb(shipId);
-    sendJson(res, 200, { ok: true, phase: "done" });
+    sendJson(res, 200, { ok: true, phase: result.toPhase });
     return;
   }
 
