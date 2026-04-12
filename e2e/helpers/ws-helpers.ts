@@ -114,7 +114,7 @@ function getSeeds(page: Page): Map<string, ShipSeed> {
 export async function installShipSeedRoute(page: Page) {
   // Intercept /api/ships/:id requests. The glob must match the full URL
   // as seen by the browser (e.g. http://localhost:PORT/api/ships/SHIP_ID).
-  await page.route(/\/api\/ships\/[^/?]+$/, async (route, request) => {
+  await page.route(/\/api\/ships\/[^/?]+(\?|$)/, async (route, request) => {
     const url = new URL(request.url());
     const segments = url.pathname.split("/");
     const shipId = segments[segments.length - 1];
