@@ -53,9 +53,28 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
   }'
 ```
 
-### 1c. E2E テスト実行（Dispatch W）
+### 1c. E2E テストカバレッジ分析・増強・実行（Dispatch W）
 
-E2E テストを実行し、失敗テストからバグを検出する。
+E2E テストのカバレッジを分析してテストを増強し、既存＋増強分のテストを実行して失敗からバグを検出する。
+
+以下 3 サブステップ（W-1 → W-2 → W-3）を 1 つの Dispatch 内で順次実行する。
+
+**W-1: テストカバレッジ分析**
+- `e2e/*.spec.ts` の一覧を確認し、各テストが検証しているフロー・機能を把握
+- 現在の機能一覧（Ship ライフサイクル、Fleet 切り替え、Commander 操作、Dispatch 起動等）と突合
+- テストされていない機能・フローを特定
+
+**W-2: テスト増強**
+- カバレッジ不足箇所にテストを追加
+- 過去バグの再発防止テスト（regression test）を重点的に追加
+  - closed な `type/bug` issue を参照し、再発防止観点でテストを書き起こす
+- 未カバー機能フロー（Fleet CRUD、Ship sortie/stop/resume、Commander chat、Dispatch 起動等）を優先
+- 追加したテストをコミットする（`test: add regression/coverage tests for audit-bug` 等）
+
+**W-3: テスト実行**
+- `npx playwright test --config playwright.e2e.config.ts` で既存 + 増強分を実行
+- 失敗テストを BUG / TEST_ISSUE / FLAKY に分類
+- BUG カテゴリは根本原因をアプリケーションコードから追跡
 
 ```bash
 curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
@@ -66,7 +85,7 @@ curl -s -X POST http://localhost:$VIBE_ADMIRAL_ENGINE_PORT/api/dispatch \
     "name": "audit-bug-e2e",
     "type": "investigate",
     "cwd": "<repo-path>",
-    "prompt": "You are a Dispatch agent running E2E tests to discover bugs.\n\nRepo: <repo-path>\n\n## Task\n\nRun E2E tests and analyze failures to identify application bugs.\n\n### Steps\n\n1. Check for playwright config:\n   ls playwright*.config.* 2>/dev/null\n2. Run all E2E tests:\n   npx playwright test --config playwright.e2e.config.ts 2>&1\n3. If tests fail, run each failed test individually for detailed output:\n   npx playwright test --config playwright.e2e.config.ts <test-file> 2>&1\n4. Categorize each failure:\n   - **BUG**: Application code is broken (the test correctly catches a real bug)\n   - **TEST_ISSUE**: Test itself is broken (selector changed, timing issue, bad assertion)\n   - **FLAKY**: Intermittent failure (timing-dependent, environment-dependent)\n5. For BUG category failures, trace the root cause in the application code\n6. Identify untested critical paths (coverage gaps) that could hide bugs:\n   - List all E2E test files and what they cover\n   - Cross-reference with key user flows (Fleet CRUD, Ship sortie/stop/resume, Commander chat, Dispatch)\n\n### Output format\n\n```\n## E2E Test Results\n\n### Execution Summary\n- **Total**: N tests\n- **Passed**: N\n- **Failed**: N\n- **Skipped**: N\n\n### Failures\n\n#### Bug W-1: <title>\n- **Test**: `e2e/<file>.spec.ts` — \"<test name>\"\n- **Category**: BUG | TEST_ISSUE | FLAKY\n- **Error**: <error message>\n- **Stack**: <first 5 lines of stack trace>\n- **Root Cause**: <analysis of why this fails>\n- **Severity**: critical | high | medium | low\n\n### Coverage Gaps\n| Untested Area | Risk Level | Description |\n|---------------|-----------|-------------|\n\n## Summary\n| Category | Count |\n|----------|-------|\n| BUG | N |\n| TEST_ISSUE | N |\n| FLAKY | N |\n| Coverage Gaps | N |\n```\n\nDo NOT create issues or make changes. Only run tests and report."
+    "prompt": "You are a Dispatch agent auditing E2E test coverage, enhancing tests, and running them to discover bugs.\n\nRepo: <repo-path>\n\n## Task\n\nExecute three sequential sub-steps (W-1 \u2192 W-2 \u2192 W-3). Do NOT skip W-1/W-2 even if tests appear comprehensive.\n\n### W-1: Test Coverage Analysis\n\n1. List all existing E2E test files:\n   ls e2e/*.spec.ts 2>/dev/null || find . -name \"*.spec.ts\" -path \"*/e2e/*\"\n2. For each test file, read it and summarize what flow/feature it validates\n3. Cross-reference with the current feature set:\n   - Ship lifecycle (sortie / stop / resume / abandon / retry)\n   - Fleet CRUD (create / switch / delete / settings)\n   - Commander operations (Flagship / Dock chat, Dispatch launch)\n   - Gate flow (planning-gate / implementing-gate / acceptance-test-gate)\n   - Phase transitions and UI updates\n4. Identify untested features/flows and output a coverage-gap table\n\n### W-2: Test Enhancement\n\n1. For identified coverage gaps, prioritize:\n   - **Regression tests for past bugs** \u2014 query recent closed `type/bug` issues:\n     gh issue list --state closed --label type/bug --limit 20 --json number,title,body\n     For each past bug, assess whether an E2E regression test exists. If not, add one.\n   - **Uncovered critical feature flows** \u2014 Fleet CRUD, Ship sortie/stop/resume, Commander chat, Dispatch launch\n2. Write new tests under `e2e/`, following existing test conventions\n3. Commit the added tests:\n   git add e2e/<new-test-files>\n   git commit -m \"test: add regression/coverage tests for audit-bug\"\n4. Only add tests that are actually executable and meaningful. Do NOT fabricate tests for features that do not exist.\n\n### W-3: Test Execution\n\n1. Check for playwright config:\n   ls playwright*.config.* 2>/dev/null\n2. Run all E2E tests (existing + newly added):\n   npx playwright test --config playwright.e2e.config.ts 2>&1\n3. If tests fail, run each failed test individually for detailed output:\n   npx playwright test --config playwright.e2e.config.ts <test-file> 2>&1\n4. Categorize each failure:\n   - **BUG**: Application code is broken (the test correctly catches a real bug)\n   - **TEST_ISSUE**: Test itself is broken (selector changed, timing issue, bad assertion)\n   - **FLAKY**: Intermittent failure (timing-dependent, environment-dependent)\n5. For BUG category failures, trace the root cause in the application code\n\n### Output format\n\n```\n## E2E Audit Results\n\n### W-1: Coverage Analysis\n\n#### Existing Tests\n| Test File | Covered Flow/Feature |\n|-----------|----------------------|\n\n#### Coverage Gaps\n| Untested Area | Risk Level | Description |\n|---------------|-----------|-------------|\n\n### W-2: Test Enhancement\n\n#### Added Tests\n| Test File | Target | Type (regression / coverage) | Related Past Bug |\n|-----------|--------|------------------------------|-------------------|\n\n#### Commit\n- Commit SHA: <sha>\n- Message: <commit message>\n\n### W-3: Execution Summary\n- **Total**: N tests\n- **Passed**: N\n- **Failed**: N\n- **Skipped**: N\n\n#### Failures\n\n##### Bug W-1: <title>\n- **Test**: `e2e/<file>.spec.ts` \u2014 \"<test name>\"\n- **Category**: BUG | TEST_ISSUE | FLAKY\n- **Error**: <error message>\n- **Stack**: <first 5 lines of stack trace>\n- **Root Cause**: <analysis of why this fails>\n- **Severity**: critical | high | medium | low\n\n## Summary\n| Category | Count |\n|----------|-------|\n| Coverage Gaps (W-1) | N |\n| Added Tests (W-2) | N |\n| BUG | N |\n| TEST_ISSUE | N |\n| FLAKY | N |\n```\n\nYou MAY write and commit new test files under `e2e/` for W-2. Do NOT modify application source code and do NOT create issues. Only audit, enhance tests, run tests, and report."
   }'
 ```
 
