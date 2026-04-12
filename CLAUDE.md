@@ -138,6 +138,10 @@ dev-shared 共通ルールに従う。詳細は `~/Projects/Plugins/dev-shared/C
 - [ADR-0018: Escort Gate Feedback の構造化](adr/0018-structured-gate-feedback.md)
 - [ADR-0019: Frontend ストア正規化と楽観的更新パターン](adr/0019-frontend-store-normalization.md)
 - [ADR-0020: Escort セッション蓄積のトークン追跡と最適化方針](adr/0020-escort-token-tracking.md)
+- [ADR-0021: PhaseTransactionService による XState/DB/Long-poll/Escort の単一原子トランザクション](adr/0021-phase-transaction-service.md) *(Proposed)*
+- [ADR-0022: Engine の Parse-safe / Logger / エラー伝播 抽象の導入](adr/0022-engine-parse-safety-error-abstractions.md) *(Proposed)*
+- [ADR-0023: Ship/Escort ログチャネル分離 + セッション登録一本化 + 通知 payload 自律化](adr/0023-ship-escort-log-channel-separation.md) *(Proposed)*
+- [ADR-0024: Fleet / cwd / SystemPrompt の Context Isolation Registry](adr/0024-context-isolation-registry.md) *(Proposed)*
 
 ## ラベル体系
 
