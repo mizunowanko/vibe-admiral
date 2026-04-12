@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Ship, Phase, StreamMessage, GateCheckState } from "@/types";
 import { wsClient } from "@/lib/ws-client";
 import * as api from "@/lib/api-client";
+import { useFleetStore } from "@/stores/fleetStore";
 
 interface ShipPhaseData {
   fleetId?: string;
@@ -207,11 +208,12 @@ export const useShipStore = create<ShipState>((set) => ({
   updateShipFromApi: async (shipId) => {
     try {
       const existing = useShipStore.getState().ships.get(shipId);
-      if (!existing?.fleetId) {
-        console.warn(`[shipStore] updateShipFromApi: Ship ${shipId} not found or missing fleetId, skipping`);
+      const fleetId = existing?.fleetId ?? useFleetStore.getState().selectedFleetId;
+      if (!fleetId) {
+        console.warn(`[shipStore] updateShipFromApi: Ship ${shipId} — no fleetId available, skipping`);
         return;
       }
-      const ship = await api.fetchShip(shipId, existing.fleetId);
+      const ship = await api.fetchShip(shipId, fleetId);
       if (ship) {
         useShipStore.getState().upsertShip(ship);
       }
