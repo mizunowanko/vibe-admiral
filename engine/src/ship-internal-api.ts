@@ -11,6 +11,7 @@ import { isGatePhase, GATE_PREV_PHASE, PHASE_ORDER, normalizeGateFeedback } from
 import type { Phase, GatePhase } from "./types.js";
 import { shouldSkipGate, resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
+import picomatch from "picomatch";
 
 // ── Comment URL validation ──
 
@@ -373,9 +374,8 @@ export async function handleShipRoute(
               timeout: 10000,
             }).trim().split("\n").filter(Boolean);
 
-            const { matchesGlob } = await import("node:path");
             const hasMatch = changedFiles.some((file) =>
-              fleet.qaRequiredPaths!.some((pattern) => matchesGlob(file, pattern))
+              fleet.qaRequiredPaths!.some((pattern) => picomatch.isMatch(file, pattern))
             );
             if (hasMatch) {
               console.log(
