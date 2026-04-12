@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShipProcess, Phase, EscortProcess } from "./types.js";
+import { safeJsonParse } from "./util/json-safe.js";
 
 /** Persisted ship row stored in SQLite. */
 export interface ShipRow {
@@ -909,7 +910,7 @@ export class FleetDatabase {
       fromPhase: row.from_phase,
       toPhase: row.to_phase,
       triggeredBy: row.triggered_by,
-      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+      metadata: safeJsonParse(row.metadata, "phase-transition.metadata", null),
       createdAt: row.created_at,
     }));
   }
@@ -1095,11 +1096,7 @@ export class FleetDatabase {
       "SELECT actor_snapshot FROM ships WHERE id = ?",
     ).get(shipId) as { actor_snapshot: string | null } | undefined;
     if (!row?.actor_snapshot) return null;
-    try {
-      return JSON.parse(row.actor_snapshot);
-    } catch {
-      return null;
-    }
+    return safeJsonParse(row.actor_snapshot, "actor-snapshot", null);
   }
 
   /** Update the actor snapshot for a ship (standalone, outside phase transitions). */
