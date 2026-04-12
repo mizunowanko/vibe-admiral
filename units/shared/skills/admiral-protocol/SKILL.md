@@ -88,7 +88,7 @@ curl -s http://localhost:9721/api/restart -X POST
 ### 11. commander-notify — Send Heads-Up Notification to Another Commander
 
 ```bash
-curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/commander-notify \
+curl -sS --fail-with-body http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/commander-notify \
   -H 'Content-Type: application/json' \
   -d '{
     "from": "flagship",

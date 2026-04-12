@@ -52,7 +52,7 @@ PR URL をユーザーに報告する。
 PR 作成/push 完了後、Engine REST API で `coding-gate` に遷移し、**code-review Gate** を開始する:
 
 ```bash
-curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+curl -sS --fail-with-body http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
   -H 'Content-Type: application/json' \
   -d '{"phase": "coding-gate", "metadata": {}}'
 ```

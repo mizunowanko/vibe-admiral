@@ -91,7 +91,7 @@ gh pr list --search "<ISSUE_NUMBER>" --repo "$REPO" --json number,title,state,ur
    ```
 4. `plan-gate` への Engine REST API でフェーズを遷移する:
    ```bash
-   curl -sf http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
+   curl -sS --fail-with-body http://localhost:${VIBE_ADMIRAL_ENGINE_PORT:-9721}/api/ship/${VIBE_ADMIRAL_SHIP_ID}/phase-transition \
      -H 'Content-Type: application/json' \
      -d "{\"phase\": \"plan-gate\", \"metadata\": {\"planCommentUrl\": \"<comment-url>\", \"qaRequired\": <true or false>}}"
    ```
