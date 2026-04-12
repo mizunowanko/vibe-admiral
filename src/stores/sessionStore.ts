@@ -70,6 +70,7 @@ export function createDispatchSession(
   fleetId: string,
   name: string,
   parentRole: CommanderRole,
+  parentSessionId?: string,
 ): Session {
   return {
     id: `dispatch-${dispatchId}`,
@@ -77,7 +78,7 @@ export function createDispatchSession(
     fleetId,
     label: name,
     hasInput: false,
-    parentSessionId: `${parentRole}-${fleetId}`,
+    parentSessionId: parentSessionId ?? `${parentRole}-${fleetId}`,
   };
 }
 

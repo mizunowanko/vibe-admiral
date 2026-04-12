@@ -6,10 +6,7 @@ import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useAdmiralSettingsStore } from "@/stores/admiralSettingsStore";
-import {
-  useSessionStore,
-  createShipSession,
-} from "@/stores/sessionStore";
+import { useSessionStore } from "@/stores/sessionStore";
 
 export function useEngine() {
   const setFleets = useFleetStore((s) => s.setFleets);
@@ -17,7 +14,9 @@ export function useEngine() {
   const setMainView = useUIStore((s) => s.setMainView);
   const setShipCompacting = useShipStore((s) => s.setShipCompacting);
   const addShipLog = useShipStore((s) => s.addShipLog);
+  const addEscortLog = useShipStore((s) => s.addEscortLog);
   const mergeShipHistory = useShipStore((s) => s.mergeShipHistory);
+  const mergeEscortHistory = useShipStore((s) => s.mergeEscortHistory);
   const setGateCheck = useShipStore((s) => s.setGateCheck);
   const clearGateCheck = useShipStore((s) => s.clearGateCheck);
   const upsertShip = useShipStore((s) => s.upsertShip);
@@ -33,6 +32,8 @@ export function useEngine() {
   const setAdmiralSettings = useAdmiralSettingsStore((s) => s.setSettings);
   const fetchAdmiralSettings = useAdmiralSettingsStore((s) => s.fetchSettings);
   const registerSession = useSessionStore((s) => s.registerSession);
+  const upsertDispatch = useSessionStore((s) => s.upsertDispatch);
+  const addDispatchLog = useSessionStore((s) => s.addDispatchLog);
   const setFocus = useSessionStore((s) => s.setFocus);
   const selectedFleetId = useFleetStore((s) => s.selectedFleetId);
   const prevFleetIdRef = useRef<string | null>(null);
@@ -49,7 +50,9 @@ export function useEngine() {
         upsertShip,
         updateShipFromApi,
         addShipLog,
+        addEscortLog,
         mergeShipHistory,
+        mergeEscortHistory,
         setShipCompacting,
         setGateCheck,
         clearGateCheck,
@@ -65,6 +68,8 @@ export function useEngine() {
       },
       sessionStore: {
         registerSession,
+        upsertDispatch,
+        addDispatchLog,
         setFocus,
         getState: () => useSessionStore.getState(),
       },
@@ -83,7 +88,9 @@ export function useEngine() {
     setMainView,
     setShipCompacting,
     addShipLog,
+    addEscortLog,
     mergeShipHistory,
+    mergeEscortHistory,
     setGateCheck,
     clearGateCheck,
     upsertShip,
@@ -95,6 +102,8 @@ export function useEngine() {
     setPreviousCrash,
     setAdmiralSettings,
     registerSession,
+    upsertDispatch,
+    addDispatchLog,
     setFocus,
   ]);
 
@@ -135,11 +144,9 @@ export function useEngine() {
         if (!fleetId) return;
         return fetchShips(fleetId);
       }).then(() => {
+        // Session registration now handled by upsertShip (ADR-0023)
         const ships = useShipStore.getState().ships;
         for (const ship of ships.values()) {
-          registerSession(
-            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-          );
           if (ship.phase !== "done") {
             wsClient.send({ type: "ship:logs", data: { id: ship.id } });
           }
@@ -161,7 +168,6 @@ export function useEngine() {
     fetchFleets,
     fetchAdmiralSettings,
     fetchShips,
-    registerSession,
   ]);
 
   // Re-fetch ship logs when the selected fleet changes.
@@ -175,15 +181,13 @@ export function useEngine() {
     if (selectedFleetId === prev) return;
 
     void fetchShips(selectedFleetId).then(() => {
+      // Session registration now handled by upsertShip (ADR-0023)
       const ships = useShipStore.getState().ships;
       for (const ship of ships.values()) {
         if (ship.fleetId === selectedFleetId && ship.phase !== "done") {
-          registerSession(
-            createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-          );
           wsClient.send({ type: "ship:logs", data: { id: ship.id } });
         }
       }
     });
-  }, [selectedFleetId, fetchShips, registerSession]);
+  }, [selectedFleetId, fetchShips]);
 }

@@ -1,14 +1,10 @@
 import type { MessageHandler } from "./handler-types";
 import type { Ship } from "@/types";
-import { createShipSession } from "@/stores/sessionStore";
 
 export const handleShipData: MessageHandler<"ship:data"> = (msg, ctx) => {
   const shipList = msg.data as Ship[];
   for (const ship of shipList) {
     ctx.shipStore.upsertShip(ship);
-    ctx.sessionStore.registerSession(
-      createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-    );
     if (ship.phase !== "done") {
       ctx.wsClient.send({ type: "ship:logs", data: { id: ship.id } });
     }
@@ -16,25 +12,21 @@ export const handleShipData: MessageHandler<"ship:data"> = (msg, ctx) => {
 };
 
 export const handleShipCreated: MessageHandler<"ship:created"> = (msg, ctx) => {
-  void ctx.shipStore.updateShipFromApi(msg.data.shipId).then(() => {
-    const ship = ctx.shipStore.getState().ships.get(msg.data.shipId) as Ship | undefined;
-    if (ship) {
-      ctx.sessionStore.registerSession(
-        createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-      );
-    }
-  });
+  const data = msg.data;
+  if ("fleetId" in data && data.fleetId) {
+    ctx.shipStore.updateShipFromApi(data.id, data.fleetId);
+  } else {
+    ctx.shipStore.updateShipFromApi(data.id);
+  }
 };
 
 export const handleShipUpdated: MessageHandler<"ship:updated"> = (msg, ctx) => {
-  void ctx.shipStore.updateShipFromApi(msg.data.shipId).then(() => {
-    const ship = ctx.shipStore.getState().ships.get(msg.data.shipId) as Ship | undefined;
-    if (ship) {
-      ctx.sessionStore.registerSession(
-        createShipSession(ship.id, ship.fleetId, ship.issueNumber, ship.issueTitle),
-      );
-    }
-  });
+  const data = msg.data;
+  if ("fleetId" in data && data.fleetId) {
+    ctx.shipStore.updateShipFromApi(data.id, data.fleetId);
+  } else {
+    ctx.shipStore.updateShipFromApi(data.id);
+  }
 };
 
 export const handleShipCompacting: MessageHandler<"ship:compacting"> = (msg, ctx) => {
@@ -52,7 +44,12 @@ export const handleShipHistory: MessageHandler<"ship:history"> = (msg, ctx) => {
 };
 
 export const handleShipDone: MessageHandler<"ship:done"> = (msg, ctx) => {
-  void ctx.shipStore.updateShipFromApi(msg.data.shipId);
+  const data = msg.data;
+  if ("fleetId" in data && data.fleetId) {
+    ctx.shipStore.updateShipFromApi(data.id, data.fleetId);
+  } else {
+    ctx.shipStore.updateShipFromApi(data.id);
+  }
 };
 
 export const handleShipRemoved: MessageHandler<"ship:removed"> = (msg, ctx) => {

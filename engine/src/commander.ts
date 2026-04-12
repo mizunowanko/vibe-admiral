@@ -300,6 +300,7 @@ export class CommanderManager {
       name,
       status: "running",
       startedAt: Date.now(),
+      parentSessionId: `${this.role}-${fleetId}`,
     };
     session.dispatches.set(toolUseId, dispatch);
     return dispatch;
