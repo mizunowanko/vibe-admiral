@@ -17,10 +17,10 @@ export const UNIT_DEPLOY_MAP: Record<UnitType, { skills: string[]; sharedSkills:
   },
   flagship: {
     skills: ["sortie", "ship-inspect"],
-    sharedSkills: ["admiral-protocol", "read-issue"],
+    sharedSkills: ["admiral-protocol", "read-issue", "fleet-config"],
   },
   dock: {
     skills: ["issue-manage", "investigate", "dock-ship-status"],
-    sharedSkills: ["admiral-protocol", "read-issue"],
+    sharedSkills: ["admiral-protocol", "read-issue", "fleet-config"],
   },
 };
