@@ -156,8 +156,10 @@ interface PendingLongPoll {
 const pendingPhaseWaiters = new Map<string, Set<PendingLongPoll>>();
 
 /**
- * Notify all long-poll waiters for a ship that its phase has changed.
+ * Notify long-poll waiters for a ship that its phase has changed.
  * Called from ship-lifecycle.ts when a phase transition occurs.
+ * #947 fix: deletes individual waiters (not the entire Map entry)
+ * and only removes the Map key when the set is empty.
  */
 export function notifyPhaseWaiters(shipId: string, newPhase: string): void {
   const waiters = pendingPhaseWaiters.get(shipId);

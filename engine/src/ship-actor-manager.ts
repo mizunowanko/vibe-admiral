@@ -309,9 +309,8 @@ export class ShipActorManager {
 
   /**
    * @deprecated Downgraded to drift detection logger (ADR-0021).
-   * PhaseTransactionService now ensures DB-first ordering, making reconciliation unnecessary.
-   * This method only logs drift for observability — it does NOT repair state.
-   * Retained for Engine restart/restore flows where snapshot-based restoration is used.
+   * PhaseTransactionService now ensures DB-first ordering, making routine reconciliation unnecessary.
+   * Still used for: (1) Engine restart/restore flows, (2) DB persist failure rollback in PhaseTransactionService.
    */
   reconcilePhase(shipId: string, dbPhase: Phase, persistedSnapshot?: unknown): boolean {
     const actorPhase = this.getPhase(shipId);
