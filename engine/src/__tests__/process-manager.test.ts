@@ -292,20 +292,49 @@ describe("ProcessManager", () => {
 
       pm.sortie("ship-001", "/path", 42);
 
-      mockProc.stderr!.emit("data", Buffer.from("Error 429 Too Many Requests"));
+      mockProc.stderr!.emit("data", Buffer.from("Error 429 Too Many Requests\n"));
       expect(rateLimitHandler).toHaveBeenCalledWith("ship-001");
-      // error should NOT be emitted for retryable errors — prevents frontend noise
       expect(errorHandler).not.toHaveBeenCalled();
     });
 
-    it("emits error event for all stderr content", () => {
+    it("emits error event for non-retryable stderr content", () => {
       const errorHandler = vi.fn();
       pm.on("error", errorHandler);
 
       pm.sortie("ship-001", "/path", 42);
 
-      mockProc.stderr!.emit("data", Buffer.from("Something went wrong"));
+      mockProc.stderr!.emit("data", Buffer.from("Something went wrong\n"));
       expect(errorHandler).toHaveBeenCalledWith("ship-001", expect.any(Error));
+    });
+
+    it("buffers partial stderr lines until newline arrives (#946)", () => {
+      const rateLimitHandler = vi.fn();
+      const errorHandler = vi.fn();
+      pm.on("rate-limit", rateLimitHandler);
+      pm.on("error", errorHandler);
+
+      pm.sortie("ship-001", "/path", 42);
+
+      mockProc.stderr!.emit("data", Buffer.from("APIError: "));
+      expect(rateLimitHandler).not.toHaveBeenCalled();
+      expect(errorHandler).not.toHaveBeenCalled();
+
+      mockProc.stderr!.emit("data", Buffer.from("429 rate_limit_error\n"));
+      expect(rateLimitHandler).toHaveBeenCalledWith("ship-001");
+      expect(errorHandler).not.toHaveBeenCalled();
+    });
+
+    it("handles multiple stderr lines in a single chunk", () => {
+      const rateLimitHandler = vi.fn();
+      const errorHandler = vi.fn();
+      pm.on("rate-limit", rateLimitHandler);
+      pm.on("error", errorHandler);
+
+      pm.sortie("ship-001", "/path", 42);
+
+      mockProc.stderr!.emit("data", Buffer.from("Error 429\nSome real error\n"));
+      expect(rateLimitHandler).toHaveBeenCalledTimes(1);
+      expect(errorHandler).toHaveBeenCalledTimes(1);
     });
   });
 
