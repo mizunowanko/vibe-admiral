@@ -188,9 +188,10 @@ export function notifyPhaseWaiters(shipId: string, newPhase: string): void {
       if (!waiter.res.writableEnded) {
         sendJson(waiter.res, 200, { ok: true, phase: newPhase, timeout: false } as ApiResponse & { timeout: boolean });
       }
+      waiters.delete(waiter);
     }
   }
-  pendingPhaseWaiters.delete(shipId);
+  if (waiters.size === 0) pendingPhaseWaiters.delete(shipId);
 }
 
 export async function handleShipRoute(
