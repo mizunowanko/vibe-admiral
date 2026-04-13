@@ -13,6 +13,7 @@
 import { createActor, type Actor } from "xstate";
 import { shipMachine, stateValueToPhase, type ShipMachineContext, type ShipMachineEvent, type ShipMachineInput } from "./ship-machine.js";
 import type { Phase, GatePhase, GateType, ShipProcess } from "./types.js";
+import { PHASE_REPLAY_EVENTS } from "./gate-taxonomy.js";
 
 /** Side-effect handlers provided by the Engine wiring layer. */
 export interface ShipActorSideEffects {
@@ -30,23 +31,7 @@ export interface ShipActorSideEffects {
   onLaunchEscort: (shipId: string, gatePhase: GatePhase, gateType: GateType) => void;
 }
 
-/**
- * Events to replay from the initial "plan" state to reach each phase.
- * XState v5 always creates actors at the initial state, so we replay
- * events to advance the actor to the correct DB phase on Engine restart.
- */
-const PHASE_REPLAY_EVENTS: Record<Phase, ShipMachineEvent[]> = {
-  plan: [],
-  "plan-gate": [{ type: "GATE_ENTER" }],
-  coding: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
-  "coding-gate": [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }],
-  qa: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
-  "qa-gate": [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }],
-  merging: [{ type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }, { type: "GATE_ENTER" }, { type: "GATE_APPROVED" }],
-  done: [],
-  paused: [],
-  abandoned: [],
-};
+// PHASE_REPLAY_EVENTS moved to gate-taxonomy.ts — auto-generated from PHASE_ORDER (#956).
 
 export class ShipActorManager {
   private actors = new Map<string, Actor<typeof shipMachine>>();

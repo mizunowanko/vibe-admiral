@@ -67,26 +67,9 @@ export type GateConfig = boolean | GateType;
 /** Fleet-level gate settings. Omitted gate phases use defaults. */
 export type FleetGateSettings = Partial<Record<GatePhase, GateConfig>>;
 
-/** Default gate types for each gate phase. */
-export const DEFAULT_GATE_TYPES: Record<GatePhase, GateType> = {
-  "plan-gate": "plan-review",
-  "coding-gate": "code-review",
-  "qa-gate": "playwright",
-};
-
-/** The phase that follows each gate phase when approved. */
-export const GATE_NEXT_PHASE: Record<GatePhase, Phase> = {
-  "plan-gate": "coding",
-  "coding-gate": "qa",
-  "qa-gate": "merging",
-};
-
-/** The phase preceding each gate phase (what triggers the gate). */
-export const GATE_PREV_PHASE: Record<GatePhase, Phase> = {
-  "plan-gate": "plan",
-  "coding-gate": "coding",
-  "qa-gate": "qa",
-};
+// Gate constants (DEFAULT_GATE_TYPES, GATE_NEXT_PHASE, GATE_PREV_PHASE)
+// moved to gate-taxonomy.ts as derived constants from GATE_TAXONOMY (#956).
+// Re-exported from types.ts for backwards compatibility.
 
 /** Check if a phase is a gate phase. */
 export function isGatePhase(phase: Phase): phase is GatePhase {

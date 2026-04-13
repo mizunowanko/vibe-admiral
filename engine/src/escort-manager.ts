@@ -8,7 +8,8 @@ import type { FleetDatabase } from "./db.js";
 import type { ShipActorManager } from "./ship-actor-manager.js";
 import type { PhaseTransactionService } from "./phase-transaction-service.js";
 import type { EscortProcess, GatePhase, GateType, GateIntent, Phase } from "./types.js";
-import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
+import { isGatePhase, GATE_PREV_PHASE, GATE_PHASE_SKILL } from "./types.js";
+import { classifyEscortOutcome, MAX_ESCORT_FAILS } from "./escort-outcome.js";
 import { safeJsonParse } from "./util/json-safe.js";
 
 /**
@@ -41,14 +42,7 @@ const ESCORT_SKILLS = new Set([
   "shared-read-issue",
 ]);
 
-/** Map gate phase to the deployed Escort skill name.
- *  The Engine now launches the gate-specific skill directly,
- *  bypassing the deleted `/escort` orchestrator (#896). */
-const GATE_PHASE_SKILL: Record<GatePhase, string> = {
-  "plan-gate": "/escort-planning-gate",
-  "coding-gate": "/escort-implementing-gate",
-  "qa-gate": "/escort-acceptance-test-gate",
-};
+// GATE_PHASE_SKILL moved to gate-taxonomy.ts (#956), imported via types.ts.
 
 export class EscortManager {
   private processManager: ProcessManagerLike;
@@ -612,105 +606,124 @@ export class EscortManager {
     if (!parentShip) return;
 
     const currentPhase = parentShip.phase as Phase;
-    if (!isGatePhase(currentPhase)) {
-      // Phase already moved past gate — verdict was submitted successfully.
-      // This is the normal path in the on-demand model.
-      this.shipManager.clearGateCheck(parentShipId);
-      this.clearGateIntent(parentShipId);
-      return;
-    }
 
-    // Escort died without submitting verdict while parent is in gate phase.
-    // Log diagnostic info from escort-log.jsonl to aid debugging (#896).
-    {
-      const ship = this.shipManager.getShip(parentShipId);
-      if (ship) {
-        const logPath = join(ship.worktreePath, ".claude", "escort-log.jsonl");
-        readFile(logPath, "utf-8").then((content) => {
-          const lines = content.trim().split("\n").slice(-10);
-          const lastMessages = lines
-            .map((l) => safeJsonParse<Record<string, unknown>>(l, { source: "escort.lastLog" }))
-            .filter((m): m is Record<string, unknown> => m != null)
-            .filter((m) => m.type === "assistant" || m.type === "result")
-            .map((m) => {
-              if (m.type === "result") return `[result] costUsd=${m.costUsd as number | undefined}`;
-              return `[assistant] ${(String(m.message ?? "")).slice(0, 200)}`;
-            });
-          if (lastMessages.length > 0) {
-            console.warn(
-              `[escort-manager] Escort ${escortShipId.slice(0, 8)}... last log entries:\n${lastMessages.join("\n")}`,
-            );
-          }
-        }).catch(() => { /* log file may not exist */ });
-      }
-    }
-
-    // Check for a pre-declared gate intent — if the Escort declared "approve"
-    // before dying, honour that intent instead of reverting (fallback mechanism).
+    // Classify outcome before any side effects (#956)
     const intent = this.getGateIntent(parentShipId);
-    this.clearGateIntent(parentShipId);
+    const context = this.actorManager?.getContext(parentShipId);
+    const outcome = classifyEscortOutcome({
+      currentPhase,
+      isGatePhase: isGatePhase(currentPhase),
+      exitCode: code,
+      intent: intent ?? null,
+      escortFailCount: context?.escortFailCount ?? 0,
+    });
 
-    if (intent?.verdict === "approve" && this.phaseTx) {
-      console.log(
-        `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict, but gate-intent was "approve" — auto-approving for Ship ${parentShipId.slice(0, 8)}...`,
-      );
-
-      const approveResult = this.phaseTx.commit(parentShipId, {
-        event: { type: "GATE_APPROVED" },
-        triggeredBy: "escort",
-        metadata: {
-          gate_result: "approved",
-          fallback: true,
-          reason: `Escort died (code=${code}) but had declared approve intent — auto-approved`,
-        },
-      });
-
-      if (approveResult.success) {
+    switch (outcome.kind) {
+      case "verdict": {
+        this.shipManager.clearGateCheck(parentShipId);
+        this.clearGateIntent(parentShipId);
         return;
       }
-      console.warn(
-        `[escort-manager] Fallback GATE_APPROVED failed for Ship ${parentShipId.slice(0, 8)}...: ${approveResult.error} — falling through to revert`,
-      );
-    }
 
-    // No approve intent or fallback failed — treat as rejection
-    const prevPhase = GATE_PREV_PHASE[currentPhase as GatePhase];
-    console.warn(
-      `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict — reverting Ship ${parentShipId.slice(0, 8)}... from ${currentPhase} to ${prevPhase}`,
-    );
+      case "intent-approve": {
+        this.clearGateIntent(parentShipId);
+        if (this.tryFallbackApprove(parentShipId, code)) return;
+        console.warn(`[escort-manager] Fallback GATE_APPROVED failed for Ship ${parentShipId.slice(0, 8)}... — falling through to revert`);
+        this.handleEscortDeath(parentShipId, parentShip, currentPhase as GatePhase, code, escortShipId);
+        return;
+      }
 
-    const feedback = `Escort process exited unexpectedly (code=${code}) without submitting verdict`;
-    if (this.phaseTx) {
-      const result = this.phaseTx.commit(parentShipId, {
-        event: { type: "ESCORT_DIED", exitCode: code, feedback },
-        triggeredBy: "escort",
-        metadata: { gate_result: "rejected", feedback },
-      });
-      if (!result.success) {
-        console.error(`[escort-manager] Phase revert failed for Ship ${parentShipId.slice(0, 8)}...: ${result.error}`);
+      case "died-post-start":
+      case "fail-limit": {
+        this.clearGateIntent(parentShipId);
+        this.logEscortDiagnostics(parentShipId, escortShipId);
+        this.handleEscortDeath(parentShipId, parentShip, currentPhase as GatePhase, code, escortShipId);
+        return;
       }
     }
+  }
 
-    // Check if Escort fail count has exceeded the limit — auto-stop the Ship
-    const MAX_ESCORT_FAILS = 3;
+  private tryFallbackApprove(parentShipId: string, exitCode: number | null): boolean {
+    if (!this.phaseTx) return false;
+    const result = this.phaseTx.commit(parentShipId, {
+      event: { type: "GATE_APPROVED" },
+      triggeredBy: "escort",
+      metadata: {
+        gate_result: "approved",
+        fallback: true,
+        reason: `Escort died (code=${exitCode}) but had declared approve intent — auto-approved`,
+      },
+    });
+    return result.success;
+  }
+
+  private commitEscortDied(parentShipId: string, exitCode: number | null): void {
+    if (!this.phaseTx) return;
+    const feedback = `Escort process exited unexpectedly (code=${exitCode}) without submitting verdict`;
+    const result = this.phaseTx.commit(parentShipId, {
+      event: { type: "ESCORT_DIED", exitCode, feedback },
+      triggeredBy: "escort",
+      metadata: { gate_result: "rejected", feedback },
+    });
+    if (!result.success) {
+      console.error(`[escort-manager] Phase revert failed for Ship ${parentShipId.slice(0, 8)}...: ${result.error}`);
+    }
+  }
+
+  private handleEscortDeath(
+    parentShipId: string,
+    parentShip: { issueNumber: number; issueTitle: string; phase: string },
+    gatePhase: GatePhase,
+    exitCode: number | null,
+    escortShipId: string,
+  ): void {
+    const prevPhase = GATE_PREV_PHASE[gatePhase];
+    console.warn(
+      `[escort-manager] Escort ${escortShipId.slice(0, 8)}... died without verdict — reverting Ship ${parentShipId.slice(0, 8)}... from ${gatePhase} to ${prevPhase}`,
+    );
+
+    this.commitEscortDied(parentShipId, exitCode);
+
+    // Check if fail count now exceeds the limit (post-increment by XState)
     const context = this.actorManager?.getContext(parentShipId);
     if (context && context.escortFailCount >= MAX_ESCORT_FAILS) {
       console.error(
         `[escort-manager] Ship #${parentShip.issueNumber} (${parentShipId.slice(0, 8)}...) hit Escort fail limit ` +
-        `(${context.escortFailCount}/${MAX_ESCORT_FAILS} consecutive failures) — auto-stopping to prevent infinite loop`,
+        `(${context.escortFailCount}/${MAX_ESCORT_FAILS} consecutive failures) — auto-stopping`,
       );
       this.actorManager?.send(parentShipId, { type: "PAUSE" });
       this.actorManager?.send(parentShipId, { type: "ESCORT_FAIL_LIMIT" });
-      this.shipManager.updatePhase(parentShipId, "paused", `Auto-paused: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}`);
+      this.shipManager.updatePhase(parentShipId, "paused", `Auto-paused: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${gatePhase}`);
 
-      const stopMessage = `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) auto-paused: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${currentPhase}. Manual intervention required.`;
+      const stopMessage = `Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) auto-paused: ${MAX_ESCORT_FAILS} consecutive Escort failures in ${gatePhase}. Manual intervention required.`;
       this.onEscortDeathCallback?.(parentShipId, stopMessage);
       return;
     }
 
-    // Notify Flagship
-    const message = `Escort died without verdict for Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) during ${currentPhase}. Phase reverted to ${prevPhase}. (exit code=${code})`;
+    const message = `Escort died without verdict for Ship #${parentShip.issueNumber} (${parentShip.issueTitle}) during ${gatePhase}. Phase reverted to ${prevPhase}. (exit code=${exitCode})`;
     this.onEscortDeathCallback?.(parentShipId, message);
+  }
+
+  private logEscortDiagnostics(parentShipId: string, escortShipId: string): void {
+    const ship = this.shipManager.getShip(parentShipId);
+    if (!ship) return;
+    const logPath = join(ship.worktreePath, ".claude", "escort-log.jsonl");
+    readFile(logPath, "utf-8").then((content) => {
+      const lines = content.trim().split("\n").slice(-10);
+      const lastMessages = lines
+        .map((l) => safeJsonParse<Record<string, unknown>>(l, { source: "escort.lastLog" }))
+        .filter((m): m is Record<string, unknown> => m != null)
+        .filter((m) => m.type === "assistant" || m.type === "result")
+        .map((m) => {
+          if (m.type === "result") return `[result] costUsd=${m.costUsd as number | undefined}`;
+          return `[assistant] ${(String(m.message ?? "")).slice(0, 200)}`;
+        });
+      if (lastMessages.length > 0) {
+        console.warn(
+          `[escort-manager] Escort ${escortShipId.slice(0, 8)}... last log entries:\n${lastMessages.join("\n")}`,
+        );
+      }
+    }).catch(() => { /* log file may not exist */ });
   }
 
   /** Kill all running Escort processes. */
