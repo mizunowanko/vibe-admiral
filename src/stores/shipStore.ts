@@ -62,8 +62,8 @@ interface ShipState {
   setShipCompacting: (id: string, isCompacting: boolean) => void;
   addShipLog: (id: string, message: StreamMessage) => void;
   addEscortLog: (id: string, message: StreamMessage) => void;
-  mergeShipHistory: (id: string, messages: StreamMessage[]) => void;
-  mergeEscortHistory: (id: string, messages: StreamMessage[]) => void;
+  mergeShipHistory: (id: string, messages: StreamMessage[], requestedAt: number) => void;
+  mergeEscortHistory: (id: string, messages: StreamMessage[], requestedAt: number) => void;
   setGateCheck: (id: string, gateCheck: GateCheckState) => void;
   clearGateCheck: (id: string) => void;
   setShipDone: (id: string, prUrl?: string, merged?: boolean) => void;
@@ -169,8 +169,7 @@ export const useShipStore = create<ShipState>((set) => ({
     scheduleBatchFlush();
   },
 
-  mergeShipHistory: (id, messages) => {
-    // Drain any pending buffered messages for this ship so they aren't lost
+  mergeShipHistory: (id, messages, requestedAt) => {
     const buffered = pendingShipLogs.get(id) ?? [];
     pendingShipLogs.delete(id);
 
@@ -178,15 +177,11 @@ export const useShipStore = create<ShipState>((set) => ({
       const shipLogs = new Map(state.shipLogs);
       const existing = shipLogs.get(id) ?? [];
 
-      // History from server is the authoritative base.
-      // Append any existing/buffered messages that are newer than the latest
-      // history timestamp to preserve streaming messages that arrived after
-      // the Engine read the log files.
-      const lastMsg = messages[messages.length - 1];
-      const historyLatestTs = lastMsg ? (lastMsg.timestamp ?? 0) : 0;
-
+      // Keep buffered/existing messages that arrived after the history was
+      // requested (local clock). This avoids the old timestamp-gate bug where
+      // messages without a server timestamp were silently dropped.
       const newer = [...existing, ...buffered].filter(
-        (m) => (m.timestamp ?? 0) > historyLatestTs,
+        (m) => (m.timestamp ?? 0) >= requestedAt,
       );
 
       shipLogs.set(id, [...messages, ...newer]);
@@ -194,7 +189,7 @@ export const useShipStore = create<ShipState>((set) => ({
     });
   },
 
-  mergeEscortHistory: (id, messages) => {
+  mergeEscortHistory: (id, messages, requestedAt) => {
     const buffered = pendingEscortLogs.get(id) ?? [];
     pendingEscortLogs.delete(id);
 
@@ -202,11 +197,8 @@ export const useShipStore = create<ShipState>((set) => ({
       const escortLogs = new Map(state.escortLogs);
       const existing = escortLogs.get(id) ?? [];
 
-      const lastMsg = messages[messages.length - 1];
-      const historyLatestTs = lastMsg ? (lastMsg.timestamp ?? 0) : 0;
-
       const newer = [...existing, ...buffered].filter(
-        (m) => (m.timestamp ?? 0) > historyLatestTs,
+        (m) => (m.timestamp ?? 0) >= requestedAt,
       );
 
       escortLogs.set(id, [...messages, ...newer]);

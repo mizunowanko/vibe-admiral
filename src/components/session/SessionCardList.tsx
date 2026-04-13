@@ -1,22 +1,14 @@
-import { memo, useState, useMemo, useRef } from "react";
+import { memo, useState, useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useSessionStore, commanderSessionId, shipSessionId } from "@/stores/sessionStore";
 import { useShipStore } from "@/stores/shipStore";
 import { ActiveShipSummary } from "@/components/ship/ActiveShipSummary";
 import { SessionCard, DispatchCard } from "./SessionCard";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { Ship, Dispatch } from "@/types";
+import type { Dispatch } from "@/types";
 
 interface SessionCardListProps {
   fleetId: string;
-}
-
-function buildFleetShipFingerprint(ships: Ship[]): string {
-  return ships
-    .map(
-      (s) =>
-        `${s.id}:${s.phase}:${s.issueNumber}:${s.issueTitle}:${s.isCompacting}:${s.gateCheck?.status ?? ""}:${s.processDead ?? false}:${s.repo}`,
-    )
-    .join("|");
 }
 
 function ShipsSection({ fleetId }: { fleetId: string }) {
@@ -25,21 +17,11 @@ function ShipsSection({ fleetId }: { fleetId: string }) {
   const sessions = useSessionStore((s) => s.sessions);
   const [showInactive, setShowInactive] = useState(false);
 
-  const prevRef = useRef<{ fingerprint: string; ships: Ship[] }>({
-    fingerprint: "",
-    ships: [],
-  });
-  const allFleetShips = useShipStore((s) => {
-    const filtered = Array.from(s.ships.values()).filter(
-      (ship) => ship.fleetId === fleetId,
-    );
-    const fingerprint = buildFleetShipFingerprint(filtered);
-    if (fingerprint === prevRef.current.fingerprint) {
-      return prevRef.current.ships;
-    }
-    prevRef.current = { fingerprint, ships: filtered };
-    return filtered;
-  });
+  const allFleetShips = useShipStore(
+    useShallow((s) =>
+      Array.from(s.ships.values()).filter((ship) => ship.fleetId === fleetId),
+    ),
+  );
 
   const fleetShips = useMemo(
     () =>
