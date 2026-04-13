@@ -1,41 +1,17 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdirSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAdmiralHome } from "./admiral-home.js";
-import { safeJsonParse } from "./util/json-safe.js";
+import {
+  isRetryableError,
+  isRateLimitError,
+  attachStdoutProcessor,
+  attachStderrProcessor,
+} from "./stream-processor.js";
 
-/** Retryable error patterns in stderr / error output from Claude CLI.
- *  Covers rate limits (429), overload (529), server errors (500),
- *  and transient auth failures (401). */
-const RETRYABLE_ERROR_PATTERNS = [
-  /rate.?limit/i,
-  /\b429\b/,
-  /too many requests/i,
-  /overloaded/i,
-  /rate_limit_error/i,
-  /APIError.*429/i,
-  /\b529\b/,
-  /\b500\b/,
-  /\b401\b/,
-  /internal.?server.?error/i,
-  /service.?unavailable/i,
-];
+export { isRetryableError, isRateLimitError };
 
-export function isRetryableError(text: string): boolean {
-  return RETRYABLE_ERROR_PATTERNS.some((p) => p.test(text));
-}
-
-/** @deprecated Use isRetryableError instead. Kept for backward compatibility. */
-export const isRateLimitError = isRetryableError;
-
-/**
- * Shared allowedTools for Commander sessions (Flagship / Dock).
- * Commanders are strictly read-only — no Write, Edit, or Agent.
- * Dispatch is launched via Engine API (POST /api/dispatch), not Agent tool.
- * AskUserQuestion is NOT allowed — Commanders sometimes use it and hang.
- */
 export const COMMANDER_ALLOWED_TOOLS =
   "Bash,Read,Glob,Grep,WebSearch,WebFetch";
 
@@ -51,12 +27,7 @@ export interface ProcessEvents {
   spawn: (id: string) => void;
 }
 
-/**
- * ProcessManager interface — used by IpcProcessManager proxy to maintain
- * API compatibility when the real ProcessManager runs in a separate process.
- */
 export interface ProcessManagerLike {
-  // Spawn methods
   sortie(
     id: string,
     worktreePath: string,
@@ -97,7 +68,6 @@ export interface ProcessManagerLike {
     logFileName?: string,
   ): void;
 
-  // Communication methods
   sendMessage(
     id: string,
     message: string,
@@ -105,16 +75,13 @@ export interface ProcessManagerLike {
   ): SendResult;
   sendToolResult(id: string, toolUseId: string, result: string): SendResult;
 
-  // Lifecycle methods
   kill(id: string): boolean;
   killAll(): void;
 
-  // Query methods
   isRunning(id: string): boolean;
   getActiveCount(): number;
   getPid(id: string): number | undefined;
 
-  // EventEmitter methods (use `any` to match Node.js EventEmitter signature)
   /* eslint-disable @typescript-eslint/no-explicit-any */
   on(event: string, listener: (...args: any[]) => void): this;
   emit(event: string, ...args: any[]): boolean;
@@ -122,7 +89,6 @@ export interface ProcessManagerLike {
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
-/** CLI executable path — overridable via CLAUDE_CLI_PATH for E2E testing with stub CLI. */
 const CLI_PATH = process.env.CLAUDE_CLI_PATH ?? "claude";
 
 export class ProcessManager extends EventEmitter {
@@ -136,16 +102,6 @@ export class ProcessManager extends EventEmitter {
     skill?: string,
     extraEnv?: Record<string, string>,
   ): ChildProcess {
-    // See .claude/rules/cli-subprocess.md for full rationale.
-    //
-    // stdio: stdin MUST be 'ignore' — Bun replaces pipe FDs with Unix
-    // sockets when stdin is a pipe, breaking stdout capture.
-    //
-    // disallowedTools:
-    //   EnterPlanMode/ExitPlanMode — in -p mode, plan mode causes CLI
-    //     to exit after ExitPlanMode without performing implementation.
-    //   AskUserQuestion — Ship runs non-interactively (stdin ignored);
-    //     user interaction uses DB message board instead.
     const skillCmd = skill ?? "/implement";
     const args = [
       "-p",
@@ -179,8 +135,6 @@ export class ProcessManager extends EventEmitter {
       },
     );
 
-    // Escort processes share the parent Ship's worktree — write to separate log file
-    // so ship-manager can load them independently (#729).
     const isEscort = skill?.startsWith("/escort-") ?? false;
     const logFileName = isEscort ? "escort-log.jsonl" : "ship-log.jsonl";
     const logFilePath = join(worktreePath, ".claude", logFileName);
@@ -188,10 +142,6 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  /**
-   * Launch a Dispatch process — an independent CLI session for investigation or modification.
-   * Similar to sortie() but with type-dependent allowedTools instead of disallowedTools.
-   */
   dispatchSortie(
     id: string,
     cwd: string,
@@ -229,10 +179,6 @@ export class ProcessManager extends EventEmitter {
     return proc;
   }
 
-  /**
-   * Launch an interactive commander session (Dock or Flagship).
-   * Both roles use the same CLI config — they differ only in system prompt and skills.
-   */
   launchCommander(
     id: string,
     fleetPath: string,
@@ -240,15 +186,6 @@ export class ProcessManager extends EventEmitter {
     systemPrompt?: string,
     extraEnv?: Record<string, string>,
   ): ChildProcess {
-    // See .claude/rules/cli-subprocess.md for full rationale.
-    //
-    // stdio: stdin IS a pipe (interactive messaging via stream-json).
-    // MUST write to stdin immediately after spawn — Bun blocks stdout
-    // when stdin pipe is idle, creating a deadlock if you wait for init.
-    //
-    // allowedTools: Commanders are strictly read-only.
-    // Dispatch is launched via Engine API (POST /api/dispatch), not via Agent tool.
-    // AskUserQuestion is NOT allowed — it causes Commanders to hang.
     const args = [
       "-p",
       "",
@@ -348,10 +285,6 @@ export class ProcessManager extends EventEmitter {
     return { ok: true };
   }
 
-  /**
-   * Resume an interactive commander session (Dock or Flagship).
-   * --resume without -p: keeps the session interactive (stdin-driven).
-   */
   resumeCommander(
     id: string,
     sessionId: string,
@@ -411,8 +344,6 @@ export class ProcessManager extends EventEmitter {
     appendSystemPrompt?: string,
     logFileName?: string,
   ): ChildProcess {
-    // Same stdio/disallowedTools constraints as sortie().
-    // See .claude/rules/cli-subprocess.md for full rationale.
     const args = [
       "--resume",
       sessionId,
@@ -426,9 +357,6 @@ export class ProcessManager extends EventEmitter {
       "EnterPlanMode,ExitPlanMode,AskUserQuestion",
     ];
 
-    // Re-inject system prompt so customInstructions survive session resume.
-    // The original --append-system-prompt from sortie() is part of the stored session,
-    // but re-applying it provides defense-in-depth against content loss.
     if (appendSystemPrompt) {
       args.push("--append-system-prompt", appendSystemPrompt);
     }
@@ -490,7 +418,6 @@ export class ProcessManager extends EventEmitter {
     this.emit("spawn", id);
     const shortId = id.slice(0, 8);
 
-    // Ensure log directory exists for Ship log persistence
     if (logFilePath) {
       try {
         mkdirSync(dirname(logFilePath), { recursive: true });
@@ -501,42 +428,20 @@ export class ProcessManager extends EventEmitter {
 
     console.log(`[proc:${shortId}] spawned (pid=${proc.pid})`);
 
-    let buffer = "";
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const msg = safeJsonParse<Record<string, unknown>>(line, { source: `proc:${shortId}.stdout` });
-        if (!msg) continue;
+    const callbacks = {
+      onMessage: (msg: Record<string, unknown>) => {
         this.emit("data", id, msg);
+      },
+      onRetryableError: () => {
+        this.emit("rate-limit", id);
+      },
+      onError: (error: Error) => {
+        this.emit("error", id, error);
+      },
+    };
 
-        if (logFilePath && !(msg.type === "system" && msg.subtype === "init")) {
-          const msgWithTs = { ...msg, timestamp: Date.now() };
-          appendFile(logFilePath, JSON.stringify(msgWithTs) + "\n").catch(() => {});
-        }
-      }
-    });
-
-    let stderrBuffer = "";
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      stderrBuffer += chunk.toString();
-      const lines = stderrBuffer.split("\n");
-      stderrBuffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const text = line.trim();
-        if (!text) continue;
-        console.error(`[proc:${shortId}] stderr: ${text.slice(0, 200)}`);
-        if (isRetryableError(text)) {
-          this.emit("rate-limit", id);
-        } else {
-          this.emit("error", id, new Error(text));
-        }
-      }
-    });
+    attachStdoutProcessor(proc, shortId, logFilePath, callbacks);
+    attachStderrProcessor(proc, shortId, callbacks);
 
     proc.on("exit", (code) => {
       console.log(`[proc:${shortId}] exited (code=${code})`);
