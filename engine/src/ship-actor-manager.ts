@@ -14,6 +14,8 @@ import { createActor, type Actor } from "xstate";
 import { shipMachine, stateValueToPhase, type ShipMachineContext, type ShipMachineEvent, type ShipMachineInput } from "./ship-machine.js";
 import type { Phase, GatePhase, GateType, ShipProcess } from "./types.js";
 
+type PersistedSnapshot = ReturnType<Actor<typeof shipMachine>["getPersistedSnapshot"]>;
+
 /** Side-effect handlers provided by the Engine wiring layer. */
 export interface ShipActorSideEffects {
   /** Persist phase change to DB and notify frontend. */
@@ -72,12 +74,10 @@ export class ShipActorManager {
 
     const actor = createActor(shipMachine, { input });
     const needsReplay = startPhase && startPhase !== "plan";
-    this.setupSubscription(input.shipId, actor, { suppressInitial: !!needsReplay });
+    this.setupSubscription(input.shipId, actor);
     actor.start();
     this.actors.set(input.shipId, actor);
 
-    // Re-sortie: replay events to advance XState to the target phase.
-    // suppressInitial prevents side effects (Escort launches) during replay.
     if (needsReplay) {
       this.replayToPhase(input.shipId, actor, startPhase, null);
     }
@@ -117,10 +117,9 @@ export class ShipActorManager {
       try {
         const actor = createActor(shipMachine, {
           input,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          snapshot: persistedSnapshot as any,
+          snapshot: persistedSnapshot as PersistedSnapshot,
         });
-        this.setupSubscription(ship.id, actor, { suppressInitial: true });
+        this.setupSubscription(ship.id, actor);
         actor.start();
         this.actors.set(ship.id, actor);
 
@@ -150,7 +149,7 @@ export class ShipActorManager {
 
     // Fallback: replay-based restoration (legacy Ships without snapshots)
     const actor = createActor(shipMachine, { input });
-    this.setupSubscription(ship.id, actor, { suppressInitial: true });
+    this.setupSubscription(ship.id, actor);
     actor.start();
     this.actors.set(ship.id, actor);
 
@@ -359,10 +358,9 @@ export class ShipActorManager {
       try {
         const actor = createActor(shipMachine, {
           input,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          snapshot: persistedSnapshot as any,
+          snapshot: persistedSnapshot as PersistedSnapshot,
         });
-        this.setupSubscription(shipId, actor, { suppressInitial: true });
+        this.setupSubscription(shipId, actor);
         actor.start();
         this.actors.set(shipId, actor);
 
@@ -389,7 +387,7 @@ export class ShipActorManager {
     }
 
     const actor = createActor(shipMachine, { input });
-    this.setupSubscription(shipId, actor, { suppressInitial: true });
+    this.setupSubscription(shipId, actor);
     actor.start();
     this.actors.set(shipId, actor);
 
@@ -454,38 +452,26 @@ export class ShipActorManager {
     this.replayingShips.delete(shipId);
   }
 
-  /**
-   * Subscribe to Actor state changes and dispatch side effects.
-   * @param suppressInitial If true, suppress the initial state notification
-   *   (used for restored actors where the DB phase is the source of truth).
-   */
   private setupSubscription(
     shipId: string,
     actor: Actor<typeof shipMachine>,
-    options?: { suppressInitial?: boolean },
   ): void {
     let previousPhase: string | null = null;
-    const suppressInitial = options?.suppressInitial ?? false;
 
     actor.subscribe((snapshot) => {
       const currentPhase = snapshot.value as string;
 
-      // Only dispatch on actual phase changes
       if (currentPhase === previousPhase) return;
 
       const isInitial = previousPhase === null;
       previousPhase = currentPhase;
 
-      // Skip initial state notification for both new and restored actors
-      if (isInitial && suppressInitial) return;
       if (isInitial) return;
 
-      // Suppress side effects during replay (Engine restart reconciliation)
       if (this.replayingShips.has(shipId)) return;
 
       const phase = stateValueToPhase(currentPhase);
 
-      // Dispatch side effects
       this.sideEffects?.onPhaseChange(shipId, phase);
     });
   }
