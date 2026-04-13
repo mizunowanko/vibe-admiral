@@ -178,10 +178,10 @@ export const useShipStore = create<ShipState>((set) => ({
       const existing = shipLogs.get(id) ?? [];
 
       // Keep buffered/existing messages that arrived after the history was
-      // requested (local clock). This avoids the old timestamp-gate bug where
-      // messages without a server timestamp were silently dropped.
+      // requested (local clock). Messages without a timestamp are streaming
+      // fragments that just arrived — always preserve them.
       const newer = [...existing, ...buffered].filter(
-        (m) => (m.timestamp ?? 0) >= requestedAt,
+        (m) => m.timestamp == null || m.timestamp >= requestedAt,
       );
 
       shipLogs.set(id, [...messages, ...newer]);
@@ -198,7 +198,7 @@ export const useShipStore = create<ShipState>((set) => ({
       const existing = escortLogs.get(id) ?? [];
 
       const newer = [...existing, ...buffered].filter(
-        (m) => (m.timestamp ?? 0) >= requestedAt,
+        (m) => m.timestamp == null || m.timestamp >= requestedAt,
       );
 
       escortLogs.set(id, [...messages, ...newer]);
