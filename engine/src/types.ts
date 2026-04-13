@@ -8,11 +8,20 @@ export {
   type GateType,
   type GateConfig,
   type FleetGateSettings,
+  isGatePhase,
+} from "./phases.js";
+// === Gate Taxonomy (re-exported from gate-taxonomy.ts — Single Source of Truth #956) ===
+export {
   DEFAULT_GATE_TYPES,
   GATE_NEXT_PHASE,
   GATE_PREV_PHASE,
-  isGatePhase,
-} from "./phases.js";
+  GATE_PHASE_SKILL,
+  PHASE_REPLAY_EVENTS,
+  type GateReplayEvent,
+  type GateTaxonomyEntry,
+  type GateSkipContext,
+  GATE_TAXONOMY,
+} from "./gate-taxonomy.js";
 // Local import for types used within this file.
 import type { Phase, GatePhase, GateType, FleetGateSettings } from "./phases.js";
 

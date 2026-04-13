@@ -82,11 +82,14 @@ export interface ProcessManagerLike {
   getActiveCount(): number;
   getPid(id: string): number | undefined;
 
-  /* eslint-disable @typescript-eslint/no-explicit-any */
+  // Typed overloads for ProcessEvents
+  on<K extends keyof ProcessEvents>(event: K, listener: ProcessEvents[K]): this;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, listener: (...args: any[]) => void): this;
+  emit<K extends keyof ProcessEvents>(event: K, ...args: Parameters<ProcessEvents[K]>): boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emit(event: string, ...args: any[]): boolean;
   removeAllListeners(event?: string): this;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 const CLI_PATH = process.env.CLAUDE_CLI_PATH ?? "claude";
@@ -175,7 +178,8 @@ export class ProcessManager extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    this.setupProcess(id, proc);
+    const logFilePath = join(getAdmiralHome(), "dispatches", `dispatch-log-${id}.jsonl`);
+    this.setupProcess(id, proc, logFilePath);
     return proc;
   }
 
@@ -214,17 +218,6 @@ export class ProcessManager extends EventEmitter {
 
     this.setupProcess(id, proc);
     return proc;
-  }
-
-  /** @deprecated Use launchCommander instead. */
-  launchBridge(
-    id: string,
-    fleetPath: string,
-    additionalDirs: string[],
-    systemPrompt?: string,
-    extraEnv?: Record<string, string>,
-  ): ChildProcess {
-    return this.launchCommander(id, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   sendMessage(
@@ -321,18 +314,6 @@ export class ProcessManager extends EventEmitter {
 
     this.setupProcess(id, proc);
     return proc;
-  }
-
-  /** @deprecated Use resumeCommander instead. */
-  resumeBridge(
-    id: string,
-    sessionId: string,
-    fleetPath: string,
-    additionalDirs: string[],
-    systemPrompt?: string,
-    extraEnv?: Record<string, string>,
-  ): ChildProcess {
-    return this.resumeCommander(id, sessionId, fleetPath, additionalDirs, systemPrompt, extraEnv);
   }
 
   resumeSession(

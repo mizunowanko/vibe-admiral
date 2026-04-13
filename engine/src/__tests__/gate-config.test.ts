@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { GATE_PHASES, resolveGateType, getNextPhaseAfterGate, shouldSkipGate } from "../gate-config.js";
+import { resolveGateType, getNextPhaseAfterGate, shouldSkipGate } from "../gate-config.js";
 import type { GateSkipContext } from "../gate-config.js";
+import { GATE_PHASES } from "../types.js";
 import { DEFAULT_GATE_TYPES } from "../types.js";
 import type { FleetGateSettings, GatePhase } from "../types.js";
 
