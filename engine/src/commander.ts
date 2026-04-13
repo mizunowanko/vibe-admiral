@@ -8,6 +8,7 @@ import { safeJsonParse } from "./util/json-safe.js";
 import { buildCommanderEnv, toLaunchRecord } from "./launch-environment.js";
 import { validateOrFresh } from "./session-resumer.js";
 import type { ContextRegistry } from "./context-registry.js";
+import { hashCustomInstructions } from "./context-registry.js";
 
 const MAX_HISTORY = 500;
 
@@ -112,7 +113,7 @@ export class CommanderManager {
       cwd: fleetPath,
       sessionId: resumeResult.sessionId,
       customInstructionsSource: customInstructionsText ? "fleet" : "global",
-      customInstructionsHash: "",
+      customInstructionsHash: hashCustomInstructions(customInstructionsText),
     });
 
     if (session.sessionId) {

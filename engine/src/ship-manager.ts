@@ -18,6 +18,7 @@ import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 import { UNIT_DEPLOY_MAP } from "./unit-deploy-map.js";
 import { buildShipEnv, toLaunchRecord } from "./launch-environment.js";
 import type { ContextRegistry } from "./context-registry.js";
+import { hashCustomInstructions } from "./context-registry.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -323,7 +324,7 @@ export class ShipManager {
       cwd: worktreePath,
       sessionId: null,
       customInstructionsSource: customInstructionsText ? "fleet" : "global",
-      customInstructionsHash: "",
+      customInstructionsHash: hashCustomInstructions(customInstructionsText),
     });
     this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, toLaunchRecord(shipEnv));
 

@@ -4,6 +4,12 @@
  * Single reference point for Fleet / cwd / session / customInstructions context.
  * All subprocess launch and resume paths MUST obtain their context from this registry.
  */
+import { createHash } from "node:crypto";
+
+export function hashCustomInstructions(text: string | undefined): string {
+  if (!text) return "";
+  return createHash("sha256").update(text).digest("hex").slice(0, 12);
+}
 
 // ── Branded type aliases (documentation-level; runtime-compatible with string) ──
 

@@ -13,6 +13,7 @@ import { safeJsonParse } from "./util/json-safe.js";
 import { EscortFilesystemManager } from "./escort-filesystem-manager.js";
 import { buildEscortEnv, toLaunchRecord } from "./launch-environment.js";
 import type { ContextRegistry } from "./context-registry.js";
+import { hashCustomInstructions } from "./context-registry.js";
 
 const GATE_PHASE_SKILL: Record<GatePhase, string> = {
   "plan-gate": "/escort-planning-gate",
@@ -195,7 +196,9 @@ export class EscortManager {
       fleetId: parentShip.fleetId,
       parentShipId: parentShip.id,
       gatePrompt,
-      extras: extraEnv,
+      qaRequiredPaths: extraEnv?.VIBE_ADMIRAL_QA_REQUIRED_PATHS,
+      qaRequired: extraEnv?.VIBE_ADMIRAL_QA_REQUIRED,
+      acceptanceTestRequired: extraEnv?.VIBE_ADMIRAL_ACCEPTANCE_TEST_REQUIRED,
     });
 
     this.contextRegistry?.register({
@@ -205,7 +208,7 @@ export class EscortManager {
       cwd: parentShip.worktreePath,
       sessionId: null,
       customInstructionsSource: extraPrompt ? "escort-stash" : "global",
-      customInstructionsHash: "",
+      customInstructionsHash: hashCustomInstructions(extraPrompt),
     });
 
     const gateContext = gatePhase
@@ -250,7 +253,9 @@ export class EscortManager {
       fleetId: parentShip.fleetId,
       parentShipId: parentShip.id,
       gatePrompt,
-      extras: extraEnv,
+      qaRequiredPaths: extraEnv?.VIBE_ADMIRAL_QA_REQUIRED_PATHS,
+      qaRequired: extraEnv?.VIBE_ADMIRAL_QA_REQUIRED,
+      acceptanceTestRequired: extraEnv?.VIBE_ADMIRAL_ACCEPTANCE_TEST_REQUIRED,
     });
 
     const resumeMessage = `The parent Ship has entered ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`;

@@ -67,7 +67,9 @@ export function buildEscortEnv(opts: {
   parentShipId: ShipId;
   gatePrompt?: string;
   enginePort?: string;
-  extras?: Record<string, string>;
+  qaRequiredPaths?: string;
+  qaRequired?: string;
+  acceptanceTestRequired?: string;
 }): EscortLaunchEnv {
   const env: EscortLaunchEnv = {
     VIBE_ADMIRAL: "true",
@@ -77,7 +79,9 @@ export function buildEscortEnv(opts: {
     VIBE_ADMIRAL_FLEET_ID: opts.fleetId,
     VIBE_ADMIRAL_PARENT_SHIP_ID: opts.parentShipId,
     ...(opts.gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: opts.gatePrompt } : {}),
-    ...(opts.extras ?? {}),
+    ...(opts.qaRequiredPaths ? { VIBE_ADMIRAL_QA_REQUIRED_PATHS: opts.qaRequiredPaths } : {}),
+    ...(opts.qaRequired ? { VIBE_ADMIRAL_QA_REQUIRED: opts.qaRequired } : {}),
+    ...(opts.acceptanceTestRequired ? { VIBE_ADMIRAL_ACCEPTANCE_TEST_REQUIRED: opts.acceptanceTestRequired } : {}),
     VIBE_ADMIRAL_ENV_HASH: "",
   } as EscortLaunchEnv;
   env.VIBE_ADMIRAL_ENV_HASH = computeEnvHash(env);
