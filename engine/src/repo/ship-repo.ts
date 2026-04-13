@@ -40,13 +40,14 @@ export class ShipRepo {
       "SELECT id, fleet_id FROM repos WHERE owner = ? AND name = ?",
     ).get(owner, name) as { id: number; fleet_id: string | null } | undefined;
     if (existing) {
-      if (fleetId && existing.fleet_id && existing.fleet_id !== fleetId) {
+      const isAssigned = existing.fleet_id && existing.fleet_id !== "__unassigned__";
+      if (fleetId && isAssigned && existing.fleet_id !== fleetId) {
         throw new Error(
-          `[db] Repo ${owner}/${name} belongs to fleet ${existing.fleet_id.slice(0, 8)}..., ` +
+          `[db] Repo ${owner}/${name} belongs to fleet ${existing.fleet_id!.slice(0, 8)}..., ` +
           `cannot assign to fleet ${fleetId.slice(0, 8)}... — use transferRepoFleet() for explicit transfer`,
         );
       }
-      if (fleetId && !existing.fleet_id) {
+      if (fleetId && (!isAssigned || existing.fleet_id !== fleetId)) {
         this.db.prepare("UPDATE repos SET fleet_id = ? WHERE id = ?").run(fleetId, existing.id);
       }
       return existing.id;
@@ -54,7 +55,7 @@ export class ShipRepo {
 
     const result = this.db.prepare(
       "INSERT INTO repos (owner, name, fleet_id) VALUES (?, ?, ?)",
-    ).run(owner, name, fleetId ?? null);
+    ).run(owner, name, fleetId ?? "__unassigned__");
     return Number(result.lastInsertRowid);
   }
 
