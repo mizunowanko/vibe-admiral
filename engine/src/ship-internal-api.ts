@@ -12,6 +12,7 @@ import type { Phase, GatePhase } from "./types.js";
 import { shouldSkipGate, resolveGateType } from "./gate-config.js";
 import { mergeSettings } from "./deep-merge.js";
 import picomatch from "picomatch";
+import { composeForGate } from "./system-prompt-registry.js";
 
 // ── Comment URL validation ──
 
@@ -95,19 +96,9 @@ export async function launchEscortForGate(
 
   const escortManager = deps.getEscortManager();
 
-  let escortExtraPrompt: string | undefined;
-  let shipCustomInstructionsText: string | undefined;
-  {
-    const ci = mergedGateSettings.customInstructions;
-    const escortCiParts = [ci?.shared, ci?.escort].filter(Boolean);
-    if (escortCiParts.length > 0) {
-      escortExtraPrompt = `## Custom Instructions\n\n${escortCiParts.join("\n\n")}`;
-    }
-    const shipCiParts = [ci?.shared, ci?.ship].filter(Boolean);
-    if (shipCiParts.length > 0) {
-      shipCustomInstructionsText = `## Custom Instructions\n\n${shipCiParts.join("\n\n")}`;
-    }
-  }
+  // ADR-0024: Unified CI composition via SystemPromptRegistry
+  const { escortText: escortExtraPrompt, shipText: shipCustomInstructionsText } =
+    composeForGate(mergedGateSettings.customInstructions);
 
   const gatePrompt = mergedGateSettings.gatePrompts?.[gateType];
 

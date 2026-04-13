@@ -5,6 +5,9 @@ import { getAdmiralHome } from "./admiral-home.js";
 import type { StreamMessage, PersistedCommanderSession, CommanderRole, Dispatch, DispatchStatus } from "./types.js";
 import { UNIT_DEPLOY_MAP } from "./unit-deploy-map.js";
 import { safeJsonParse } from "./util/json-safe.js";
+import { buildCommanderEnv, toLaunchRecord } from "./launch-environment.js";
+import { validateOrFresh } from "./session-resumer.js";
+import type { ContextRegistry } from "./context-registry.js";
 
 const MAX_HISTORY = 500;
 
@@ -37,10 +40,15 @@ export class CommanderManager {
   protected processManager: ProcessManagerLike;
   private appendCount = 0;
   protected readonly role: CommanderRole;
+  private contextRegistry: ContextRegistry | null = null;
 
   constructor(processManager: ProcessManagerLike, role: CommanderRole) {
     this.processManager = processManager;
     this.role = role;
+  }
+
+  setContextRegistry(registry: ContextRegistry): void {
+    this.contextRegistry = registry;
   }
 
   /**
@@ -67,10 +75,11 @@ export class CommanderManager {
     const restoredHistory = await this.loadHistory(fleetId);
     const persisted = await this.loadSession(fleetId);
 
-    // Invalidate session ID if cwd changed (e.g. Commander moved to Fleet repo)
-    const persistedSessionId = (persisted?.sessionId && persisted.cwd && persisted.cwd !== fleetPath)
-      ? null  // cwd changed — old session ID is invalid
-      : (persisted?.sessionId ?? null);
+    // ADR-0024: Unified cwd/session validation via SessionResumer
+    const resumeResult = validateOrFresh(persisted?.sessionId ?? null, {
+      expectedCwd: fleetPath,
+      persistedCwd: persisted?.cwd,
+    });
 
     // Deploy skills, rules, and custom instructions to Fleet repo
     const deployedFiles: string[] = [];
@@ -84,7 +93,7 @@ export class CommanderManager {
       fleetPath,
       additionalDirs,
       systemPrompt,
-      sessionId: persistedSessionId,
+      sessionId: resumeResult.sessionId,
       history: restoredHistory,
       pendingToolUseId: null,
       questionAskedAt: null,
@@ -93,7 +102,18 @@ export class CommanderManager {
     };
     this.sessions.set(fleetId, session);
 
-    const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
+    // ADR-0024: Type-safe env assembly via LaunchEnvironment
+    const commanderEnv = buildCommanderEnv({ fleetId });
+
+    this.contextRegistry?.register({
+      fleetId,
+      unitKind: "commander",
+      unitId: sessionId,
+      cwd: fleetPath,
+      sessionId: resumeResult.sessionId,
+      customInstructionsSource: customInstructionsText ? "fleet" : "global",
+      customInstructionsHash: "",
+    });
 
     if (session.sessionId) {
       this.processManager.resumeCommander(
@@ -102,7 +122,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
-        commanderEnv,
+        toLaunchRecord(commanderEnv),
       );
     } else {
       this.processManager.launchCommander(
@@ -110,7 +130,7 @@ export class CommanderManager {
         fleetPath,
         additionalDirs,
         systemPrompt,
-        commanderEnv,
+        toLaunchRecord(commanderEnv),
       );
     }
     return sessionId;
@@ -135,7 +155,8 @@ export class CommanderManager {
       return { resumed: false, reason: "already running" };
     }
 
-    const commanderEnv = { VIBE_ADMIRAL_FLEET_ID: fleetId };
+    // ADR-0024: Type-safe env assembly via LaunchEnvironment
+    const commanderEnv = buildCommanderEnv({ fleetId });
 
     if (session.sessionId) {
       this.processManager.resumeCommander(
@@ -144,7 +165,7 @@ export class CommanderManager {
         session.fleetPath,
         session.additionalDirs,
         session.systemPrompt,
-        commanderEnv,
+        toLaunchRecord(commanderEnv),
       );
       return { resumed: true, method: "session resume" };
     } else {
@@ -153,7 +174,7 @@ export class CommanderManager {
         session.fleetPath,
         session.additionalDirs,
         session.systemPrompt,
-        commanderEnv,
+        toLaunchRecord(commanderEnv),
       );
       return { resumed: true, method: "fresh launch" };
     }

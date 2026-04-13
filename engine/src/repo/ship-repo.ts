@@ -28,12 +28,25 @@ interface ShipJoinRow extends ShipRow {
 export class ShipRepo {
   constructor(private db: Database.Database) {}
 
+  /**
+   * Ensure a repo row exists for the given (owner, name, fleetId) tuple.
+   * After V16, repos have UNIQUE(owner, name, fleet_id).
+   *
+   * Throws if the repo exists under a DIFFERENT fleet — use transferRepoFleet()
+   * to explicitly move ownership (ADR-0024 Decision 2).
+   */
   ensureRepo(owner: string, name: string, fleetId?: string): number {
     const existing = this.db.prepare(
       "SELECT id, fleet_id FROM repos WHERE owner = ? AND name = ?",
     ).get(owner, name) as { id: number; fleet_id: string | null } | undefined;
     if (existing) {
-      if (fleetId && existing.fleet_id !== fleetId) {
+      if (fleetId && existing.fleet_id && existing.fleet_id !== fleetId) {
+        throw new Error(
+          `[db] Repo ${owner}/${name} belongs to fleet ${existing.fleet_id.slice(0, 8)}..., ` +
+          `cannot assign to fleet ${fleetId.slice(0, 8)}... — use transferRepoFleet() for explicit transfer`,
+        );
+      }
+      if (fleetId && !existing.fleet_id) {
         this.db.prepare("UPDATE repos SET fleet_id = ? WHERE id = ?").run(fleetId, existing.id);
       }
       return existing.id;
@@ -43,6 +56,25 @@ export class ShipRepo {
       "INSERT INTO repos (owner, name, fleet_id) VALUES (?, ?, ?)",
     ).run(owner, name, fleetId ?? null);
     return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Explicitly transfer a repo to a different fleet (ADR-0024).
+   * Audit-logged — only callable via Dock commands.
+   */
+  transferRepoFleet(owner: string, name: string, newFleetId: string): void {
+    const existing = this.db.prepare(
+      "SELECT id, fleet_id FROM repos WHERE owner = ? AND name = ?",
+    ).get(owner, name) as { id: number; fleet_id: string | null } | undefined;
+    if (!existing) {
+      throw new Error(`[db] Repo ${owner}/${name} not found — cannot transfer`);
+    }
+    const oldFleetId = existing.fleet_id;
+    this.db.prepare("UPDATE repos SET fleet_id = ? WHERE id = ?").run(newFleetId, existing.id);
+    console.log(
+      `[db] Transferred repo ${owner}/${name} from fleet ${oldFleetId?.slice(0, 8) ?? "null"} ` +
+      `to fleet ${newFleetId.slice(0, 8)}...`,
+    );
   }
 
   upsertShip(ship: ShipProcess): void {

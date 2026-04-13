@@ -11,6 +11,8 @@ import type { EscortProcess, GatePhase, GateType, GateIntent, Phase } from "./ty
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 import { safeJsonParse } from "./util/json-safe.js";
 import { EscortFilesystemManager } from "./escort-filesystem-manager.js";
+import { buildEscortEnv, toLaunchRecord } from "./launch-environment.js";
+import type { ContextRegistry } from "./context-registry.js";
 
 const GATE_PHASE_SKILL: Record<GatePhase, string> = {
   "plan-gate": "/escort-planning-gate",
@@ -27,6 +29,7 @@ export class EscortManager {
   private escorts = new Map<string, string>();
   private fs: EscortFilesystemManager;
   private onEscortDeathCallback: ((shipId: string, message: string) => void) | null = null;
+  private contextRegistry: ContextRegistry | null = null;
 
   constructor(processManager: ProcessManagerLike, shipManager: ShipManager, getDatabase: () => FleetDatabase | null) {
     this.processManager = processManager;
@@ -41,6 +44,10 @@ export class EscortManager {
 
   setPhaseTransactionService(phaseTx: PhaseTransactionService): void {
     this.phaseTx = phaseTx;
+  }
+
+  setContextRegistry(registry: ContextRegistry): void {
+    this.contextRegistry = registry;
   }
 
   setEscortDeathHandler(handler: (shipId: string, message: string) => void): void {
@@ -150,7 +157,7 @@ export class EscortManager {
   }
 
   private async sortieEscort(
-    parentShip: { id: string; repo: string; issueNumber: number; worktreePath: string },
+    parentShip: { id: string; repo: string; fleetId: string; issueNumber: number; worktreePath: string },
     gatePhase?: GatePhase,
     extraPrompt?: string,
     gatePrompt?: string,
@@ -181,14 +188,25 @@ export class EscortManager {
     await this.fs.deployCustomInstructions(parentShip.worktreePath, extraPrompt);
     await this.fs.stashForEscort(parentShip.worktreePath);
 
-    const escortEnv: Record<string, string> = {
-      VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
-      VIBE_ADMIRAL_SHIP_ID: escortId,
-      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
-      VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
-      ...(gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: gatePrompt } : {}),
-      ...extraEnv,
-    };
+    // ADR-0024: Use buildEscortEnv for type-safe env assembly.
+    const escortEnv = buildEscortEnv({
+      escortId,
+      repo: parentShip.repo as `${string}/${string}`,
+      fleetId: parentShip.fleetId,
+      parentShipId: parentShip.id,
+      gatePrompt,
+      extras: extraEnv,
+    });
+
+    this.contextRegistry?.register({
+      fleetId: parentShip.fleetId,
+      unitKind: "escort",
+      unitId: escortId,
+      cwd: parentShip.worktreePath,
+      sessionId: null,
+      customInstructionsSource: extraPrompt ? "escort-stash" : "global",
+      customInstructionsHash: "",
+    });
 
     const gateContext = gatePhase
       ? `\n\n${loadUnitPrompt("escort", { gatePhase })}`
@@ -202,7 +220,7 @@ export class EscortManager {
       parentShip.issueNumber,
       [extraPrompt, gateContext].filter(Boolean).join("\n\n") || undefined,
       skill,
-      escortEnv,
+      toLaunchRecord(escortEnv),
     );
 
     return escortId;
@@ -210,7 +228,7 @@ export class EscortManager {
 
   private async resumeEscort(
     existingEscort: EscortProcess,
-    parentShip: { id: string; repo: string; worktreePath: string },
+    parentShip: { id: string; repo: string; fleetId: string; worktreePath: string },
     gatePhase: GatePhase,
     extraPrompt?: string,
     gatePrompt?: string,
@@ -225,14 +243,15 @@ export class EscortManager {
     await this.fs.deployCustomInstructions(parentShip.worktreePath, extraPrompt);
     await this.fs.stashForEscort(parentShip.worktreePath);
 
-    const escortEnv: Record<string, string> = {
-      VIBE_ADMIRAL_MAIN_REPO: parentShip.repo,
-      VIBE_ADMIRAL_SHIP_ID: escortId,
-      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
-      VIBE_ADMIRAL_PARENT_SHIP_ID: parentShip.id,
-      ...(gatePrompt ? { VIBE_ADMIRAL_GATE_PROMPT: gatePrompt } : {}),
-      ...extraEnv,
-    };
+    // ADR-0024: Use buildEscortEnv for type-safe env assembly.
+    const escortEnv = buildEscortEnv({
+      escortId,
+      repo: parentShip.repo as `${string}/${string}`,
+      fleetId: parentShip.fleetId,
+      parentShipId: parentShip.id,
+      gatePrompt,
+      extras: extraEnv,
+    });
 
     const resumeMessage = `The parent Ship has entered ${gatePhase}. Execute the ${gatePhase} review, submit the verdict, and exit.`;
 
@@ -241,7 +260,7 @@ export class EscortManager {
       existingEscort.sessionId,
       resumeMessage,
       parentShip.worktreePath,
-      escortEnv,
+      toLaunchRecord(escortEnv),
       extraPrompt,
       "escort-log.jsonl",
     );
