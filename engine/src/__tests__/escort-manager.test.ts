@@ -154,7 +154,7 @@ describe("EscortManager", () => {
       // Escort exits
       mockProcessManager.isRunning.mockReturnValue(false);
       mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "coding" });
-      escortManager.onEscortExit(firstId!, 0);
+      await escortManager.onEscortExit(firstId!, 0);
 
       // Re-launch should succeed
       const secondId = await escortManager.launchEscort("ship-001", "coding-gate");
@@ -297,15 +297,15 @@ describe("EscortManager", () => {
 
       // Parent already moved past gate (verdict submitted)
       mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "coding" });
-      escortManager.onEscortExit(escortId!, 0);
+      await escortManager.onEscortExit(escortId!, 0);
 
       // Should allow re-launch
       const newEscortId = await escortManager.launchEscort("ship-001", "coding-gate");
       expect(newEscortId).not.toBeNull();
     });
 
-    it("is a no-op for unknown Escort IDs", () => {
-      escortManager.onEscortExit("unknown-escort", 0);
+    it("is a no-op for unknown Escort IDs", async () => {
+      await escortManager.onEscortExit("unknown-escort", 0);
       // No error thrown
     });
 
@@ -347,7 +347,7 @@ describe("EscortManager", () => {
           issueTitle: "Test issue",
         });
 
-        escortManager.onEscortExit(escortId!, 1);
+        await escortManager.onEscortExit(escortId!, 1);
 
         expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
           event: expect.objectContaining({ type: "ESCORT_DIED", exitCode: 1 }),
@@ -371,7 +371,7 @@ describe("EscortManager", () => {
           code: "TRANSITION_REJECTED",
         });
 
-        escortManager.onEscortExit(escortId!, 1);
+        await escortManager.onEscortExit(escortId!, 1);
 
         expect(mockPhaseTx.commit).toHaveBeenCalled();
         expect(deathHandler).toHaveBeenCalled();
@@ -386,7 +386,7 @@ describe("EscortManager", () => {
           phase: "coding",
         });
 
-        escortManager.onEscortExit(escortId!, 0);
+        await escortManager.onEscortExit(escortId!, 0);
 
         expect(mockPhaseTx.commit).not.toHaveBeenCalled();
         expect(mockShipManager.clearGateCheck).toHaveBeenCalledWith("ship-001");
@@ -416,7 +416,7 @@ describe("EscortManager", () => {
           toPhase: "qa",
         });
 
-        escortManager.onEscortExit(escortId!, 1);
+        await escortManager.onEscortExit(escortId!, 1);
 
         // Should use PhaseTransactionService with GATE_APPROVED
         expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
@@ -449,7 +449,7 @@ describe("EscortManager", () => {
           declaredAt: new Date().toISOString(),
         });
 
-        escortManager.onEscortExit(escortId!, 1);
+        await escortManager.onEscortExit(escortId!, 1);
 
         // Should send ESCORT_DIED (not GATE_APPROVED) — reject intent doesn't auto-approve
         expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
@@ -470,7 +470,7 @@ describe("EscortManager", () => {
 
         // No gate-intent set (DB returns undefined)
 
-        escortManager.onEscortExit(escortId!, 1);
+        await escortManager.onEscortExit(escortId!, 1);
 
         // Should commit ESCORT_DIED via PhaseTransactionService
         expect(mockPhaseTx.commit).toHaveBeenCalledWith("ship-001", {
@@ -495,7 +495,7 @@ describe("EscortManager", () => {
           phase: "qa",
         });
 
-        escortManager.onEscortExit(escortId!, 0);
+        await escortManager.onEscortExit(escortId!, 0);
 
         // Intent should be cleared
         expect(escortManager.getGateIntent("ship-001")).toBeUndefined();
@@ -523,7 +523,7 @@ describe("EscortManager", () => {
           .mockReturnValueOnce({ success: false, error: "Rejected", code: "TRANSITION_REJECTED" })
           .mockReturnValueOnce({ success: true, fromPhase: "coding-gate", toPhase: "coding" });
 
-        escortManager.onEscortExit(escortId!, 1);
+        await escortManager.onEscortExit(escortId!, 1);
 
         // Should have tried GATE_APPROVED first, then ESCORT_DIED
         expect(mockPhaseTx.commit).toHaveBeenCalledTimes(2);
@@ -635,7 +635,7 @@ describe("EscortManager", () => {
       };
       escortManager.setActorManager(mockActorManager as unknown as ConstructorParameters<typeof EscortManager>[0] extends infer T ? T extends { setActorManager: (a: infer A) => void } ? A : never : never);
 
-      escortManager.onEscortExit(firstId!, 1);
+      await escortManager.onEscortExit(firstId!, 1);
 
       // Re-launch should succeed (cleanup awaited internally)
       mockDb.getEscortByShipId.mockReturnValue(undefined);
@@ -691,7 +691,7 @@ describe("EscortManager", () => {
 
       // Escort exits normally (phase already moved past gate)
       mockDb.getShipById.mockReturnValue({ ...makeShip(), phase: "coding" });
-      escortManager.onEscortExit(escortId!, 0);
+      await escortManager.onEscortExit(escortId!, 0);
 
       // Wait for cleanup promise to resolve
       await new Promise((r) => setTimeout(r, 10));

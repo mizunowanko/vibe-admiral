@@ -317,7 +317,7 @@ export class EscortManager {
     db?.updateEscortSessionId(escortId, sessionId);
   }
 
-  onEscortExit(escortShipId: string, code: number | null): void {
+  async onEscortExit(escortShipId: string, code: number | null): Promise<void> {
     const parentShipId = this.findShipIdByEscortId(escortShipId);
     if (!parentShipId) return;
 
@@ -369,7 +369,7 @@ export class EscortManager {
       case "died-post-start":
       case "fail-limit": {
         this.clearGateIntent(parentShipId);
-        this.logEscortDiagnostics(parentShipId, escortShipId);
+        await this.logEscortDiagnostics(parentShipId, escortShipId);
         this.handleEscortDeath(parentShipId, parentShip, currentPhase as GatePhase, code, escortShipId);
         return;
       }
@@ -436,11 +436,12 @@ export class EscortManager {
     this.onEscortDeathCallback?.(parentShipId, message);
   }
 
-  private logEscortDiagnostics(parentShipId: string, escortShipId: string): void {
+  private async logEscortDiagnostics(parentShipId: string, escortShipId: string): Promise<void> {
     const ship = this.shipManager.getShip(parentShipId);
     if (!ship) return;
     const logPath = join(ship.worktreePath, ".claude", "escort-log.jsonl");
-    readFile(logPath, "utf-8").then((content) => {
+    try {
+      const content = await readFile(logPath, "utf-8");
       const lines = content.trim().split("\n").slice(-10);
       const lastMessages = lines
         .map((l) => safeJsonParse<Record<string, unknown>>(l, { source: "escort.lastLog" }))
@@ -455,7 +456,9 @@ export class EscortManager {
           `[escort-manager] Escort ${escortShipId.slice(0, 8)}... last log entries:\n${lastMessages.join("\n")}`,
         );
       }
-    }).catch(() => { /* log file may not exist */ });
+    } catch {
+      // log file may not exist
+    }
   }
 
   killAll(): void {

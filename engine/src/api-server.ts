@@ -197,8 +197,9 @@ export function createApiHandler(deps: ApiDeps): (req: IncomingMessage, res: Ser
       if (!fleetId) {
         // Auto-resolve when a single fleet exists
         const fleets = await deps.loadFleets();
-        if (fleets.length === 1) {
-          fleetId = fleets[0]!.id;
+        const singleFleet = fleets[0];
+        if (fleets.length === 1 && singleFleet) {
+          fleetId = singleFleet.id;
         } else if (fleets.length === 0) {
           sendJson(res, 400, { ok: false, error: "No fleets configured" });
           return;
