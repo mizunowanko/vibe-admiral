@@ -2,62 +2,37 @@ import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShipProcess, Phase, EscortProcess } from "./types.js";
-import { safeJsonParse } from "./util/json-safe.js";
+import { ShipRepo } from "./repo/ship-repo.js";
+import { PhaseRepo } from "./repo/phase-repo.js";
+import { ChatLogRepo } from "./repo/chat-log-repo.js";
+import { EscortRepo } from "./repo/escort-repo.js";
+import { SnapshotRepo } from "./repo/snapshot-repo.js";
 
-/** Persisted ship row stored in SQLite. */
-export interface ShipRow {
-  id: string;
-  repo_id: number;
-  issue_number: number;
-  issue_title: string | null;
-  worktree_path: string | null;
-  branch_name: string | null;
-  session_id: string | null;
-  pr_url: string | null;
-  pr_number: number | null;
-  qa_required: number | null;
-  process_pid: number | null;
-  fleet_id: string | null;
-  phase: string;
-  created_at: string;
-  completed_at: string | null;
-  actor_snapshot: string | null;
-}
-
-/** Persisted escort row stored in SQLite. */
-export interface EscortRow {
-  id: string;
-  ship_id: string;
-  session_id: string | null;
-  process_pid: number | null;
-  phase: string;
-  created_at: string;
-  completed_at: string | null;
-  total_input_tokens: number | null;
-  total_output_tokens: number | null;
-  cache_read_input_tokens: number | null;
-  cache_creation_input_tokens: number | null;
-  cost_usd: number | null;
-}
-
-/** Row returned by the ships+repos join query. */
-interface ShipJoinRow extends ShipRow {
-  owner: string;
-  name: string;
-}
+export type { ShipRow } from "./repo/ship-repo.js";
+export type { EscortRow } from "./repo/escort-repo.js";
 
 export class FleetDatabase {
   private db: Database.Database;
+  readonly ships: ShipRepo;
+  readonly phases: PhaseRepo;
+  readonly chatLogs: ChatLogRepo;
+  readonly escorts: EscortRepo;
+  readonly snapshots: SnapshotRepo;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.migrate();
+
+    this.ships = new ShipRepo(this.db);
+    this.phases = new PhaseRepo(this.db);
+    this.chatLogs = new ChatLogRepo(this.db);
+    this.escorts = new EscortRepo(this.db);
+    this.snapshots = new SnapshotRepo(this.db);
   }
 
   private migrate(): void {
-    // Create migrations tracking table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER PRIMARY KEY,
@@ -177,8 +152,6 @@ export class FleetDatabase {
   }
 
   private applyV2(): void {
-    // V2: Rename ships.status → ships.phase, add index on messages for ship polling.
-    // Also migrate 'error' status to 'planning' (error is now a derived state).
     this.db.exec(`
       ALTER TABLE ships RENAME COLUMN status TO phase;
 
@@ -192,7 +165,6 @@ export class FleetDatabase {
   }
 
   private applyV3(): void {
-    // V3: Drop messages table (replaced by direct DB phase updates + Escort model).
     this.db.exec(`
       DROP INDEX IF EXISTS idx_messages_ship_unread;
       DROP TABLE IF EXISTS messages;
@@ -202,14 +174,10 @@ export class FleetDatabase {
   }
 
   private applyV4(): void {
-    // V4: Add kind + parent_ship_id columns for persistent Escort-as-Ship model.
-    // Relax UNIQUE(repo_id, issue_number) to UNIQUE(repo_id, issue_number, kind)
-    // so both a Ship and its Escort can coexist for the same issue.
     this.db.exec(`
       ALTER TABLE ships ADD COLUMN kind TEXT NOT NULL DEFAULT 'ship';
       ALTER TABLE ships ADD COLUMN parent_ship_id TEXT;
 
-      -- Recreate unique index to include kind
       DROP INDEX IF EXISTS idx_ships_repo_issue;
       CREATE UNIQUE INDEX idx_ships_repo_issue_kind ON ships (repo_id, issue_number, kind);
 
@@ -218,11 +186,6 @@ export class FleetDatabase {
   }
 
   private applyV5(): void {
-    // V5: Remove stale UNIQUE(repo_id, issue_number) inline constraint.
-    // foreign_keys=ON blocks DROP TABLE when other tables reference it.
-    // PRAGMA foreign_keys cannot be changed inside a transaction,
-    // so we toggle it outside, then use a transaction for the DDL.
-
     this.db.pragma("foreign_keys = OFF");
 
     try {
@@ -273,13 +236,6 @@ export class FleetDatabase {
   }
 
   private applyV6(): void {
-    // V6: Separate escorts from ships table into dedicated escorts table.
-    // 1. Create escorts table
-    // 2. Migrate existing escort rows from ships to escorts
-    // 3. Remove escort rows from ships
-    // 4. Rebuild ships table without kind/parent_ship_id columns
-    // 5. Restore UNIQUE(repo_id, issue_number) constraint
-
     this.db.pragma("foreign_keys = OFF");
 
     try {
@@ -289,7 +245,6 @@ export class FleetDatabase {
 
         BEGIN;
 
-        -- Create escorts table
         CREATE TABLE escorts (
           id TEXT PRIMARY KEY,
           ship_id TEXT NOT NULL,
@@ -300,12 +255,10 @@ export class FleetDatabase {
           completed_at TEXT
         );
 
-        -- Migrate existing escort data from ships
         INSERT INTO escorts (id, ship_id, session_id, process_pid, phase, created_at, completed_at)
         SELECT id, parent_ship_id, session_id, process_pid, phase, created_at, completed_at
         FROM ships WHERE kind = 'escort' AND parent_ship_id IS NOT NULL;
 
-        -- Delete escort phase_transitions and phases before removing escort ships
         DELETE FROM phase_transitions WHERE ship_id IN (
           SELECT id FROM ships WHERE kind = 'escort'
         );
@@ -313,10 +266,8 @@ export class FleetDatabase {
           SELECT id FROM ships WHERE kind = 'escort'
         );
 
-        -- Delete escort rows from ships
         DELETE FROM ships WHERE kind = 'escort';
 
-        -- Rebuild ships table without kind/parent_ship_id
         CREATE TABLE ships_new (
           id TEXT PRIMARY KEY,
           repo_id INTEGER NOT NULL REFERENCES repos(id),
@@ -343,11 +294,7 @@ export class FleetDatabase {
 
         ALTER TABLE ships_new RENAME TO ships;
 
-        -- Restore original unique constraint (no kind column needed)
         CREATE UNIQUE INDEX idx_ships_repo_issue ON ships (repo_id, issue_number);
-
-        -- Drop old kind-based index (already removed with table)
-        -- No-op since we dropped and recreated the table
 
         INSERT INTO schema_version (version) VALUES (6);
 
@@ -362,9 +309,6 @@ export class FleetDatabase {
   }
 
   private applyV7(): void {
-    // V7: Add foreign key constraint to escorts.ship_id → ships(id).
-    // Rebuild escorts table with proper FK for referential integrity.
-
     this.db.pragma("foreign_keys = OFF");
 
     try {
@@ -405,9 +349,6 @@ export class FleetDatabase {
   }
 
   private applyV8(): void {
-    // V8: Rename phase values from verbose names to display-name-based names.
-    // planning → plan, implementing → coding, acceptance-test → qa
-    // Also renames gate phases accordingly.
     this.db.exec(`
       UPDATE ships SET phase = CASE phase
         WHEN 'planning' THEN 'plan'
@@ -469,7 +410,6 @@ export class FleetDatabase {
   }
 
   private applyV9(): void {
-    // V9: Add chat_logs table for persisting Ship/Escort chat logs after worktree deletion.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS chat_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -488,8 +428,6 @@ export class FleetDatabase {
   }
 
   private applyV10(): void {
-    // V10: Migrate "stopped" phase to "paused" (#763).
-    // Existing stopped ships are treated as paused (backward compatible).
     this.db.exec(`
       UPDATE ships SET phase = 'paused' WHERE phase = 'stopped';
       UPDATE phases SET phase = 'paused' WHERE phase = 'stopped';
@@ -499,8 +437,6 @@ export class FleetDatabase {
   }
 
   private applyV11(): void {
-    // V11: Add actor_snapshot column for XState snapshot persistence (ADR-0017).
-    // Stores serialized XState Actor snapshot for O(1) restoration on Engine restart.
     this.db.exec(`
       ALTER TABLE ships ADD COLUMN actor_snapshot TEXT;
 
@@ -509,8 +445,6 @@ export class FleetDatabase {
   }
 
   private applyV12(): void {
-    // V12: Add token usage tracking columns to escorts table (#800).
-    // Tracks cumulative input/output tokens and cost per Escort across gate sessions.
     this.db.exec(`
       ALTER TABLE escorts ADD COLUMN total_input_tokens INTEGER;
       ALTER TABLE escorts ADD COLUMN total_output_tokens INTEGER;
@@ -521,8 +455,6 @@ export class FleetDatabase {
   }
 
   private applyV13(): void {
-    // V13: Add cache token tracking columns to escorts table (#825).
-    // Tracks cache_read_input_tokens and cache_creation_input_tokens per Escort.
     this.db.exec(`
       ALTER TABLE escorts ADD COLUMN cache_read_input_tokens INTEGER;
       ALTER TABLE escorts ADD COLUMN cache_creation_input_tokens INTEGER;
@@ -532,9 +464,6 @@ export class FleetDatabase {
   }
 
   private applyV14(): void {
-    // V14: Add fleet_id to repos table for fleet-repo association (#867).
-    // Enables DB-level tracking of which repos belong to which fleet,
-    // preventing cross-fleet interference in ship queries.
     this.db.exec(`
       ALTER TABLE repos ADD COLUMN fleet_id TEXT;
 
@@ -543,8 +472,6 @@ export class FleetDatabase {
   }
 
   private applyV15(): void {
-    // V15: gate_intents table (ADR-0021) — replaces in-memory Map.
-    // commentUrl is required to satisfy audit log contract (#751).
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS gate_intents (
         ship_id TEXT PRIMARY KEY REFERENCES ships(id),
@@ -558,244 +485,60 @@ export class FleetDatabase {
     `);
   }
 
-  /** Ensure a repo row exists and return its ID. Updates fleet_id if provided. */
+  // === Facade methods — delegate to repos ===
+
   ensureRepo(owner: string, name: string, fleetId?: string): number {
-    const existing = this.db.prepare(
-      "SELECT id, fleet_id FROM repos WHERE owner = ? AND name = ?",
-    ).get(owner, name) as { id: number; fleet_id: string | null } | undefined;
-    if (existing) {
-      // Update fleet_id if it changed or was previously unset
-      if (fleetId && existing.fleet_id !== fleetId) {
-        this.db.prepare("UPDATE repos SET fleet_id = ? WHERE id = ?").run(fleetId, existing.id);
-      }
-      return existing.id;
-    }
-
-    const result = this.db.prepare(
-      "INSERT INTO repos (owner, name, fleet_id) VALUES (?, ?, ?)",
-    ).run(owner, name, fleetId ?? null);
-    return Number(result.lastInsertRowid);
+    return this.ships.ensureRepo(owner, name, fleetId);
   }
 
-  /** Insert or update a ship record. */
   upsertShip(ship: ShipProcess): void {
-    const [owner, name] = ship.repo.split("/");
-    if (!owner || !name) return;
-
-    const repoId = this.ensureRepo(owner, name, ship.fleetId);
-
-    // Delete any existing row with the same repo+issue to avoid UNIQUE constraint conflict.
-    // Must also delete child rows (phases, phase_transitions) to satisfy foreign key constraints.
-    const existingShip = this.db.prepare(
-      "SELECT id FROM ships WHERE repo_id = ? AND issue_number = ?",
-    ).get(repoId, ship.issueNumber) as { id: string } | undefined;
-    if (existingShip && existingShip.id !== ship.id) {
-      this.deleteShip(existingShip.id);
-    }
-
-    this.db.prepare(`
-      INSERT INTO ships (id, repo_id, issue_number, issue_title, worktree_path, branch_name, session_id, pr_url, pr_number, qa_required, fleet_id, phase, created_at, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        issue_title = excluded.issue_title,
-        worktree_path = excluded.worktree_path,
-        branch_name = excluded.branch_name,
-        session_id = excluded.session_id,
-        pr_url = excluded.pr_url,
-        pr_number = excluded.pr_number,
-        qa_required = excluded.qa_required,
-        fleet_id = excluded.fleet_id,
-        phase = excluded.phase,
-        completed_at = excluded.completed_at
-    `).run(
-      ship.id,
-      repoId,
-      ship.issueNumber,
-      ship.issueTitle,
-      ship.worktreePath,
-      ship.branchName,
-      ship.sessionId,
-      ship.prUrl,
-      null,
-      ship.qaRequired ? 1 : 0,
-      ship.fleetId,
-      ship.phase,
-      ship.createdAt,
-      ship.completedAt ? new Date(ship.completedAt).toISOString() : null,
-    );
+    this.ships.upsertShip(ship);
   }
 
-  /** Update ship phase and optionally completed_at. */
   updateShipPhase(shipId: string, phase: Phase, completedAt?: number): void {
-    this.db.prepare(`
-      UPDATE ships SET phase = ?, completed_at = ? WHERE id = ?
-    `).run(
-      phase,
-      completedAt ? new Date(completedAt).toISOString() : null,
-      shipId,
-    );
+    this.ships.updateShipPhase(shipId, phase, completedAt);
   }
 
-  /** Update ship session ID. */
   updateShipSessionId(shipId: string, sessionId: string | null): void {
-    this.db.prepare("UPDATE ships SET session_id = ? WHERE id = ?").run(
-      sessionId,
-      shipId,
-    );
+    this.ships.updateShipSessionId(shipId, sessionId);
   }
 
-  /**
-   * Delete a ship and all associated child records from the database.
-   * FK constraints are temporarily disabled to handle cases where
-   * transferTransitionsForReSortie() has moved records to a new ship ID
-   * that may not exist yet (#853).
-   */
   deleteShip(shipId: string): void {
-    this.db.pragma("foreign_keys = OFF");
-    try {
-      this.db.transaction(() => {
-        this.db.prepare("DELETE FROM escorts WHERE ship_id = ?").run(shipId);
-        this.db.prepare("DELETE FROM phase_transitions WHERE ship_id = ?").run(shipId);
-        this.db.prepare("DELETE FROM phases WHERE ship_id = ?").run(shipId);
-        this.db.prepare("DELETE FROM ships WHERE id = ?").run(shipId);
-      })();
-    } finally {
-      this.db.pragma("foreign_keys = ON");
-    }
+    this.ships.deleteShip(shipId);
   }
 
-  /**
-   * Transfer phase_transitions and phases from an old ship to a new ship ID.
-   * Used during re-sortie to preserve phase history across ship generations.
-   * FK constraints are temporarily disabled since the new ship may not exist yet.
-   */
   transferTransitionsForReSortie(oldShipId: string, newShipId: string): void {
-    this.db.pragma("foreign_keys = OFF");
-    try {
-      this.db.transaction(() => {
-        this.db.prepare(
-          "UPDATE phase_transitions SET ship_id = ? WHERE ship_id = ?",
-        ).run(newShipId, oldShipId);
-        this.db.prepare(
-          "DELETE FROM phases WHERE ship_id = ?",
-        ).run(oldShipId);
-      })();
-    } finally {
-      this.db.pragma("foreign_keys = ON");
-    }
+    this.ships.transferTransitionsForReSortie(oldShipId, newShipId);
   }
 
-  /** Get all ships with non-terminal phase (for startup restoration).
-   *  Includes "paused" and "abandoned" ships so they can be resumed after Engine restart. */
   getActiveShips(): ShipProcess[] {
-    const rows = this.db.prepare(`
-      SELECT s.*, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase != 'done'
-    `).all() as ShipJoinRow[];
-
-    return rows.map((row) => this.rowToShipProcess(row));
+    return this.ships.getActiveShips();
   }
 
-  /** Get all ships (including done) from the database. */
   getAllShips(): ShipProcess[] {
-    const rows = this.db.prepare(`
-      SELECT s.*, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      ORDER BY s.created_at ASC
-    `).all() as ShipJoinRow[];
-
-    return rows.map((row) => this.rowToShipProcess(row));
+    return this.ships.getAllShips();
   }
 
-  /** Get all ships for a specific fleet. */
   getShipsByFleet(fleetId: string): ShipProcess[] {
-    const rows = this.db.prepare(`
-      SELECT s.*, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      WHERE s.fleet_id = ?
-      ORDER BY s.created_at ASC
-    `).all(fleetId) as ShipJoinRow[];
-
-    return rows.map((row) => this.rowToShipProcess(row));
+    return this.ships.getShipsByFleet(fleetId);
   }
 
-  /** Get a single ship by ID. */
   getShipById(shipId: string): ShipProcess | undefined {
-    const row = this.db.prepare(`
-      SELECT s.*, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      WHERE s.id = ?
-    `).get(shipId) as ShipJoinRow | undefined;
-
-    return row ? this.rowToShipProcess(row) : undefined;
+    return this.ships.getShipById(shipId);
   }
 
-  /** Get a ship by repo and issue number (active only, phase != done). */
   getShipByIssue(repo: string, issueNumber: number, fleetId?: string): ShipProcess | undefined {
-    const [owner, name] = repo.split("/");
-    if (!owner || !name) return undefined;
-
-    const sql = fleetId
-      ? `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
-         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.fleet_id = ? AND s.phase NOT IN ('done', 'paused', 'abandoned')`
-      : `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
-         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.phase NOT IN ('done', 'paused', 'abandoned')`;
-    const params = fleetId ? [owner, name, issueNumber, fleetId] : [owner, name, issueNumber];
-    const row = this.db.prepare(sql).get(...params) as ShipJoinRow | undefined;
-
-    return row ? this.rowToShipProcess(row) : undefined;
+    return this.ships.getShipByIssue(repo, issueNumber, fleetId);
   }
 
-  /** Get a ship by repo and issue number (any phase, including done/paused/abandoned). */
   getShipByIssueAnyPhase(repo: string, issueNumber: number, fleetId?: string): ShipProcess | undefined {
-    const [owner, name] = repo.split("/");
-    if (!owner || !name) return undefined;
-
-    const sql = fleetId
-      ? `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
-         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ? AND s.fleet_id = ?`
-      : `SELECT s.*, r.owner, r.name FROM ships s JOIN repos r ON s.repo_id = r.id
-         WHERE r.owner = ? AND r.name = ? AND s.issue_number = ?`;
-    const params = fleetId ? [owner, name, issueNumber, fleetId] : [owner, name, issueNumber];
-    const row = this.db.prepare(sql).get(...params) as ShipJoinRow | undefined;
-
-    return row ? this.rowToShipProcess(row) : undefined;
+    return this.ships.getShipByIssueAnyPhase(repo, issueNumber, fleetId);
   }
 
-  /** Get active ship issue numbers (phase != done). */
   getActiveShipIssueNumbers(): Array<{ repo: string; issueNumber: number }> {
-    const rows = this.db.prepare(`
-      SELECT s.issue_number, r.owner, r.name
-      FROM ships s
-      JOIN repos r ON s.repo_id = r.id
-      WHERE s.phase NOT IN ('done', 'paused', 'abandoned')
-    `).all() as Array<{ issue_number: number; owner: string; name: string }>;
-
-    return rows.map((row) => ({
-      repo: `${row.owner}/${row.name}`,
-      issueNumber: row.issue_number,
-    }));
+    return this.ships.getActiveShipIssueNumbers();
   }
 
-  /**
-   * Persist a phase transition that was already validated by XState.
-   * DB is responsible only for:
-   * 1. Optimistic lock (verify current DB phase matches expectedPhase)
-   * 2. Audit log recording
-   * 3. Phase persistence (phases + ships tables)
-   *
-   * Idempotent: if the same transition was recorded within the last 5 seconds, no-op.
-   * Returns true if the transition was applied, false if no-op.
-   *
-   * IMPORTANT: This method must only be called from XState side-effect callbacks
-   * or after XState has validated the transition. Direct calls from API handlers
-   * are prohibited — use ShipActorManager.requestTransition() instead.
-   */
   persistPhaseTransition(
     shipId: string,
     expectedPhase: Phase,
@@ -804,80 +547,13 @@ export class FleetDatabase {
     metadata?: Record<string, unknown>,
     actorSnapshot?: unknown,
   ): boolean {
-    const txn = this.db.transaction(() => {
-      // Optimistic lock: verify current phase matches expected
-      const current = this.db.prepare(
-        "SELECT phase FROM ships WHERE id = ?",
-      ).get(shipId) as { phase: string } | undefined;
-
-      if (!current) {
-        throw new Error(`Ship ${shipId} not found in database`);
-      }
-      if (current.phase !== expectedPhase) {
-        throw new Error(`Phase mismatch: expected ${expectedPhase}, got ${current.phase}`);
-      }
-
-      // Idempotency: check if same transition was recorded in last 5 seconds
-      const recent = this.db.prepare(`
-        SELECT id FROM phase_transitions
-        WHERE ship_id = ? AND from_phase = ? AND to_phase = ?
-          AND created_at > datetime('now', '-5 seconds')
-        LIMIT 1
-      `).get(shipId, expectedPhase, newPhase) as { id: number } | undefined;
-
-      if (recent) {
-        return false;
-      }
-
-      // Insert audit log
-      this.db.prepare(`
-        INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(
-        shipId,
-        expectedPhase,
-        newPhase,
-        triggeredBy,
-        metadata ? JSON.stringify(metadata) : null,
-      );
-
-      // Upsert current phase
-      this.db.prepare(`
-        INSERT INTO phases (ship_id, phase, updated_at)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(ship_id) DO UPDATE SET
-          phase = excluded.phase,
-          updated_at = excluded.updated_at
-      `).run(shipId, newPhase);
-
-      // Update ships table (phase + snapshot in same transaction for consistency)
-      if (actorSnapshot !== undefined) {
-        this.db.prepare("UPDATE ships SET phase = ?, actor_snapshot = ? WHERE id = ?").run(
-          newPhase,
-          JSON.stringify(actorSnapshot),
-          shipId,
-        );
-      } else {
-        this.db.prepare("UPDATE ships SET phase = ? WHERE id = ?").run(newPhase, shipId);
-      }
-
-      return true;
-    });
-
-    return txn();
+    return this.phases.persistPhaseTransition(shipId, expectedPhase, newPhase, triggeredBy, metadata, actorSnapshot);
   }
 
-  /** Get the phase a ship was in before it was paused. */
   getPhaseBeforeStopped(shipId: string): Phase | null {
-    const row = this.db.prepare(`
-      SELECT from_phase FROM phase_transitions
-      WHERE ship_id = ? AND to_phase IN ('paused', 'stopped')
-      ORDER BY id DESC LIMIT 1
-    `).get(shipId) as { from_phase: string | null } | undefined;
-    return (row?.from_phase as Phase) ?? null;
+    return this.phases.getPhaseBeforeStopped(shipId);
   }
 
-  /** Record a phase transition in the audit log (non-transactional, for backward compat). */
   recordPhaseTransition(
     shipId: string,
     fromPhase: string | null,
@@ -885,71 +561,17 @@ export class FleetDatabase {
     triggeredBy: string,
     metadata?: Record<string, unknown>,
   ): void {
-    this.db.prepare(`
-      INSERT INTO phase_transitions (ship_id, from_phase, to_phase, triggered_by, metadata)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      shipId,
-      fromPhase,
-      toPhase,
-      triggeredBy,
-      metadata ? JSON.stringify(metadata) : null,
-    );
-
-    this.db.prepare(`
-      INSERT INTO phases (ship_id, phase, updated_at)
-      VALUES (?, ?, datetime('now'))
-      ON CONFLICT(ship_id) DO UPDATE SET
-        phase = excluded.phase,
-        updated_at = excluded.updated_at
-    `).run(shipId, toPhase);
+    this.phases.recordPhaseTransition(shipId, fromPhase, toPhase, triggeredBy, metadata);
   }
 
-  /** Get recent phase transitions for a ship, ordered by most recent first. */
   getPhaseTransitions(shipId: string, limit: number = 10): Array<Record<string, unknown>> {
-    const rows = this.db.prepare(`
-      SELECT id, ship_id, from_phase, to_phase, triggered_by, metadata, created_at
-      FROM phase_transitions
-      WHERE ship_id = ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    `).all(shipId, limit) as Array<{
-      id: number;
-      ship_id: string;
-      from_phase: string | null;
-      to_phase: string;
-      triggered_by: string;
-      metadata: string | null;
-      created_at: string;
-    }>;
-
-    return rows.map((row) => ({
-      id: row.id,
-      shipId: row.ship_id,
-      fromPhase: row.from_phase,
-      toPhase: row.to_phase,
-      triggeredBy: row.triggered_by,
-      metadata: safeJsonParse(row.metadata, "phase-transition.metadata", null),
-      createdAt: row.created_at,
-    }));
+    return this.phases.getPhaseTransitions(shipId, limit);
   }
 
-  /** Delete all records for ships in terminal states. */
   purgeTerminalShips(): number {
-    const terminalShips = this.db.prepare(
-      "SELECT id FROM ships WHERE phase = 'done'",
-    ).all() as Array<{ id: string }>;
-
-    for (const ship of terminalShips) {
-      this.deleteShip(ship.id);
-    }
-
-    return terminalShips.length;
+    return this.phases.purgeTerminalShips((shipId) => this.ships.deleteShip(shipId));
   }
 
-  // === Chat Log DB methods ===
-
-  /** Persist a compressed chat log for a ship. */
   saveChatLog(
     shipId: string,
     logType: "ship" | "escort",
@@ -957,101 +579,41 @@ export class FleetDatabase {
     messageCount: number,
     rawByteSize: number,
   ): void {
-    this.db.prepare(`
-      INSERT INTO chat_logs (ship_id, log_type, data, message_count, byte_size)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(shipId, logType, compressedData, messageCount, rawByteSize);
+    this.chatLogs.saveChatLog(shipId, logType, compressedData, messageCount, rawByteSize);
   }
 
-  /** Load compressed chat logs for a ship from the database. */
   getChatLogs(shipId: string): Array<{ logType: string; data: Buffer; messageCount: number }> {
-    const rows = this.db.prepare(
-      "SELECT log_type, data, message_count FROM chat_logs WHERE ship_id = ?",
-    ).all(shipId) as Array<{ log_type: string; data: Buffer; message_count: number }>;
-    return rows.map((row) => ({
-      logType: row.log_type,
-      data: row.data,
-      messageCount: row.message_count,
-    }));
+    return this.chatLogs.getChatLogs(shipId);
   }
 
-  /** Check if chat logs exist for a ship. */
   hasChatLogs(shipId: string): boolean {
-    const row = this.db.prepare(
-      "SELECT 1 FROM chat_logs WHERE ship_id = ? LIMIT 1",
-    ).get(shipId) as { 1: number } | undefined;
-    return !!row;
+    return this.chatLogs.hasChatLogs(shipId);
   }
 
-  /** Close the database connection. */
-  close(): void {
-    this.db.close();
-  }
-
-  /** Get the database file path. */
-  get path(): string {
-    return this.db.name;
-  }
-
-  // === Escort DB methods ===
-
-  /** Insert or update an escort record. */
   upsertEscort(escort: EscortProcess): void {
-    this.db.prepare(`
-      INSERT INTO escorts (id, ship_id, session_id, process_pid, phase, created_at, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        session_id = excluded.session_id,
-        process_pid = excluded.process_pid,
-        phase = excluded.phase,
-        completed_at = excluded.completed_at
-    `).run(
-      escort.id,
-      escort.shipId,
-      escort.sessionId,
-      escort.processPid,
-      escort.phase,
-      escort.createdAt,
-      escort.completedAt,
-    );
+    this.escorts.upsertEscort(escort);
   }
 
-  /** Get an escort by ID. */
   getEscortById(id: string): EscortProcess | undefined {
-    const row = this.db.prepare(
-      "SELECT * FROM escorts WHERE id = ?",
-    ).get(id) as EscortRow | undefined;
-    return row ? this.rowToEscortProcess(row) : undefined;
+    return this.escorts.getEscortById(id);
   }
 
-  /** Get the active escort for a parent Ship (phase != 'done'). */
   getEscortByShipId(shipId: string): EscortProcess | undefined {
-    const row = this.db.prepare(
-      "SELECT * FROM escorts WHERE ship_id = ? AND phase != 'done' ORDER BY created_at DESC LIMIT 1",
-    ).get(shipId) as EscortRow | undefined;
-    return row ? this.rowToEscortProcess(row) : undefined;
+    return this.escorts.getEscortByShipId(shipId);
   }
 
-  /** Update escort phase and optionally completed_at. */
   updateEscortPhase(id: string, phase: string, completedAt?: string): void {
-    this.db.prepare(
-      "UPDATE escorts SET phase = ?, completed_at = ? WHERE id = ?",
-    ).run(phase, completedAt ?? null, id);
+    this.escorts.updateEscortPhase(id, phase, completedAt);
   }
 
-  /** Update escort session ID. */
   updateEscortSessionId(id: string, sessionId: string | null): void {
-    this.db.prepare(
-      "UPDATE escorts SET session_id = ? WHERE id = ?",
-    ).run(sessionId, id);
+    this.escorts.updateEscortSessionId(id, sessionId);
   }
 
-  /** Delete an escort from the database. */
   deleteEscort(id: string): void {
-    this.db.prepare("DELETE FROM escorts WHERE id = ?").run(id);
+    this.escorts.deleteEscort(id);
   }
 
-  /** Accumulate token usage for an Escort (adds to existing totals). */
   updateEscortUsage(
     id: string,
     inputTokens: number,
@@ -1060,18 +622,9 @@ export class FleetDatabase {
     cacheCreationInputTokens: number,
     costUsd: number,
   ): void {
-    this.db.prepare(`
-      UPDATE escorts SET
-        total_input_tokens = COALESCE(total_input_tokens, 0) + ?,
-        total_output_tokens = COALESCE(total_output_tokens, 0) + ?,
-        cache_read_input_tokens = COALESCE(cache_read_input_tokens, 0) + ?,
-        cache_creation_input_tokens = COALESCE(cache_creation_input_tokens, 0) + ?,
-        cost_usd = COALESCE(cost_usd, 0) + ?
-      WHERE id = ?
-    `).run(inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, costUsd, id);
+    this.escorts.updateEscortUsage(id, inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens, costUsd);
   }
 
-  /** Get Escort usage for a parent Ship (returns the active or most recent Escort). */
   getEscortUsageByShipId(shipId: string): {
     totalInputTokens: number;
     totalOutputTokens: number;
@@ -1079,110 +632,38 @@ export class FleetDatabase {
     cacheCreationInputTokens: number;
     costUsd: number;
   } | null {
-    const row = this.db.prepare(
-      "SELECT total_input_tokens, total_output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cost_usd FROM escorts WHERE ship_id = ? ORDER BY created_at DESC LIMIT 1",
-    ).get(shipId) as { total_input_tokens: number | null; total_output_tokens: number | null; cache_read_input_tokens: number | null; cache_creation_input_tokens: number | null; cost_usd: number | null } | undefined;
-    if (!row) return null;
-    return {
-      totalInputTokens: row.total_input_tokens ?? 0,
-      totalOutputTokens: row.total_output_tokens ?? 0,
-      cacheReadInputTokens: row.cache_read_input_tokens ?? 0,
-      cacheCreationInputTokens: row.cache_creation_input_tokens ?? 0,
-      costUsd: row.cost_usd ?? 0,
-    };
+    return this.escorts.getEscortUsageByShipId(shipId);
   }
 
-  private rowToEscortProcess(row: EscortRow): EscortProcess {
-    return {
-      id: row.id,
-      shipId: row.ship_id,
-      sessionId: row.session_id,
-      processPid: row.process_pid,
-      phase: row.phase,
-      createdAt: row.created_at,
-      completedAt: row.completed_at,
-      totalInputTokens: row.total_input_tokens,
-      totalOutputTokens: row.total_output_tokens,
-      cacheReadInputTokens: row.cache_read_input_tokens,
-      cacheCreationInputTokens: row.cache_creation_input_tokens,
-      costUsd: row.cost_usd,
-    };
-  }
-
-  /** Get the persisted XState actor snapshot for a ship (ADR-0017). */
   getActorSnapshot(shipId: string): unknown | null {
-    const row = this.db.prepare(
-      "SELECT actor_snapshot FROM ships WHERE id = ?",
-    ).get(shipId) as { actor_snapshot: string | null } | undefined;
-    if (!row?.actor_snapshot) return null;
-    return safeJsonParse(row.actor_snapshot, "actor-snapshot", null);
+    return this.snapshots.getActorSnapshot(shipId);
   }
 
-  /** Update the actor snapshot for a ship (standalone, outside phase transitions). */
   updateActorSnapshot(shipId: string, snapshot: unknown): void {
-    this.db.prepare(
-      "UPDATE ships SET actor_snapshot = ? WHERE id = ?",
-    ).run(JSON.stringify(snapshot), shipId);
+    this.snapshots.updateActorSnapshot(shipId, snapshot);
   }
-
-  // === Gate Intent DB methods (ADR-0021) ===
 
   setGateIntent(shipId: string, verdict: "approve" | "reject", feedback?: string, commentUrl?: string): void {
-    this.db.prepare(`
-      INSERT INTO gate_intents (ship_id, verdict, feedback, comment_url, declared_at)
-      VALUES (?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(ship_id) DO UPDATE SET
-        verdict = excluded.verdict,
-        feedback = excluded.feedback,
-        comment_url = excluded.comment_url,
-        declared_at = excluded.declared_at
-    `).run(shipId, verdict, feedback ?? null, commentUrl ?? null);
+    this.escorts.setGateIntent(shipId, verdict, feedback, commentUrl);
   }
 
   getGateIntent(shipId: string): { verdict: "approve" | "reject"; feedback: string | null; commentUrl: string | null; declaredAt: string } | undefined {
-    const row = this.db.prepare(
-      "SELECT verdict, feedback, comment_url, declared_at FROM gate_intents WHERE ship_id = ?",
-    ).get(shipId) as { verdict: string; feedback: string | null; comment_url: string | null; declared_at: string } | undefined;
-    if (!row) return undefined;
-    return {
-      verdict: row.verdict as "approve" | "reject",
-      feedback: row.feedback,
-      commentUrl: row.comment_url,
-      declaredAt: row.declared_at,
-    };
+    return this.escorts.getGateIntent(shipId);
   }
 
   clearGateIntent(shipId: string): void {
-    this.db.prepare("DELETE FROM gate_intents WHERE ship_id = ?").run(shipId);
+    this.escorts.clearGateIntent(shipId);
   }
 
-  private rowToShipProcess(row: ShipJoinRow): ShipProcess {
-    return {
-      id: row.id,
-      fleetId: row.fleet_id ?? "",
-      repo: `${row.owner}/${row.name}`,
-      issueNumber: row.issue_number,
-      issueTitle: row.issue_title ?? "",
-      worktreePath: row.worktree_path ?? "",
-      branchName: row.branch_name ?? "",
-      sessionId: row.session_id,
-      phase: row.phase as Phase,
-      isCompacting: false,
-      prUrl: row.pr_url,
-      prReviewStatus: null,
-      gateCheck: null,
-      qaRequired: row.qa_required === 1,
-      retryCount: 0,
-      createdAt: row.created_at,
-      completedAt: row.completed_at ? new Date(row.completed_at).getTime() : undefined,
-      lastOutputAt: null,
-    };
+  close(): void {
+    this.db.close();
+  }
+
+  get path(): string {
+    return this.db.name;
   }
 }
 
-/** Initialize the fleet database, creating the directory if needed.
- *  @param dbDir - Directory where fleet.db will be stored (created if needed).
- */
 export async function initFleetDatabase(dbDir: string): Promise<FleetDatabase> {
   await mkdir(dbDir, { recursive: true });
   const dbPath = join(dbDir, "fleet.db");
