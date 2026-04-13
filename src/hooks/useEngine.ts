@@ -2,6 +2,7 @@ import { useEffect, useRef, useMemo } from "react";
 import { wsClient } from "@/lib/ws-client";
 import { createHandlerMap, dispatchMessage } from "@/hooks/handlers";
 import type { HandlerContext } from "@/hooks/handlers";
+import { historyRequestedAt } from "@/hooks/handlers/ship-handlers";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useShipStore } from "@/stores/shipStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -148,9 +149,12 @@ export function useEngine() {
         const ships = useShipStore.getState().ships;
         for (const ship of ships.values()) {
           if (ship.phase !== "done") {
+            historyRequestedAt.set(ship.id, Date.now());
             wsClient.send({ type: "ship:logs", data: { id: ship.id } });
           }
         }
+        // Reconcile persisted focus after sessions are fully loaded
+        useSessionStore.getState().reconcileFocus();
       });
     });
 
@@ -185,6 +189,7 @@ export function useEngine() {
       const ships = useShipStore.getState().ships;
       for (const ship of ships.values()) {
         if (ship.fleetId === selectedFleetId && ship.phase !== "done") {
+          historyRequestedAt.set(ship.id, Date.now());
           wsClient.send({ type: "ship:logs", data: { id: ship.id } });
         }
       }

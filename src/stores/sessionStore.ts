@@ -29,6 +29,8 @@ interface SessionState {
   mergeCommanderHistory: (sessionId: string, history: StreamMessage[], requestedAt: number) => void;
   clearCommanderMessages: (sessionId: string) => void;
 
+  /** Remove stale entries from focusedSessionIdByFleet that reference non-existent sessions. */
+  reconcileFocus: () => void;
   /** Get the focused session object. */
   getFocusedSession: () => Session | null;
   /** Get dispatches for a specific fleet. */
@@ -223,6 +225,22 @@ export const useSessionStore = create<SessionState>()(
           commanderLoading.delete(sessionId);
           return { commanderMessages, commanderLoading };
         });
+      },
+
+      reconcileFocus: () => {
+        const { sessions, focusedSessionIdByFleet } = get();
+        const cleaned: Record<string, string> = {};
+        let changed = false;
+        for (const [fleetId, sessionId] of Object.entries(focusedSessionIdByFleet)) {
+          if (sessions.has(sessionId)) {
+            cleaned[fleetId] = sessionId;
+          } else {
+            changed = true;
+          }
+        }
+        if (changed) {
+          set({ focusedSessionIdByFleet: cleaned });
+        }
       },
 
       getFocusedSession: () => {

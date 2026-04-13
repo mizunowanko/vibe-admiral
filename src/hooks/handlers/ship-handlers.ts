@@ -1,11 +1,14 @@
 import type { MessageHandler } from "./handler-types";
 import type { Ship } from "@/types";
 
+export const historyRequestedAt = new Map<string, number>();
+
 export const handleShipData: MessageHandler<"ship:data"> = (msg, ctx) => {
   const shipList = msg.data as Ship[];
   for (const ship of shipList) {
     ctx.shipStore.upsertShip(ship);
     if (ship.phase !== "done") {
+      historyRequestedAt.set(ship.id, Date.now());
       ctx.wsClient.send({ type: "ship:logs", data: { id: ship.id } });
     }
   }
@@ -39,7 +42,9 @@ export const handleShipStream: MessageHandler<"ship:stream"> = (msg, ctx) => {
 
 export const handleShipHistory: MessageHandler<"ship:history"> = (msg, ctx) => {
   if (msg.data.messages.length > 0) {
-    ctx.shipStore.mergeShipHistory(msg.data.id, msg.data.messages);
+    const requestedAt = historyRequestedAt.get(msg.data.id) ?? 0;
+    historyRequestedAt.delete(msg.data.id);
+    ctx.shipStore.mergeShipHistory(msg.data.id, msg.data.messages, requestedAt);
   }
 };
 
