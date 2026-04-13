@@ -85,8 +85,22 @@ function scanQuestionTimeouts(deps: QuestionTimeoutDeps): void {
         data: { fleetId },
       });
 
-      // Send tool_result to commander stdin
-      processManager.sendToolResult(processId, toolUseId, autoAnswer);
+      // Send tool_result to commander stdin (skip if process already exited)
+      if (processManager.isRunning(processId)) {
+        processManager.sendToolResult(processId, toolUseId, autoAnswer);
+      } else {
+        const expiredMsg: StreamMessage = {
+          type: "system",
+          subtype: "commander-status",
+          content: `${roleLabel} question expired — process no longer running.`,
+          timestamp: Date.now(),
+        };
+        manager.addToHistory(fleetId, expiredMsg);
+        broadcast({
+          type: `${role}:stream`,
+          data: { fleetId, message: expiredMsg },
+        });
+      }
     }
   }
 }

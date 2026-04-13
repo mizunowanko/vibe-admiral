@@ -39,6 +39,7 @@ export class EscortFilesystemManager {
         console.warn(`[escort-fs] Failed to restore Ship customInstructions for ${parentShipId.slice(0, 8)}...:`, err);
       });
     })();
+    cleanupPromise.finally(() => this.cleanupPromises.delete(parentShipId));
     this.cleanupPromises.set(parentShipId, cleanupPromise);
   }
 

@@ -320,7 +320,7 @@ export class EscortManager {
     db?.updateEscortSessionId(escortId, sessionId);
   }
 
-  onEscortExit(escortShipId: string, code: number | null): void {
+  async onEscortExit(escortShipId: string, code: number | null): Promise<void> {
     const parentShipId = this.findShipIdByEscortId(escortShipId);
     if (!parentShipId) return;
 
@@ -352,7 +352,8 @@ export class EscortManager {
       const ship = this.shipManager.getShip(parentShipId);
       if (ship) {
         const logPath = join(ship.worktreePath, ".claude", "escort-log.jsonl");
-        readFile(logPath, "utf-8").then((content) => {
+        try {
+          const content = await readFile(logPath, "utf-8");
           const lines = content.trim().split("\n").slice(-10);
           const lastMessages = lines
             .map((l) => safeJsonParse<Record<string, unknown>>(l, { source: "escort.lastLog" }))
@@ -367,7 +368,9 @@ export class EscortManager {
               `[escort-manager] Escort ${escortShipId.slice(0, 8)}... last log entries:\n${lastMessages.join("\n")}`,
             );
           }
-        }).catch(() => { /* log file may not exist */ });
+        } catch {
+          // log file may not exist
+        }
       }
     }
 
