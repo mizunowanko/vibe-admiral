@@ -5,10 +5,10 @@
  * Provides WS capture (monkey-patch), message injection,
  * and message waiting utilities.
  *
- * Since ADR-0019, WS messages are notification-only — the frontend
- * fetches full data via REST API on receiving ship:created / ship:updated.
- * `seedShip()` + `injectShipNotification()` handle this by intercepting
- * the REST fetch and dispatching the correct WS notification.
+ * Since ADR-0023, WS messages carry self-contained ShipData payloads
+ * (id, fleetId, phase, issueNumber, issueTitle, repo). The frontend
+ * handler uses fleetId from the payload to fetch full data via REST API.
+ * `seedShip()` sends the correct payload and intercepts the REST fetch.
  */
 
 import type { Page } from "@playwright/test";
@@ -90,7 +90,7 @@ export async function injectWsMessage(
 }
 
 // ---------------------------------------------------------------------------
-// Ship seeding — notification-only WS protocol (ADR-0019)
+// Ship seeding — self-contained WS payload protocol (ADR-0023)
 // ---------------------------------------------------------------------------
 
 // Per-page registry of seeded ships. Playwright route handlers use this
@@ -154,17 +154,22 @@ export async function installShipSeedRoute(page: Page) {
 
 /**
  * Seed a ship into the test registry and inject a `ship:created` WS
- * notification so the frontend fetches it from the intercepted route.
- *
- * Equivalent to what the real Engine does: insert to DB → broadcast
- * `ship:created { shipId }` → frontend calls GET /api/ships/:id.
+ * notification with self-contained ShipData (ADR-0023) so the frontend
+ * fetches it from the intercepted route.
  */
 export async function seedShip(page: Page, ship: ShipSeed) {
   getSeeds(page).set(ship.id, ship);
 
   await injectWsMessage(page, {
     type: "ship:created",
-    data: { shipId: ship.id },
+    data: {
+      id: ship.id,
+      fleetId: ship.fleetId,
+      phase: ship.phase,
+      issueNumber: ship.issueNumber,
+      issueTitle: ship.issueTitle,
+      repo: ship.repo,
+    },
   });
   // Allow the frontend to process the WS message and fetch from the route
   await page.waitForTimeout(500);
@@ -184,9 +189,19 @@ export async function updateSeededShip(
   if (existing) {
     seeds.set(shipId, { ...existing, ...updates });
   }
+  const updated = seeds.get(shipId);
   await injectWsMessage(page, {
     type: "ship:updated",
-    data: { shipId },
+    data: updated
+      ? {
+          id: updated.id,
+          fleetId: updated.fleetId,
+          phase: updated.phase,
+          issueNumber: updated.issueNumber,
+          issueTitle: updated.issueTitle,
+          repo: updated.repo,
+        }
+      : { id: shipId, fleetId: "", phase: "", issueNumber: 0, issueTitle: "", repo: "" },
   });
   await page.waitForTimeout(200);
 }
@@ -200,9 +215,19 @@ export async function completeSeededShip(page: Page, shipId: string) {
   if (existing) {
     seeds.set(shipId, { ...existing, phase: "done" });
   }
+  const done = seeds.get(shipId);
   await injectWsMessage(page, {
     type: "ship:done",
-    data: { shipId },
+    data: done
+      ? {
+          id: done.id,
+          fleetId: done.fleetId,
+          phase: done.phase,
+          issueNumber: done.issueNumber,
+          issueTitle: done.issueTitle,
+          repo: done.repo,
+        }
+      : { id: shipId, fleetId: "", phase: "done", issueNumber: 0, issueTitle: "", repo: "" },
   });
   await page.waitForTimeout(200);
 }
