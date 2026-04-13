@@ -54,8 +54,8 @@ export interface HandlerContext {
     updateShipFromApi: (shipId: string, knownFleetId?: string) => Promise<void>;
     addShipLog: (id: string, message: StreamMessage) => void;
     addEscortLog: (id: string, message: StreamMessage) => void;
-    mergeShipHistory: (id: string, messages: StreamMessage[]) => void;
-    mergeEscortHistory: (id: string, messages: StreamMessage[]) => void;
+    mergeShipHistory: (id: string, messages: StreamMessage[], requestedAt: number) => void;
+    mergeEscortHistory: (id: string, messages: StreamMessage[], requestedAt: number) => void;
     setShipCompacting: (id: string, isCompacting: boolean) => void;
     setGateCheck: (id: string, gateCheck: GateCheckState) => void;
     clearGateCheck: (id: string) => void;
