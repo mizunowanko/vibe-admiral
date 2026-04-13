@@ -100,7 +100,7 @@ describe("CommanderManager", () => {
         "/fleet/path",
         [],
         "system prompt",
-        { VIBE_ADMIRAL_FLEET_ID: "fleet-1" },
+        expect.objectContaining({ VIBE_ADMIRAL_FLEET_ID: "fleet-1" }),
       );
       expect(mockPm.resumeCommander).not.toHaveBeenCalled();
     });
@@ -123,7 +123,7 @@ describe("CommanderManager", () => {
         "/fleet/path",
         ["/extra"],
         "prompt",
-        { VIBE_ADMIRAL_FLEET_ID: "fleet-1" },
+        expect.objectContaining({ VIBE_ADMIRAL_FLEET_ID: "fleet-1" }),
       );
       expect(mockPm.launchCommander).not.toHaveBeenCalled();
     });

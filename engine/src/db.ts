@@ -90,6 +90,9 @@ export class FleetDatabase {
     if (version < 15) {
       this.applyV15();
     }
+    if (version < 16) {
+      this.applyV16();
+    }
   }
 
   private applyV1(): void {
@@ -485,11 +488,42 @@ export class FleetDatabase {
     `);
   }
 
+  private applyV16(): void {
+    // V16: UNIQUE(owner, name, fleet_id) on repos (ADR-0024 Decision 2).
+    // Cleanup: assign 'unassigned' fleet_id to orphan rows, then recreate table
+    // with the constraint (SQLite doesn't support ADD CONSTRAINT).
+    this.db.exec(`
+      UPDATE repos SET fleet_id = '__unassigned__' WHERE fleet_id IS NULL;
+
+      CREATE TABLE repos_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner TEXT NOT NULL,
+        name TEXT NOT NULL,
+        fleet_id TEXT NOT NULL DEFAULT '__unassigned__',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(owner, name, fleet_id)
+      );
+
+      INSERT OR IGNORE INTO repos_new (id, owner, name, fleet_id, created_at)
+        SELECT id, owner, name, fleet_id, created_at FROM repos;
+
+      DROP TABLE repos;
+      ALTER TABLE repos_new RENAME TO repos;
+
+      INSERT INTO schema_version (version) VALUES (16);
+    `);
+  }
+
   // === Facade methods — delegate to repos ===
 
   ensureRepo(owner: string, name: string, fleetId?: string): number {
     return this.ships.ensureRepo(owner, name, fleetId);
   }
+
+  transferRepoFleet(owner: string, name: string, newFleetId: string): void {
+    this.ships.transferRepoFleet(owner, name, newFleetId);
+  }
+
 
   upsertShip(ship: ShipProcess): void {
     this.ships.upsertShip(ship);

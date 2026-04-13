@@ -16,6 +16,9 @@ import * as worktree from "./worktree.js";
 import type { ShipProcess, Phase, FleetSkillSources, GatePhase, GateType, GateCheckState, PRReviewStatus, StreamMessage } from "./types.js";
 import { isGatePhase, GATE_PREV_PHASE } from "./types.js";
 import { UNIT_DEPLOY_MAP } from "./unit-deploy-map.js";
+import { buildShipEnv, toLaunchRecord } from "./launch-environment.js";
+import type { ContextRegistry } from "./context-registry.js";
+import { hashCustomInstructions } from "./context-registry.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +73,7 @@ export class ShipManager {
   private onResumeToGate:
     | ((id: string, gatePhase: GatePhase) => void)
     | null = null;
+  private contextRegistry: ContextRegistry | null = null;
 
   constructor(
     processManager: ProcessManagerLike,
@@ -77,6 +81,10 @@ export class ShipManager {
   ) {
     this.processManager = processManager;
     this.statusManager = statusManager;
+  }
+
+  setContextRegistry(registry: ContextRegistry): void {
+    this.contextRegistry = registry;
   }
 
   setActorManager(actorManager: ShipActorManager): void {
@@ -303,14 +311,22 @@ export class ShipManager {
       qaRequired: true,
     }, reSortieStartPhase ?? undefined);
 
-    // 11. Launch Claude CLI process with Engine API access
-    const shipEnv: Record<string, string> = {
-      VIBE_ADMIRAL_MAIN_REPO: repo,
-      VIBE_ADMIRAL_SHIP_ID: shipId,
-      VIBE_ADMIRAL_ENGINE_PORT: process.env.ENGINE_PORT ?? "9721",
-      VIBE_ADMIRAL_FLEET_ID: fleetId,
-    };
-    this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, shipEnv);
+    // 11. Launch Claude CLI process with Engine API access (ADR-0024: LaunchEnvironment)
+    const shipEnv = buildShipEnv({
+      shipId,
+      repo: repo as `${string}/${string}`,
+      fleetId,
+    });
+    this.contextRegistry?.register({
+      fleetId,
+      unitKind: "ship",
+      unitId: shipId,
+      cwd: worktreePath,
+      sessionId: null,
+      customInstructionsSource: customInstructionsText ? "fleet" : "global",
+      customInstructionsHash: hashCustomInstructions(customInstructionsText),
+    });
+    this.processManager.sortie(shipId, worktreePath, issueNumber, fullExtraPrompt, skill, toLaunchRecord(shipEnv));
 
     this.updatePhase(shipId, initialPhase);
     if (reSortieStartPhase) {

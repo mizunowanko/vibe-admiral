@@ -518,7 +518,7 @@ describe("Ship lifecycle (integration)", () => {
         .mockResolvedValueOnce({ number: 43, title: "Issue 43", body: "", labels: [], state: "open" });
 
       await shipManager.sortie("fleet-1", "owner/repo", 42, tmpDir);
-      await shipManager.sortie("fleet-2", "owner/repo", 43, tmpDir);
+      await shipManager.sortie("fleet-2", "owner/repo2", 43, tmpDir);
 
       const fleet1Ships = shipManager.getShipsByFleet("fleet-1");
       expect(fleet1Ships).toHaveLength(1);
